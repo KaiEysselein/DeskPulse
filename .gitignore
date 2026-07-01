@@ -1,0 +1,30 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/*
+!.vscode/settings.json
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and generated CSV files
+Logs/
+*.csv
+*-view.csv
+*backup*.csv
+
+# Windows files
+Thumbs.db
+Desktop.ini
+
+# Publish output
+publish/
+*.zip
+*.msi
+*.exes
