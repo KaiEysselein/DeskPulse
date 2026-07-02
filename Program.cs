@@ -4,9 +4,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using ClosedXML.Excel;
+using Microsoft.Data.Sqlite;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
@@ -21,6 +22,9 @@ internal static class Program
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+
+        SQLitePCL.Batteries_V2.Init();
+
         Application.Run(new TrayAppContext());
     }
 }
@@ -28,54 +32,44 @@ internal static class Program
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string AppVersion = "0.0.1";
+    public const string Version = "0.0.2";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
-
-    public static string DisplayNameWithVersion => $"{AppName} v{AppVersion}";
 }
 
 public sealed class TrayAppContext : ApplicationContext
 {
-    private static readonly string IconPath = Path.Combine(AppContext.BaseDirectory, "file-logger.ico");
-
     private readonly NotifyIcon _trayIcon;
     private readonly FileIoMonitor _monitor;
-    private readonly System.Drawing.Icon _appIcon;
 
     public TrayAppContext()
     {
-        _appIcon = LoadApplicationIcon();
+        _trayIcon = new NotifyIcon
+        {
+            Icon = LoadTrayIcon(),
+            Text = AppInfo.AppName,
+            Visible = true
+        };
+
         _monitor = new FileIoMonitor();
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open log file in Excel", null, (_, _) => _monitor.OpenLogFileSnapshot());
+        menu.Items.Add("Open log file in Excel", null, (_, _) => OpenExcelReport());
         menu.Items.Add("Settings...", null, (_, _) => OpenSettingsWindow());
-        menu.Items.Add("About", null, (_, _) => ShowAbout());
+        menu.Items.Add("About", null, (_, _) => OpenAboutWindow());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
-        _trayIcon = new NotifyIcon
-        {
-            Icon = _appIcon,
-            ContextMenuStrip = menu,
-            Text = AppInfo.DisplayNameWithVersion,
-            Visible = true,
-            BalloonTipIcon = ToolTipIcon.Info
-        };
+        _trayIcon.ContextMenuStrip = menu;
 
         try
         {
             _monitor.Start();
-
-            _trayIcon.BalloonTipTitle = AppInfo.AppName;
-            _trayIcon.BalloonTipText = $"File activity monitoring started.\n\nLog file:\n{_monitor.CurrentLogFilePath}";
-            _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
-            _trayIcon.ShowBalloonTip(3000);
+            ShowBalloon("Activity monitoring started.");
         }
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"{ex.Message}\n\nExpected log file path:\n{AppSettings.GetDefaultLogFilePath()}",
+                ex.Message,
                 $"{AppInfo.AppName} could not start",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
@@ -85,38 +79,50 @@ public sealed class TrayAppContext : ApplicationContext
         }
     }
 
-    private static System.Drawing.Icon LoadApplicationIcon()
+    private static System.Drawing.Icon LoadTrayIcon()
     {
         try
         {
-            if (File.Exists(IconPath))
+            var candidates = new[]
             {
-                return new System.Drawing.Icon(IconPath);
+                Path.Combine(AppContext.BaseDirectory, "file-logger.ico"),
+                Path.Combine(Application.StartupPath, "file-logger.ico")
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                    return new System.Drawing.Icon(candidate);
             }
+
+            var executableIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+
+            if (executableIcon != null)
+                return executableIcon;
         }
         catch
         {
-            // Fall back to embedded executable icon.
-        }
-
-        try
-        {
-            var executablePath = Application.ExecutablePath;
-
-            if (!string.IsNullOrWhiteSpace(executablePath) && File.Exists(executablePath))
-            {
-                var extractedIcon = System.Drawing.Icon.ExtractAssociatedIcon(executablePath);
-
-                if (extractedIcon != null)
-                    return extractedIcon;
-            }
-        }
-        catch
-        {
-            // Fall back to generic application icon.
+            // Fall back below.
         }
 
         return System.Drawing.SystemIcons.Application;
+    }
+
+    private void OpenExcelReport()
+    {
+        try
+        {
+            _monitor.ExportAndOpenExcelReport();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                ex.Message,
+                "Could not open Excel report",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
     }
 
     private void OpenSettingsWindow()
@@ -126,114 +132,28 @@ public sealed class TrayAppContext : ApplicationContext
         if (form.ShowDialog() == DialogResult.OK)
         {
             _monitor.ReloadSettings();
-
-            _trayIcon.BalloonTipTitle = AppInfo.AppName;
-            _trayIcon.BalloonTipText = $"Settings saved.\n\nLog file:\n{_monitor.CurrentLogFilePath}";
-            _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
-            _trayIcon.ShowBalloonTip(3000);
+            ShowBalloon("Settings saved.");
         }
     }
 
-    private static void ShowAbout()
+    private static void OpenAboutWindow()
     {
-        using var aboutForm = new Form
-        {
-            Text = $"About {AppInfo.AppName}",
-            Width = 520,
-            Height = 300,
-            StartPosition = FormStartPosition.CenterScreen,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            MaximizeBox = false,
-            MinimizeBox = false
-        };
+        using var form = new AboutForm();
+        form.ShowDialog();
+    }
 
-        var titleLabel = new Label
-        {
-            Text = AppInfo.DisplayNameWithVersion,
-            Left = 20,
-            Top = 20,
-            Width = 460,
-            Height = 24,
-            Font = new System.Drawing.Font(System.Drawing.SystemFonts.DefaultFont, System.Drawing.FontStyle.Bold)
-        };
-
-        var descriptionLabel = new Label
-        {
-            Text = "Windows file activity monitor.\n\nLogs selected file open, write/save, and close activity to CSV.",
-            Left = 20,
-            Top = 58,
-            Width = 460,
-            Height = 70
-        };
-
-        var defaultLogLabel = new Label
-        {
-            Text = $"Default log file:\n{AppSettings.GetDefaultLogFilePath()}",
-            Left = 20,
-            Top = 135,
-            Width = 460,
-            Height = 44
-        };
-
-        var githubLabel = new LinkLabel
-        {
-            Text = $"GitHub: {AppInfo.GitHubUrl}",
-            Left = 20,
-            Top = 188,
-            Width = 460,
-            Height = 24
-        };
-
-        githubLabel.LinkClicked += (_, _) =>
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = AppInfo.GitHubUrl,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Could not open GitHub link.\n\n{AppInfo.GitHubUrl}\n\nError:\n{ex.Message}",
-                    AppInfo.AppName,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
-            }
-        };
-
-        var okButton = new Button
-        {
-            Text = "OK",
-            Left = 395,
-            Top = 222,
-            Width = 90,
-            DialogResult = DialogResult.OK
-        };
-
-        aboutForm.Controls.Add(titleLabel);
-        aboutForm.Controls.Add(descriptionLabel);
-        aboutForm.Controls.Add(defaultLogLabel);
-        aboutForm.Controls.Add(githubLabel);
-        aboutForm.Controls.Add(okButton);
-
-        aboutForm.AcceptButton = okButton;
-        aboutForm.CancelButton = okButton;
-
-        aboutForm.ShowDialog();
+    private void ShowBalloon(string text)
+    {
+        _trayIcon.BalloonTipTitle = AppInfo.AppName;
+        _trayIcon.BalloonTipText = text;
+        _trayIcon.ShowBalloonTip(3000);
     }
 
     protected override void ExitThreadCore()
     {
         _monitor.Dispose();
-
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
-
-        _appIcon.Dispose();
 
         base.ExitThreadCore();
     }
@@ -243,32 +163,24 @@ public sealed class FileIoMonitor : IDisposable
 {
     private const string SessionName = "DeskPulseSession";
 
-    private readonly object _logLock = new();
     private readonly object _openFilesLock = new();
     private readonly object _settingsLock = new();
-
     private readonly Dictionary<string, List<FileOpenInfo>> _openEventsByFile = new(StringComparer.OrdinalIgnoreCase);
 
     private AppSettings _settings;
-
+    private DeskPulseDatabase _database;
     private TraceEventSession? _session;
     private Thread? _workerThread;
     private bool _disposed;
 
-    public string CurrentLogFilePath
-    {
-        get
-        {
-            var settings = GetSettingsSnapshot();
-            return settings.LogFilePath;
-        }
-    }
-
     public FileIoMonitor()
     {
         _settings = AppSettings.Load();
-        EnsureLogFolderExists(_settings.LogFilePath);
-        EnsureCsvHeaderExists();
+
+        EnsureDataFolderExists(_settings.DataFolderPath);
+
+        _database = new DeskPulseDatabase(_settings.DatabaseFilePath);
+        _database.Initialize();
     }
 
     public void Start()
@@ -283,7 +195,7 @@ public sealed class FileIoMonitor : IDisposable
         _workerThread = new Thread(RunEtwSession)
         {
             IsBackground = true,
-            Name = "DeskPulse ETW File Monitor"
+            Name = "DeskPulse ETW Monitor"
         };
 
         _workerThread.Start();
@@ -294,9 +206,39 @@ public sealed class FileIoMonitor : IDisposable
         lock (_settingsLock)
         {
             _settings = AppSettings.Load();
-            EnsureLogFolderExists(_settings.LogFilePath);
-            EnsureCsvHeaderExists();
+
+            EnsureDataFolderExists(_settings.DataFolderPath);
+
+            if (!string.Equals(_database.DatabaseFilePath, _settings.DatabaseFilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                _database.Dispose();
+                _database = new DeskPulseDatabase(_settings.DatabaseFilePath);
+            }
+
+            _database.Initialize();
         }
+    }
+
+    public void ExportAndOpenExcelReport()
+    {
+        AppSettings settings;
+        DeskPulseDatabase database;
+
+        lock (_settingsLock)
+        {
+            settings = _settings.Clone();
+            database = _database;
+        }
+
+        EnsureDataFolderExists(settings.DataFolderPath);
+
+        database.ExportToExcel(settings.ExcelExportFilePath);
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = settings.ExcelExportFilePath,
+            UseShellExecute = true
+        });
     }
 
     private AppSettings GetSettingsSnapshot()
@@ -304,6 +246,14 @@ public sealed class FileIoMonitor : IDisposable
         lock (_settingsLock)
         {
             return _settings.Clone();
+        }
+    }
+
+    private DeskPulseDatabase GetDatabaseSnapshot()
+    {
+        lock (_settingsLock)
+        {
+            return _database;
         }
     }
 
@@ -323,62 +273,58 @@ public sealed class FileIoMonitor : IDisposable
                 KernelTraceEventParser.Keywords.FileIOInit
             );
 
-            session.Source.Kernel.FileIOCreate += data =>
-            {
-                HandleFileEvent("OPEN", data);
-            };
-
-            session.Source.Kernel.FileIOWrite += data =>
-            {
-                HandleFileEvent("WRITE", data);
-            };
-
-            session.Source.Kernel.FileIOClose += data =>
-            {
-                HandleFileEvent("CLOSE", data);
-            };
+            session.Source.Kernel.FileIOCreate += data => HandleFileEvent("OPEN", data);
+            session.Source.Kernel.FileIOWrite += data => HandleFileEvent("WRITE", data);
+            session.Source.Kernel.FileIOClose += data => HandleFileEvent("CLOSE", data);
 
             session.Source.Process();
         }
         catch (Exception ex)
         {
-            WriteErrorToCsv(ex);
+            TryWriteError(ex);
         }
     }
 
     private void HandleFileEvent(string operation, TraceEvent data)
     {
-        var fileName = TryGetPayloadString(data, "FileName");
-
-        if (string.IsNullOrWhiteSpace(fileName))
-            return;
-
-        if (!ShouldMonitorFile(fileName))
-            return;
-
-        var fullFileName = GetSafeFullPath(fileName);
-
-        if (string.IsNullOrWhiteSpace(fullFileName))
-            return;
-
         var processId = data.ProcessID;
         var processName = string.IsNullOrWhiteSpace(data.ProcessName)
             ? "UnknownProcess"
             : data.ProcessName;
 
-        var key = BuildOpenFileKey(fullFileName, processId, processName);
+        if (IsDeskPulseProcess(processId, processName))
+            return;
+
+        var rawFileName = TryGetPayloadString(data, "FileName");
+
+        if (string.IsNullOrWhiteSpace(rawFileName))
+            return;
+
+        var normalizedPath = PathUtilities.NormalizeEtwPath(rawFileName);
+
+        if (!ShouldMonitorFile(normalizedPath))
+            return;
+
+        var fullPath = GetSafeFullPath(normalizedPath);
+
+        if (string.IsNullOrWhiteSpace(fullPath))
+            return;
+
+        var folderPath = PathUtilities.GetFolderPath(fullPath);
+        var fileNameOnly = PathUtilities.GetFileNameOnly(fullPath);
+        var extension = PathUtilities.GetExtension(fullPath);
+
+        var key = BuildOpenFileKey(fullPath, processId, processName);
         var eventTime = DateTime.Now;
 
         if (operation == "OPEN")
         {
-            var openingSize = TryGetFileSize(fullFileName);
-
             RegisterOpenFileEvent(
                 key,
                 new FileOpenInfo
                 {
                     OpenedTime = eventTime,
-                    SizeAtOpening = openingSize
+                    SizeAtOpening = TryGetFileSize(fullPath)
                 }
             );
 
@@ -387,30 +333,27 @@ public sealed class FileIoMonitor : IDisposable
 
         if (operation == "WRITE")
         {
-            var writeSize = TryGetFileSize(fullFileName);
+            var writeSize = TryGetFileSize(fullPath);
             var writeWasAttachedToOpenSession = RegisterFileWriteEvent(key, eventTime, writeSize);
 
             if (!writeWasAttachedToOpenSession)
             {
-                WriteCsvRow(
-                    file: fullFileName,
-                    dateOpened: "",
-                    timeOpened: "",
-                    sizeAtOpening: "",
-                    firstWriteDate: eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    firstWriteTime: eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                    lastWriteDate: eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    lastWriteTime: eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                    writeCount: "1",
-                    sizeAtLastWrite: FormatFileSize(writeSize),
-                    dateClosed: "",
-                    timeClosed: "",
-                    sizeAtClosing: "",
-                    inferredAction: "Save/write detected",
-                    process: processName,
-                    processId: processId.ToString(CultureInfo.InvariantCulture),
-                    note: "Write event seen, but matching open event was not found"
-                );
+                WriteEvent(new ActivityEventRecord
+                {
+                    ActivityType = "File",
+                    FullPath = fullPath,
+                    FolderPath = folderPath,
+                    FileName = fileNameOnly,
+                    Extension = extension,
+                    FirstWriteTime = eventTime,
+                    LastWriteTime = eventTime,
+                    WriteCount = 1,
+                    SizeAtLastWrite = writeSize,
+                    InferredAction = "Save/write detected",
+                    ProcessName = processName,
+                    ProcessId = processId,
+                    Note = "Write event seen, but matching open event was not found"
+                });
             }
 
             return;
@@ -418,61 +361,130 @@ public sealed class FileIoMonitor : IDisposable
 
         if (operation == "CLOSE")
         {
-            var closingSize = TryGetFileSize(fullFileName);
+            var closingSize = TryGetFileSize(fullPath);
             var openInfo = TryConsumeOpenFileEvent(key);
 
             if (openInfo == null)
             {
-                WriteCsvRow(
-                    file: fullFileName,
-                    dateOpened: "",
-                    timeOpened: "",
-                    sizeAtOpening: "",
-                    firstWriteDate: "",
-                    firstWriteTime: "",
-                    lastWriteDate: "",
-                    lastWriteTime: "",
-                    writeCount: "",
-                    sizeAtLastWrite: "",
-                    dateClosed: eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    timeClosed: eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                    sizeAtClosing: FormatFileSize(closingSize),
-                    inferredAction: "Unknown close action",
-                    process: processName,
-                    processId: processId.ToString(CultureInfo.InvariantCulture),
-                    note: "Close event seen, but matching open event was not found"
-                );
+                WriteEvent(new ActivityEventRecord
+                {
+                    ActivityType = "File",
+                    FullPath = fullPath,
+                    FolderPath = folderPath,
+                    FileName = fileNameOnly,
+                    Extension = extension,
+                    ClosedTime = eventTime,
+                    SizeAtClosing = closingSize,
+                    InferredAction = "Unknown close action",
+                    ProcessName = processName,
+                    ProcessId = processId,
+                    Note = "Close event seen, but matching open event was not found"
+                });
 
                 return;
             }
 
-            var inferredAction = InferFileAction(
-                openInfo.SizeAtOpening,
-                closingSize,
-                openInfo.WriteCount
-            );
+            WriteEvent(new ActivityEventRecord
+            {
+                ActivityType = "File",
+                FullPath = fullPath,
+                FolderPath = folderPath,
+                FileName = fileNameOnly,
+                Extension = extension,
+                OpenedTime = openInfo.OpenedTime,
+                SizeAtOpening = openInfo.SizeAtOpening,
+                FirstWriteTime = openInfo.FirstWriteTime,
+                LastWriteTime = openInfo.LastWriteTime,
+                WriteCount = openInfo.WriteCount,
+                SizeAtLastWrite = openInfo.SizeAtLastWrite,
+                ClosedTime = eventTime,
+                SizeAtClosing = closingSize,
+                InferredAction = InferFileAction(openInfo.SizeAtOpening, closingSize, openInfo.WriteCount),
+                ProcessName = processName,
+                ProcessId = processId,
+                Note = ""
+            });
+        }
+    }
 
-            WriteCsvRow(
-                file: fullFileName,
-                dateOpened: openInfo.OpenedTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                timeOpened: openInfo.OpenedTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                sizeAtOpening: FormatFileSize(openInfo.SizeAtOpening),
-                firstWriteDate: FormatDate(openInfo.FirstWriteTime),
-                firstWriteTime: FormatTime(openInfo.FirstWriteTime),
-                lastWriteDate: FormatDate(openInfo.LastWriteTime),
-                lastWriteTime: FormatTime(openInfo.LastWriteTime),
-                writeCount: openInfo.WriteCount > 0
-                    ? openInfo.WriteCount.ToString(CultureInfo.InvariantCulture)
-                    : "",
-                sizeAtLastWrite: FormatFileSize(openInfo.SizeAtLastWrite),
-                dateClosed: eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                timeClosed: eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                sizeAtClosing: FormatFileSize(closingSize),
-                inferredAction: inferredAction,
-                process: processName,
-                processId: processId.ToString(CultureInfo.InvariantCulture),
-                note: ""
+    private static bool IsDeskPulseProcess(int processId, string processName)
+    {
+        if (processId == Environment.ProcessId)
+            return true;
+
+        if (string.IsNullOrWhiteSpace(processName))
+            return false;
+
+        var normalizedProcessName = processName.Trim();
+
+        if (normalizedProcessName.Equals(AppInfo.AppName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (normalizedProcessName.Equals(AppInfo.AppName + ".exe", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (normalizedProcessName.Equals("DeskPulse", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (normalizedProcessName.Equals("DeskPulse.exe", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private void WriteEvent(ActivityEventRecord record)
+    {
+        try
+        {
+            GetDatabaseSnapshot().InsertActivityEvent(record);
+        }
+        catch (Exception ex)
+        {
+            TryWriteStartupDiagnostic(ex);
+        }
+    }
+
+    private void TryWriteError(Exception ex)
+    {
+        try
+        {
+            WriteEvent(new ActivityEventRecord
+            {
+                ActivityType = "Error",
+                FullPath = "DeskPulse ETW session",
+                FolderPath = "",
+                FileName = "",
+                Extension = "",
+                InferredAction = "Monitor error",
+                ProcessName = AppInfo.AppName,
+                ProcessId = Environment.ProcessId,
+                Note = ex.ToString()
+            });
+        }
+        catch
+        {
+            TryWriteStartupDiagnostic(ex);
+        }
+    }
+
+    private static void TryWriteStartupDiagnostic(Exception ex)
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), "DeskPulse-startup.log");
+
+            File.AppendAllText(
+                path,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)
+                + Environment.NewLine
+                + ex
+                + Environment.NewLine
+                + Environment.NewLine
             );
+        }
+        catch
+        {
+            // Last-resort logging failed. Do not crash the monitor.
         }
     }
 
@@ -501,7 +513,6 @@ public sealed class FileIoMonitor : IDisposable
                 return false;
 
             var openInfo = list[^1];
-
             openInfo.WriteCount++;
 
             if (openInfo.FirstWriteTime == null)
@@ -531,17 +542,53 @@ public sealed class FileIoMonitor : IDisposable
             list.RemoveAt(0);
 
             if (list.Count == 0)
-            {
                 _openEventsByFile.Remove(key);
-            }
 
             return openInfo;
         }
     }
 
-    private static string BuildOpenFileKey(string fullFileName, int processId, string processName)
+    private bool ShouldMonitorFile(string fileName)
     {
-        return $"{fullFileName}|{processId}|{processName}";
+        try
+        {
+            var settings = GetSettingsSnapshot();
+            var ext = PathUtilities.GetExtension(fileName);
+
+            if (string.IsNullOrWhiteSpace(ext))
+                return false;
+
+            if (!settings.ExtensionsToMonitor.Contains(ext))
+                return false;
+
+            var fullPath = GetSafeFullPath(fileName);
+
+            if (string.IsNullOrWhiteSpace(fullPath))
+                return false;
+
+            if (settings.IgnoreTempFolders && PathExclusions.IsInTempFolder(fullPath))
+                return false;
+
+            var dbPath = Path.GetFullPath(settings.DatabaseFilePath);
+            var exportPath = Path.GetFullPath(settings.ExcelExportFilePath);
+
+            if (string.Equals(fullPath, dbPath, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (string.Equals(fullPath, exportPath, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string BuildOpenFileKey(string fullPath, int processId, string processName)
+    {
+        return $"{fullPath}|{processId}|{processName}";
     }
 
     private static string? TryGetPayloadString(TraceEvent data, string payloadName)
@@ -557,45 +604,6 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    private bool ShouldMonitorFile(string fileName)
-    {
-        try
-        {
-            var settings = GetSettingsSnapshot();
-
-            var ext = Path.GetExtension(fileName);
-
-            if (string.IsNullOrWhiteSpace(ext))
-                return false;
-
-            if (!settings.ExtensionsToMonitor.Contains(ext))
-                return false;
-
-            var fullFileName = GetSafeFullPath(fileName);
-
-            if (string.IsNullOrWhiteSpace(fullFileName))
-                return false;
-
-            if (PathExclusions.IsInTempFolder(fullFileName))
-                return false;
-
-            var fullCsvLogFileName = Path.GetFullPath(settings.LogFilePath);
-            var fullCsvSnapshotFileName = Path.GetFullPath(settings.SnapshotFilePath);
-
-            if (string.Equals(fullFileName, fullCsvLogFileName, StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            if (string.Equals(fullFileName, fullCsvSnapshotFileName, StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static string? GetSafeFullPath(string fileName)
     {
         try
@@ -604,7 +612,7 @@ public sealed class FileIoMonitor : IDisposable
         }
         catch
         {
-            return null;
+            return fileName;
         }
     }
 
@@ -623,285 +631,25 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    private static string FormatFileSize(long? size)
-    {
-        if (size == null)
-            return "";
-
-        return size.Value.ToString(CultureInfo.InvariantCulture);
-    }
-
-    private static string FormatDate(DateTime? value)
-    {
-        if (value == null)
-            return "";
-
-        return value.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-    }
-
-    private static string FormatTime(DateTime? value)
-    {
-        if (value == null)
-            return "";
-
-        return value.Value.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
-    }
-
     private static string InferFileAction(long? sizeAtOpening, long? sizeAtClosing, int writeCount)
     {
         if (writeCount > 0)
         {
-            if (sizeAtOpening == null && sizeAtClosing == null)
-                return "Edit/save action - write detected";
+            if (sizeAtOpening != null && sizeAtClosing != null && sizeAtOpening.Value != sizeAtClosing.Value)
+                return "Edited/saved, file size changed";
 
-            if (sizeAtOpening == null)
-                return "Edit/save action - write detected, opening size unavailable";
-
-            if (sizeAtClosing == null)
-                return "Edit/save action - write detected, closing size unavailable";
-
-            if (sizeAtOpening.Value == sizeAtClosing.Value)
-                return "Edit/save action - write detected, unchanged final size";
-
-            if (sizeAtClosing.Value > sizeAtOpening.Value)
-                return "Edit/save action - file size increased";
-
-            if (sizeAtClosing.Value < sizeAtOpening.Value)
-                return "Edit/save action - file size decreased";
-
-            return "Edit/save action - write detected";
+            return "Edited/saved";
         }
 
-        if (sizeAtOpening == null && sizeAtClosing == null)
-            return "Unknown action";
-
-        if (sizeAtOpening == null)
-            return "Unknown action - opening size unavailable";
-
-        if (sizeAtClosing == null)
-            return "Unknown action - closing size unavailable";
-
-        if (sizeAtOpening.Value == sizeAtClosing.Value)
-            return "Read / unchanged-size action";
-
-        if (sizeAtClosing.Value > sizeAtOpening.Value)
-            return "Possible edit action - file size increased";
-
-        if (sizeAtClosing.Value < sizeAtOpening.Value)
-            return "Possible edit action - file size decreased";
-
-        return "Unknown action";
+        return "Opened/read only";
     }
 
-    private void EnsureCsvHeaderExists()
+    private static void EnsureDataFolderExists(string folderPath)
     {
-        var settings = GetSettingsSnapshot();
+        if (string.IsNullOrWhiteSpace(folderPath))
+            throw new InvalidOperationException("The DeskPulse data folder path is empty.");
 
-        lock (_logLock)
-        {
-            EnsureLogFolderExists(settings.LogFilePath);
-
-            var expectedHeader = GetCsvHeaderLine();
-
-            if (!File.Exists(settings.LogFilePath) || new FileInfo(settings.LogFilePath).Length == 0)
-            {
-                File.WriteAllText(settings.LogFilePath, expectedHeader + Environment.NewLine, Encoding.UTF8);
-                return;
-            }
-
-            var existingHeader = "";
-
-            try
-            {
-                existingHeader = File.ReadLines(settings.LogFilePath, Encoding.UTF8).FirstOrDefault() ?? "";
-            }
-            catch
-            {
-                return;
-            }
-
-            if (string.Equals(existingHeader, expectedHeader, StringComparison.Ordinal))
-                return;
-
-            var logFolder = Path.GetDirectoryName(settings.LogFilePath);
-
-            if (string.IsNullOrWhiteSpace(logFolder))
-                return;
-
-            var logFileNameWithoutExtension = Path.GetFileNameWithoutExtension(settings.LogFilePath);
-            var logFileExtension = Path.GetExtension(settings.LogFilePath);
-
-            if (string.IsNullOrWhiteSpace(logFileExtension))
-                logFileExtension = ".csv";
-
-            var backupPath = Path.Combine(
-                logFolder,
-                logFileNameWithoutExtension + "-backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + logFileExtension
-            );
-
-            try
-            {
-                File.Copy(settings.LogFilePath, backupPath, overwrite: false);
-                File.WriteAllText(settings.LogFilePath, expectedHeader + Environment.NewLine, Encoding.UTF8);
-            }
-            catch
-            {
-                // If backup/header conversion fails, avoid crashing the monitor.
-            }
-        }
-    }
-
-    private static string GetCsvHeaderLine()
-    {
-        return string.Join(",",
-            CsvEscape("File"),
-            CsvEscape("Date Opened"),
-            CsvEscape("Time Opened"),
-            CsvEscape("Size at Opening"),
-            CsvEscape("First Save/Write Date"),
-            CsvEscape("First Save/Write Time"),
-            CsvEscape("Last Save/Write Date"),
-            CsvEscape("Last Save/Write Time"),
-            CsvEscape("Save/Write Count"),
-            CsvEscape("Size at Last Save/Write"),
-            CsvEscape("Date Closed"),
-            CsvEscape("Time Closed"),
-            CsvEscape("Size at Closing"),
-            CsvEscape("Inferred Action"),
-            CsvEscape("Process"),
-            CsvEscape("Process ID"),
-            CsvEscape("Note")
-        );
-    }
-
-    private void WriteCsvRow(
-        string file,
-        string dateOpened,
-        string timeOpened,
-        string sizeAtOpening,
-        string firstWriteDate,
-        string firstWriteTime,
-        string lastWriteDate,
-        string lastWriteTime,
-        string writeCount,
-        string sizeAtLastWrite,
-        string dateClosed,
-        string timeClosed,
-        string sizeAtClosing,
-        string inferredAction,
-        string process,
-        string processId,
-        string note)
-    {
-        var settings = GetSettingsSnapshot();
-
-        lock (_logLock)
-        {
-            try
-            {
-                EnsureLogFolderExists(settings.LogFilePath);
-                EnsureCsvHeaderExists();
-
-                var line = string.Join(",",
-                    CsvEscape(file),
-                    CsvEscape(dateOpened),
-                    CsvEscape(timeOpened),
-                    CsvEscape(sizeAtOpening),
-                    CsvEscape(firstWriteDate),
-                    CsvEscape(firstWriteTime),
-                    CsvEscape(lastWriteDate),
-                    CsvEscape(lastWriteTime),
-                    CsvEscape(writeCount),
-                    CsvEscape(sizeAtLastWrite),
-                    CsvEscape(dateClosed),
-                    CsvEscape(timeClosed),
-                    CsvEscape(sizeAtClosing),
-                    CsvEscape(inferredAction),
-                    CsvEscape(process),
-                    CsvEscape(processId),
-                    CsvEscape(note)
-                );
-
-                File.AppendAllText(settings.LogFilePath, line + Environment.NewLine, Encoding.UTF8);
-            }
-            catch
-            {
-                // Avoid crashing the monitor if Excel, antivirus, or another process temporarily locks the log.
-            }
-        }
-    }
-
-    private void WriteErrorToCsv(Exception ex)
-    {
-        WriteCsvRow(
-            file: "ERROR",
-            dateOpened: "",
-            timeOpened: "",
-            sizeAtOpening: "",
-            firstWriteDate: "",
-            firstWriteTime: "",
-            lastWriteDate: "",
-            lastWriteTime: "",
-            writeCount: "",
-            sizeAtLastWrite: "",
-            dateClosed: DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            timeClosed: DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-            sizeAtClosing: "",
-            inferredAction: "DeskPulse error",
-            process: AppInfo.AppName,
-            processId: "",
-            note: ex.Message
-        );
-    }
-
-    private static string CsvEscape(string value)
-    {
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
-        {
-            return "\"" + value.Replace("\"", "\"\"") + "\"";
-        }
-
-        return value;
-    }
-
-    private static void EnsureLogFolderExists(string logFilePath)
-    {
-        var folder = Path.GetDirectoryName(logFilePath);
-
-        if (string.IsNullOrWhiteSpace(folder))
-            throw new InvalidOperationException("The log file path must include a folder.");
-
-        Directory.CreateDirectory(folder);
-    }
-
-    public void OpenLogFileSnapshot()
-    {
-        var settings = GetSettingsSnapshot();
-
-        lock (_logLock)
-        {
-            try
-            {
-                EnsureCsvHeaderExists();
-
-                File.Copy(settings.LogFilePath, settings.SnapshotFilePath, overwrite: true);
-
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = settings.SnapshotFilePath,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Could not open the Excel log snapshot.\n\nLog file:\n{settings.LogFilePath}\n\nSnapshot file:\n{settings.SnapshotFilePath}\n\nError:\n{ex.Message}",
-                    "Could not open Excel log",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
-            }
-        }
+        Directory.CreateDirectory(folderPath);
     }
 
     public void Dispose()
@@ -913,140 +661,622 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
-            _session?.Source.StopProcessing();
-        }
-        catch
-        {
-            // Ignore shutdown errors.
-        }
-
-        try
-        {
             _session?.Dispose();
         }
         catch
         {
             // Ignore shutdown errors.
         }
+
+        try
+        {
+            _database.Dispose();
+        }
+        catch
+        {
+            // Ignore shutdown errors.
+        }
     }
+}
+
+public sealed class DeskPulseDatabase : IDisposable
+{
+    private readonly object _dbLock = new();
+
+    public DeskPulseDatabase(string databaseFilePath)
+    {
+        DatabaseFilePath = databaseFilePath;
+    }
+
+    public string DatabaseFilePath { get; }
+
+    private string ConnectionString
+    {
+        get
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = DatabaseFilePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Cache = SqliteCacheMode.Shared
+            };
+
+            return builder.ToString();
+        }
+    }
+
+    public void Initialize()
+    {
+        lock (_dbLock)
+        {
+            var folder = Path.GetDirectoryName(DatabaseFilePath);
+
+            if (!string.IsNullOrWhiteSpace(folder))
+                Directory.CreateDirectory(folder);
+
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA journal_mode=WAL;");
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            ExecuteNonQuery(connection,
+                """
+                CREATE TABLE IF NOT EXISTS ActivityEvents
+                (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CreatedAt TEXT NOT NULL,
+                    ActivityType TEXT NOT NULL,
+                    Item TEXT NOT NULL,
+                    FullPath TEXT NULL,
+                    FolderPath TEXT NULL,
+                    FileName TEXT NULL,
+                    Extension TEXT NULL,
+                    DateOpened TEXT NULL,
+                    TimeOpened TEXT NULL,
+                    SizeAtOpening INTEGER NULL,
+                    FirstWriteDate TEXT NULL,
+                    FirstWriteTime TEXT NULL,
+                    LastWriteDate TEXT NULL,
+                    LastWriteTime TEXT NULL,
+                    WriteCount INTEGER NULL,
+                    SizeAtLastWrite INTEGER NULL,
+                    DateClosed TEXT NULL,
+                    TimeClosed TEXT NULL,
+                    SizeAtClosing INTEGER NULL,
+                    InferredAction TEXT NULL,
+                    ProcessName TEXT NULL,
+                    ProcessId INTEGER NULL,
+                    Note TEXT NULL
+                );
+                """);
+
+            EnsureColumnExists(connection, "ActivityEvents", "FullPath", "TEXT NULL");
+            EnsureColumnExists(connection, "ActivityEvents", "FolderPath", "TEXT NULL");
+            EnsureColumnExists(connection, "ActivityEvents", "FileName", "TEXT NULL");
+            EnsureColumnExists(connection, "ActivityEvents", "Extension", "TEXT NULL");
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_CreatedAt ON ActivityEvents (CreatedAt);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_Item ON ActivityEvents (Item);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_FullPath ON ActivityEvents (FullPath);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_Extension ON ActivityEvents (Extension);"
+            );
+        }
+    }
+
+    public void InsertActivityEvent(ActivityEventRecord record)
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText =
+                """
+                INSERT INTO ActivityEvents
+                (
+                    CreatedAt,
+                    ActivityType,
+                    Item,
+                    FullPath,
+                    FolderPath,
+                    FileName,
+                    Extension,
+                    DateOpened,
+                    TimeOpened,
+                    SizeAtOpening,
+                    FirstWriteDate,
+                    FirstWriteTime,
+                    LastWriteDate,
+                    LastWriteTime,
+                    WriteCount,
+                    SizeAtLastWrite,
+                    DateClosed,
+                    TimeClosed,
+                    SizeAtClosing,
+                    InferredAction,
+                    ProcessName,
+                    ProcessId,
+                    Note
+                )
+                VALUES
+                (
+                    $CreatedAt,
+                    $ActivityType,
+                    $Item,
+                    $FullPath,
+                    $FolderPath,
+                    $FileName,
+                    $Extension,
+                    $DateOpened,
+                    $TimeOpened,
+                    $SizeAtOpening,
+                    $FirstWriteDate,
+                    $FirstWriteTime,
+                    $LastWriteDate,
+                    $LastWriteTime,
+                    $WriteCount,
+                    $SizeAtLastWrite,
+                    $DateClosed,
+                    $TimeClosed,
+                    $SizeAtClosing,
+                    $InferredAction,
+                    $ProcessName,
+                    $ProcessId,
+                    $Note
+                );
+                """;
+
+            AddText(command, "$CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+            AddText(command, "$ActivityType", record.ActivityType);
+            AddText(command, "$Item", record.FullPath);
+            AddText(command, "$FullPath", record.FullPath);
+            AddText(command, "$FolderPath", record.FolderPath);
+            AddText(command, "$FileName", record.FileName);
+            AddText(command, "$Extension", record.Extension);
+            AddText(command, "$DateOpened", FormatDate(record.OpenedTime));
+            AddText(command, "$TimeOpened", FormatTime(record.OpenedTime));
+            AddInteger(command, "$SizeAtOpening", record.SizeAtOpening);
+            AddText(command, "$FirstWriteDate", FormatDate(record.FirstWriteTime));
+            AddText(command, "$FirstWriteTime", FormatTime(record.FirstWriteTime));
+            AddText(command, "$LastWriteDate", FormatDate(record.LastWriteTime));
+            AddText(command, "$LastWriteTime", FormatTime(record.LastWriteTime));
+            AddInteger(command, "$WriteCount", record.WriteCount > 0 ? record.WriteCount : null);
+            AddInteger(command, "$SizeAtLastWrite", record.SizeAtLastWrite);
+            AddText(command, "$DateClosed", FormatDate(record.ClosedTime));
+            AddText(command, "$TimeClosed", FormatTime(record.ClosedTime));
+            AddInteger(command, "$SizeAtClosing", record.SizeAtClosing);
+            AddText(command, "$InferredAction", record.InferredAction);
+            AddText(command, "$ProcessName", record.ProcessName);
+            AddInteger(command, "$ProcessId", record.ProcessId);
+            AddText(command, "$Note", record.Note);
+
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void ExportToExcel(string excelFilePath)
+    {
+        lock (_dbLock)
+        {
+            var folder = Path.GetDirectoryName(excelFilePath);
+
+            if (!string.IsNullOrWhiteSpace(folder))
+                Directory.CreateDirectory(folder);
+
+            var rows = ReadAllRows();
+
+            using var workbook = new XLWorkbook();
+            var sheet = workbook.Worksheets.Add("File Activity");
+
+            var headers = new[]
+            {
+                "Id",
+                "Created At",
+                "Activity Type",
+                "Full Path",
+                "Folder Path",
+                "File Name",
+                "Extension",
+                "Date Opened",
+                "Time Opened",
+                "Size At Opening",
+                "First Write Date",
+                "First Write Time",
+                "Last Write Date",
+                "Last Write Time",
+                "Write Count",
+                "Size At Last Write",
+                "Date Closed",
+                "Time Closed",
+                "Size At Closing",
+                "Inferred Action",
+                "Process",
+                "Process ID",
+                "Note"
+            };
+
+            for (var col = 0; col < headers.Length; col++)
+            {
+                sheet.Cell(1, col + 1).Value = headers[col];
+                sheet.Cell(1, col + 1).Style.Font.Bold = true;
+            }
+
+            var rowNumber = 2;
+
+            foreach (var row in rows)
+            {
+                sheet.Cell(rowNumber, 1).Value = row.Id;
+                sheet.Cell(rowNumber, 2).Value = row.CreatedAt;
+                sheet.Cell(rowNumber, 3).Value = row.ActivityType;
+                sheet.Cell(rowNumber, 4).Value = row.FullPath;
+                sheet.Cell(rowNumber, 5).Value = row.FolderPath;
+                sheet.Cell(rowNumber, 6).Value = row.FileName;
+                sheet.Cell(rowNumber, 7).Value = row.Extension;
+                sheet.Cell(rowNumber, 8).Value = row.DateOpened;
+                sheet.Cell(rowNumber, 9).Value = row.TimeOpened;
+                SetCellValue(sheet.Cell(rowNumber, 10), row.SizeAtOpening);
+                sheet.Cell(rowNumber, 11).Value = row.FirstWriteDate;
+                sheet.Cell(rowNumber, 12).Value = row.FirstWriteTime;
+                sheet.Cell(rowNumber, 13).Value = row.LastWriteDate;
+                sheet.Cell(rowNumber, 14).Value = row.LastWriteTime;
+                SetCellValue(sheet.Cell(rowNumber, 15), row.WriteCount);
+                SetCellValue(sheet.Cell(rowNumber, 16), row.SizeAtLastWrite);
+                sheet.Cell(rowNumber, 17).Value = row.DateClosed;
+                sheet.Cell(rowNumber, 18).Value = row.TimeClosed;
+                SetCellValue(sheet.Cell(rowNumber, 19), row.SizeAtClosing);
+                sheet.Cell(rowNumber, 20).Value = row.InferredAction;
+                sheet.Cell(rowNumber, 21).Value = row.ProcessName;
+                SetCellValue(sheet.Cell(rowNumber, 22), row.ProcessId);
+                sheet.Cell(rowNumber, 23).Value = row.Note;
+
+                rowNumber++;
+            }
+
+            sheet.SheetView.FreezeRows(1);
+
+            if (sheet.RangeUsed() != null)
+                sheet.RangeUsed()!.SetAutoFilter();
+
+            sheet.Columns().AdjustToContents(1, Math.Min(rowNumber, 250));
+
+            var exportFolder = Path.GetDirectoryName(excelFilePath) ?? AppContext.BaseDirectory;
+            var exportFileNameWithoutExtension = Path.GetFileNameWithoutExtension(excelFilePath);
+
+            var tempFilePath = Path.Combine(
+                exportFolder,
+                $"{exportFileNameWithoutExtension}-{Guid.NewGuid():N}.xlsx"
+            );
+
+            workbook.SaveAs(tempFilePath);
+
+            if (File.Exists(excelFilePath))
+                File.Delete(excelFilePath);
+
+            File.Move(tempFilePath, excelFilePath);
+        }
+    }
+
+    private static void SetCellValue(IXLCell cell, long? value)
+    {
+        if (value == null)
+            cell.Value = "";
+        else
+            cell.Value = value.Value;
+    }
+
+    private List<ExcelExportRow> ReadAllRows()
+    {
+        var result = new List<ExcelExportRow>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText =
+            """
+            SELECT
+                Id,
+                CreatedAt,
+                ActivityType,
+                Item,
+                FullPath,
+                FolderPath,
+                FileName,
+                Extension,
+                DateOpened,
+                TimeOpened,
+                SizeAtOpening,
+                FirstWriteDate,
+                FirstWriteTime,
+                LastWriteDate,
+                LastWriteTime,
+                WriteCount,
+                SizeAtLastWrite,
+                DateClosed,
+                TimeClosed,
+                SizeAtClosing,
+                InferredAction,
+                ProcessName,
+                ProcessId,
+                Note
+            FROM ActivityEvents
+            ORDER BY Id;
+            """;
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            var legacyItem = ReadText(reader, 3);
+            var fullPath = ReadText(reader, 4);
+
+            if (string.IsNullOrWhiteSpace(fullPath))
+                fullPath = legacyItem;
+
+            fullPath = PathUtilities.NormalizeEtwPath(fullPath);
+
+            var folderPath = ReadText(reader, 5);
+            var fileName = ReadText(reader, 6);
+            var extension = ReadText(reader, 7);
+
+            if (string.IsNullOrWhiteSpace(folderPath))
+                folderPath = PathUtilities.GetFolderPath(fullPath);
+
+            if (string.IsNullOrWhiteSpace(fileName))
+                fileName = PathUtilities.GetFileNameOnly(fullPath);
+
+            if (string.IsNullOrWhiteSpace(extension))
+                extension = PathUtilities.GetExtension(fullPath);
+
+            result.Add(new ExcelExportRow
+            {
+                Id = ReadLong(reader, 0),
+                CreatedAt = ReadText(reader, 1),
+                ActivityType = ReadText(reader, 2),
+                FullPath = fullPath,
+                FolderPath = folderPath,
+                FileName = fileName,
+                Extension = extension,
+                DateOpened = ReadText(reader, 8),
+                TimeOpened = ReadText(reader, 9),
+                SizeAtOpening = ReadNullableLong(reader, 10),
+                FirstWriteDate = ReadText(reader, 11),
+                FirstWriteTime = ReadText(reader, 12),
+                LastWriteDate = ReadText(reader, 13),
+                LastWriteTime = ReadText(reader, 14),
+                WriteCount = ReadNullableLong(reader, 15),
+                SizeAtLastWrite = ReadNullableLong(reader, 16),
+                DateClosed = ReadText(reader, 17),
+                TimeClosed = ReadText(reader, 18),
+                SizeAtClosing = ReadNullableLong(reader, 19),
+                InferredAction = ReadText(reader, 20),
+                ProcessName = ReadText(reader, 21),
+                ProcessId = ReadNullableLong(reader, 22),
+                Note = ReadText(reader, 23)
+            });
+        }
+
+        return result;
+    }
+
+    private static void EnsureColumnExists(SqliteConnection connection, string tableName, string columnName, string columnDefinition)
+    {
+        if (ColumnExists(connection, tableName, columnName))
+            return;
+
+        ExecuteNonQuery(connection, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};");
+    }
+
+    private static bool ColumnExists(SqliteConnection connection, string tableName, string columnName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            var existingColumnName = reader.GetString(1);
+
+            if (existingColumnName.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void ExecuteNonQuery(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+
+    private static void AddText(SqliteCommand command, string name, string? value)
+    {
+        command.Parameters.AddWithValue(name, string.IsNullOrWhiteSpace(value) ? DBNull.Value : value);
+    }
+
+    private static void AddInteger(SqliteCommand command, string name, long? value)
+    {
+        command.Parameters.AddWithValue(name, value == null ? DBNull.Value : value.Value);
+    }
+
+    private static string FormatDate(DateTime? value)
+    {
+        return value == null
+            ? ""
+            : value.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatTime(DateTime? value)
+    {
+        return value == null
+            ? ""
+            : value.Value.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+    }
+
+    private static long ReadLong(SqliteDataReader reader, int ordinal)
+    {
+        return reader.IsDBNull(ordinal)
+            ? 0
+            : reader.GetInt64(ordinal);
+    }
+
+    private static long? ReadNullableLong(SqliteDataReader reader, int ordinal)
+    {
+        return reader.IsDBNull(ordinal)
+            ? null
+            : reader.GetInt64(ordinal);
+    }
+
+    private static string ReadText(SqliteDataReader reader, int ordinal)
+    {
+        return reader.IsDBNull(ordinal)
+            ? ""
+            : reader.GetString(ordinal);
+    }
+
+    public void Dispose()
+    {
+        // Connections are short-lived and disposed per operation.
+    }
+}
+
+public sealed class ActivityEventRecord
+{
+    public string ActivityType { get; set; } = "";
+    public string FullPath { get; set; } = "";
+    public string FolderPath { get; set; } = "";
+    public string FileName { get; set; } = "";
+    public string Extension { get; set; } = "";
+    public DateTime? OpenedTime { get; set; }
+    public long? SizeAtOpening { get; set; }
+    public DateTime? FirstWriteTime { get; set; }
+    public DateTime? LastWriteTime { get; set; }
+    public int WriteCount { get; set; }
+    public long? SizeAtLastWrite { get; set; }
+    public DateTime? ClosedTime { get; set; }
+    public long? SizeAtClosing { get; set; }
+    public string InferredAction { get; set; } = "";
+    public string ProcessName { get; set; } = "";
+    public int ProcessId { get; set; }
+    public string Note { get; set; } = "";
+}
+
+public sealed class ExcelExportRow
+{
+    public long Id { get; set; }
+    public string CreatedAt { get; set; } = "";
+    public string ActivityType { get; set; } = "";
+    public string FullPath { get; set; } = "";
+    public string FolderPath { get; set; } = "";
+    public string FileName { get; set; } = "";
+    public string Extension { get; set; } = "";
+    public string DateOpened { get; set; } = "";
+    public string TimeOpened { get; set; } = "";
+    public long? SizeAtOpening { get; set; }
+    public string FirstWriteDate { get; set; } = "";
+    public string FirstWriteTime { get; set; } = "";
+    public string LastWriteDate { get; set; } = "";
+    public string LastWriteTime { get; set; } = "";
+    public long? WriteCount { get; set; }
+    public long? SizeAtLastWrite { get; set; }
+    public string DateClosed { get; set; } = "";
+    public string TimeClosed { get; set; } = "";
+    public long? SizeAtClosing { get; set; }
+    public string InferredAction { get; set; } = "";
+    public string ProcessName { get; set; } = "";
+    public long? ProcessId { get; set; }
+    public string Note { get; set; } = "";
 }
 
 public sealed class FileOpenInfo
 {
     public DateTime OpenedTime { get; set; }
-
     public long? SizeAtOpening { get; set; }
-
-    public int WriteCount { get; set; }
-
     public DateTime? FirstWriteTime { get; set; }
-
-    public DateTime? LastWriteTime { get; set; }
-
     public long? SizeAtFirstWrite { get; set; }
-
+    public DateTime? LastWriteTime { get; set; }
     public long? SizeAtLastWrite { get; set; }
+    public int WriteCount { get; set; }
 }
 
-public sealed class RegisteredFileTypeInfo
+public static class PathUtilities
 {
-    public string Extension { get; set; } = "";
-
-    public string Description { get; set; } = "";
-
-    public override string ToString()
+    public static string NormalizeEtwPath(string filePath)
     {
-        if (string.IsNullOrWhiteSpace(Description))
-            return Extension;
+        if (string.IsNullOrWhiteSpace(filePath))
+            return "";
 
-        return $"{Extension}  -  {Description}";
-    }
-}
+        var trimmed = filePath.Trim();
 
-public static class RegisteredFileTypeReader
-{
-    public static List<RegisteredFileTypeInfo> GetRegisteredFileTypes()
-    {
-        var result = new List<RegisteredFileTypeInfo>();
+        var lanmanPrefix = @"\;LanmanRedirector\;";
 
-        try
+        if (trimmed.StartsWith(lanmanPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            foreach (var subKeyName in Registry.ClassesRoot.GetSubKeyNames())
+            var rest = trimmed.Substring(lanmanPrefix.Length);
+
+            var firstSlash = rest.IndexOf('\\');
+
+            if (firstSlash > 0)
             {
-                if (!IsLikelyFileExtension(subKeyName))
-                    continue;
+                var driveToken = rest.Substring(0, firstSlash);
+                var colonIndex = driveToken.IndexOf(':');
 
-                var description = GetDescriptionForExtension(subKeyName);
-
-                result.Add(new RegisteredFileTypeInfo
+                if (colonIndex > 0)
                 {
-                    Extension = subKeyName.Trim(),
-                    Description = description
-                });
-            }
-        }
-        catch
-        {
-            // Ignore registry read failures and return what we have.
-        }
+                    var driveLetter = driveToken.Substring(0, colonIndex);
+                    var afterDriveToken = rest.Substring(firstSlash + 1);
 
-        return result
-            .GroupBy(x => x.Extension, StringComparer.OrdinalIgnoreCase)
-            .Select(x => x.First())
-            .OrderBy(x => x.Extension, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+                    var secondSlash = afterDriveToken.IndexOf('\\');
 
-    private static bool IsLikelyFileExtension(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
+                    if (secondSlash >= 0)
+                    {
+                        var pathAfterServer = afterDriveToken.Substring(secondSlash + 1);
 
-        if (!value.StartsWith(".", StringComparison.Ordinal))
-            return false;
-
-        if (value.Length < 2 || value.Length > 20)
-            return false;
-
-        return value.Skip(1).All(ch => char.IsLetterOrDigit(ch) || ch == '_' || ch == '-');
-    }
-
-    private static string GetDescriptionForExtension(string extension)
-    {
-        try
-        {
-            using var extensionKey = Registry.ClassesRoot.OpenSubKey(extension);
-
-            if (extensionKey == null)
-                return "";
-
-            var progId = extensionKey.GetValue("")?.ToString();
-
-            if (!string.IsNullOrWhiteSpace(progId))
-            {
-                var progIdDescription = GetDescriptionForProgId(progId);
-
-                if (!string.IsNullOrWhiteSpace(progIdDescription))
-                    return progIdDescription;
-            }
-
-            using var openWithProgIdsKey = extensionKey.OpenSubKey("OpenWithProgids");
-
-            if (openWithProgIdsKey != null)
-            {
-                foreach (var valueName in openWithProgIdsKey.GetValueNames())
-                {
-                    if (string.IsNullOrWhiteSpace(valueName))
-                        continue;
-
-                    var description = GetDescriptionForProgId(valueName);
-
-                    if (!string.IsNullOrWhiteSpace(description))
-                        return description;
+                        if (!string.IsNullOrWhiteSpace(pathAfterServer))
+                            return driveLetter + @":\" + pathAfterServer;
+                    }
                 }
             }
+        }
 
-            return "";
+        return trimmed;
+    }
+
+    public static string GetFolderPath(string fullPath)
+    {
+        try
+        {
+            var folder = Path.GetDirectoryName(fullPath);
+
+            if (string.IsNullOrWhiteSpace(folder))
+                return "";
+
+            return folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         }
         catch
         {
@@ -1054,21 +1284,28 @@ public static class RegisteredFileTypeReader
         }
     }
 
-    private static string GetDescriptionForProgId(string progId)
+    public static string GetFileNameOnly(string fullPath)
     {
         try
         {
-            using var progIdKey = Registry.ClassesRoot.OpenSubKey(progId);
+            return Path.GetFileName(fullPath) ?? "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
 
-            if (progIdKey == null)
+    public static string GetExtension(string fullPath)
+    {
+        try
+        {
+            var extension = Path.GetExtension(fullPath);
+
+            if (string.IsNullOrWhiteSpace(extension))
                 return "";
 
-            var description = progIdKey.GetValue("")?.ToString();
-
-            if (string.IsNullOrWhiteSpace(description))
-                return "";
-
-            return description.Trim();
+            return extension.ToLowerInvariant();
         }
         catch
         {
@@ -1079,15 +1316,33 @@ public static class RegisteredFileTypeReader
 
 public static class PathExclusions
 {
-    public static bool IsInTempFolder(string fullPath)
+    public static bool IsInTempFolder(string filePath)
     {
         try
         {
-            var candidate = NormalizeFolderPath(fullPath);
+            var fullPath = Path.GetFullPath(filePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            foreach (var tempFolder in GetTempFolders())
+            var tempFolders = new[]
             {
-                if (IsSameOrChildPath(candidate, tempFolder))
+                Path.GetTempPath(),
+                Environment.GetEnvironmentVariable("TEMP") ?? "",
+                Environment.GetEnvironmentVariable("TMP") ?? "",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp")
+            };
+
+            foreach (var folder in tempFolders)
+            {
+                if (string.IsNullOrWhiteSpace(folder))
+                    continue;
+
+                var fullFolder = Path.GetFullPath(folder)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (fullPath.Equals(fullFolder, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (fullPath.StartsWith(fullFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
 
@@ -1098,70 +1353,15 @@ public static class PathExclusions
             return false;
         }
     }
-
-    private static List<string> GetTempFolders()
-    {
-        var folders = new List<string>();
-
-        AddFolder(folders, Path.GetTempPath());
-        AddFolder(folders, Environment.GetEnvironmentVariable("TEMP"));
-        AddFolder(folders, Environment.GetEnvironmentVariable("TMP"));
-
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        if (!string.IsNullOrWhiteSpace(localAppData))
-        {
-            AddFolder(folders, Path.Combine(localAppData, "Temp"));
-        }
-
-        var windowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-
-        if (!string.IsNullOrWhiteSpace(windowsFolder))
-        {
-            AddFolder(folders, Path.Combine(windowsFolder, "Temp"));
-        }
-
-        return folders
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private static void AddFolder(List<string> folders, string? folder)
-    {
-        if (string.IsNullOrWhiteSpace(folder))
-            return;
-
-        try
-        {
-            folders.Add(NormalizeFolderPath(folder));
-        }
-        catch
-        {
-            // Ignore invalid temp paths.
-        }
-    }
-
-    private static string NormalizeFolderPath(string path)
-    {
-        var full = Path.GetFullPath(path);
-
-        full = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        return full + Path.DirectorySeparatorChar;
-    }
-
-    private static bool IsSameOrChildPath(string candidate, string parent)
-    {
-        return candidate.StartsWith(parent, StringComparison.OrdinalIgnoreCase);
-    }
 }
 
 public sealed class AppSettings
 {
     private const string RegistryPath = @"Software\DeskPulse";
-    private const string DefaultLogFileName = "DeskPulse-log.csv";
 
-    public string LogFilePath { get; set; } = GetDefaultLogFilePath();
+    public string DataFolderPath { get; set; } = GetDefaultDataFolderPath();
+
+    public bool IgnoreTempFolders { get; set; } = true;
 
     public HashSet<string> ExtensionsToMonitor { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1175,42 +1375,19 @@ public sealed class AppSettings
         ".cs"
     };
 
-    public string SnapshotFilePath
-    {
-        get
-        {
-            var folder = Path.GetDirectoryName(LogFilePath);
-            var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(LogFilePath);
-            var extension = Path.GetExtension(LogFilePath);
+    public string DatabaseFilePath => Path.Combine(DataFolderPath, "DeskPulse.db");
 
-            if (string.IsNullOrWhiteSpace(folder))
-                folder = GetDefaultLogFolderPath();
+    public string ExcelExportFilePath => Path.Combine(DataFolderPath, "DeskPulse-export.xlsx");
 
-            if (string.IsNullOrWhiteSpace(fileNameWithoutExtension))
-                fileNameWithoutExtension = Path.GetFileNameWithoutExtension(DefaultLogFileName);
-
-            if (string.IsNullOrWhiteSpace(extension))
-                extension = ".csv";
-
-            Directory.CreateDirectory(folder);
-
-            return Path.Combine(folder, fileNameWithoutExtension + "-view" + extension);
-        }
-    }
-
-    public string ExtensionsAsText
-    {
-        get
-        {
-            return string.Join(", ", ExtensionsToMonitor.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-        }
-    }
+    public string ExtensionsAsText =>
+        string.Join(", ", ExtensionsToMonitor.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
 
     public AppSettings Clone()
     {
         return new AppSettings
         {
-            LogFilePath = LogFilePath,
+            DataFolderPath = DataFolderPath,
+            IgnoreTempFolders = IgnoreTempFolders,
             ExtensionsToMonitor = new HashSet<string>(ExtensionsToMonitor, StringComparer.OrdinalIgnoreCase)
         };
     }
@@ -1227,7 +1404,27 @@ public sealed class AppSettings
             return settings;
         }
 
-        settings.LogFilePath = ReadString(key, "LogFilePath", settings.LogFilePath);
+        settings.DataFolderPath = ReadString(key, "DataFolderPath", "");
+
+        if (string.IsNullOrWhiteSpace(settings.DataFolderPath))
+        {
+            var oldLogFilePath = ReadString(key, "LogFilePath", "");
+
+            if (!string.IsNullOrWhiteSpace(oldLogFilePath))
+            {
+                var oldFolder = Path.GetDirectoryName(oldLogFilePath);
+
+                settings.DataFolderPath = string.IsNullOrWhiteSpace(oldFolder)
+                    ? GetDefaultDataFolderPath()
+                    : oldFolder;
+            }
+            else
+            {
+                settings.DataFolderPath = GetDefaultDataFolderPath();
+            }
+        }
+
+        settings.IgnoreTempFolders = ReadBool(key, "IgnoreTempFolders", true);
 
         var extensionsText = ReadString(key, "ExtensionsToMonitor", settings.ExtensionsAsText);
         settings.ExtensionsToMonitor = ParseExtensions(extensionsText);
@@ -1259,43 +1456,12 @@ public sealed class AppSettings
         if (key == null)
             return;
 
-        var logFolder = Path.GetDirectoryName(LogFilePath);
-
-        if (!string.IsNullOrWhiteSpace(logFolder))
-        {
-            Directory.CreateDirectory(logFolder);
-        }
-
-        key.SetValue("AppVersion", AppInfo.AppVersion, RegistryValueKind.String);
-        key.SetValue("LogFilePath", LogFilePath, RegistryValueKind.String);
+        key.SetValue("AppVersion", AppInfo.Version, RegistryValueKind.String);
+        key.SetValue("DataFolderPath", DataFolderPath, RegistryValueKind.String);
+        key.SetValue("DatabaseFilePath", DatabaseFilePath, RegistryValueKind.String);
+        key.SetValue("ExcelExportFilePath", ExcelExportFilePath, RegistryValueKind.String);
         key.SetValue("ExtensionsToMonitor", ExtensionsAsText, RegistryValueKind.String);
-    }
-
-    public static string GetDefaultLogFolderPath()
-    {
-        var userProfile = Environment.GetEnvironmentVariable("USERPROFILE");
-
-        if (string.IsNullOrWhiteSpace(userProfile))
-        {
-            userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        }
-
-        if (string.IsNullOrWhiteSpace(userProfile))
-        {
-            userProfile = AppDomain.CurrentDomain.BaseDirectory;
-        }
-
-        var documentsFolder = Path.Combine(userProfile, "Documents");
-        var deskPulseFolder = Path.Combine(documentsFolder, "DeskPulse");
-
-        Directory.CreateDirectory(deskPulseFolder);
-
-        return deskPulseFolder;
-    }
-
-    public static string GetDefaultLogFilePath()
-    {
-        return Path.Combine(GetDefaultLogFolderPath(), DefaultLogFileName);
+        key.SetValue("IgnoreTempFolders", IgnoreTempFolders ? 1 : 0, RegistryValueKind.DWord);
     }
 
     public static HashSet<string> ParseExtensions(string text)
@@ -1312,261 +1478,296 @@ public sealed class AppSettings
 
         foreach (var part in parts)
         {
-            var extension = part.StartsWith(".")
+            var extension = part.StartsWith(".", StringComparison.Ordinal)
                 ? part
                 : "." + part;
 
-            result.Add(extension);
+            result.Add(extension.ToLowerInvariant());
         }
 
         return result;
     }
 
-    private static string ReadString(RegistryKey key, string name, string defaultValue)
+    public static string GetDefaultDataFolderPath()
     {
-        var value = key.GetValue(name);
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "DeskPulse"
+        );
+    }
 
-        if (value == null)
-            return defaultValue;
+    private static string ReadString(RegistryKey key, string name, string fallback)
+    {
+        try
+        {
+            return key.GetValue(name)?.ToString() ?? fallback;
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
 
-        var text = value.ToString();
+    private static bool ReadBool(RegistryKey key, string name, bool fallback)
+    {
+        try
+        {
+            var value = key.GetValue(name);
 
-        if (string.IsNullOrWhiteSpace(text))
-            return defaultValue;
+            if (value == null)
+                return fallback;
 
-        return text;
+            if (value is int intValue)
+                return intValue != 0;
+
+            if (value is string stringValue)
+            {
+                if (bool.TryParse(stringValue, out var boolValue))
+                    return boolValue;
+
+                if (int.TryParse(stringValue, out var parsedInt))
+                    return parsedInt != 0;
+            }
+
+            return fallback;
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 }
 
 public sealed class SettingsForm : Form
 {
-    private readonly ListBox _registeredFileTypesListBox;
-    private readonly ListBox _monitoredExtensionsListBox;
-    private readonly TextBox _logFilePathTextBox;
-
-    private List<RegisteredFileTypeInfo> _registeredFileTypes = new();
+    private readonly TextBox _dataFolderTextBox = new();
+    private readonly ListBox _availableExtensionsListBox = new();
+    private readonly ListBox _monitoredExtensionsListBox = new();
+    private readonly CheckBox _ignoreTempFoldersCheckBox = new();
 
     public SettingsForm()
     {
+        Text = "DeskPulse Settings";
+        Width = 860;
+        Height = 560;
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimizeBox = false;
+        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+
         var settings = AppSettings.Load();
 
-        Text = $"{AppInfo.AppName} - Settings";
-        Width = 900;
-        Height = 520;
-        StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
-
-        var versionLabel = new Label
+        var tabControl = new TabControl
         {
-            Text = $"Version: {AppInfo.AppVersion}",
-            Left = 20,
-            Top = 20,
+            Left = 12,
+            Top = 12,
             Width = 820,
-            Height = 20
+            Height = 450
         };
 
-        var registeredFileTypesLabel = new Label
+        var filesTab = new TabPage
         {
-            Text = "Registered file types:",
-            Left = 20,
-            Top = 58,
-            Width = 240
+            Text = "Files"
         };
 
-        var monitoredExtensionsLabel = new Label
+        tabControl.TabPages.Add(filesTab);
+
+        BuildFilesTab(filesTab, settings);
+
+        var okButton = new Button
         {
-            Text = "Monitored file types:",
-            Left = 540,
-            Top = 58,
-            Width = 240
-        };
-
-        _registeredFileTypesListBox = new ListBox
-        {
-            Left = 20,
-            Top = 82,
-            Width = 340,
-            Height = 250,
-            SelectionMode = SelectionMode.MultiExtended,
-            AllowDrop = true
-        };
-
-        _monitoredExtensionsListBox = new ListBox
-        {
-            Left = 540,
-            Top = 82,
-            Width = 320,
-            Height = 250,
-            SelectionMode = SelectionMode.MultiExtended,
-            AllowDrop = true
-        };
-
-        _registeredFileTypesListBox.DoubleClick += (_, _) => AddSelectedRegisteredFileTypes();
-        _monitoredExtensionsListBox.DoubleClick += (_, _) => RemoveSelectedMonitoredExtensions();
-
-        _registeredFileTypesListBox.MouseDown += ListBoxMouseDown;
-        _monitoredExtensionsListBox.MouseDown += ListBoxMouseDown;
-
-        _registeredFileTypesListBox.DragEnter += ListBoxDragEnter;
-        _monitoredExtensionsListBox.DragEnter += ListBoxDragEnter;
-
-        _registeredFileTypesListBox.DragDrop += (_, e) => RemoveDraggedExtension(e);
-        _monitoredExtensionsListBox.DragDrop += (_, e) => AddDraggedExtension(e);
-
-        var addButton = new Button
-        {
-            Text = "Add →",
-            Left = 390,
-            Top = 152,
-            Width = 120
-        };
-
-        addButton.Click += (_, _) => AddSelectedRegisteredFileTypes();
-
-        var removeButton = new Button
-        {
-            Text = "← Remove",
-            Left = 390,
-            Top = 192,
-            Width = 120
-        };
-
-        removeButton.Click += (_, _) => RemoveSelectedMonitoredExtensions();
-
-        var refreshButton = new Button
-        {
-            Text = "Refresh list",
-            Left = 390,
-            Top = 232,
-            Width = 120
-        };
-
-        refreshButton.Click += (_, _) => LoadRegisteredFileTypes();
-
-        var logFilePathLabel = new Label
-        {
-            Text = "Log file path:",
-            Left = 20,
-            Top = 370,
-            Width = 170
-        };
-
-        _logFilePathTextBox = new TextBox
-        {
-            Left = 200,
-            Top = 366,
-            Width = 560,
-            Text = settings.LogFilePath
-        };
-
-        var browseLogFileButton = new Button
-        {
-            Text = "Browse...",
-            Left = 770,
-            Top = 364,
-            Width = 90
-        };
-
-        browseLogFileButton.Click += (_, _) => BrowseForLogFile();
-
-        var saveButton = new Button
-        {
-            Text = "Save",
-            Left = 680,
-            Top = 430,
+            Text = "OK",
+            Left = 650,
+            Top = 475,
             Width = 80,
             DialogResult = DialogResult.OK
         };
 
-        saveButton.Click += (_, _) => SaveSettings();
+        okButton.Click += (_, _) => SaveSettings();
 
         var cancelButton = new Button
         {
             Text = "Cancel",
-            Left = 780,
-            Top = 430,
+            Left = 744,
+            Top = 475,
             Width = 80,
             DialogResult = DialogResult.Cancel
         };
 
-        Controls.Add(versionLabel);
-        Controls.Add(registeredFileTypesLabel);
-        Controls.Add(monitoredExtensionsLabel);
-        Controls.Add(_registeredFileTypesListBox);
-        Controls.Add(_monitoredExtensionsListBox);
-        Controls.Add(addButton);
-        Controls.Add(removeButton);
-        Controls.Add(refreshButton);
-        Controls.Add(logFilePathLabel);
-        Controls.Add(_logFilePathTextBox);
-        Controls.Add(browseLogFileButton);
-        Controls.Add(saveButton);
-        Controls.Add(cancelButton);
+        Controls.AddRange(new Control[]
+        {
+            tabControl,
+            okButton,
+            cancelButton
+        });
 
-        AcceptButton = saveButton;
+        AcceptButton = okButton;
         CancelButton = cancelButton;
 
-        LoadRegisteredFileTypes();
-        LoadMonitoredExtensions(settings.ExtensionsToMonitor);
+        LoadExtensionLists(settings);
     }
 
-    private void LoadRegisteredFileTypes()
+    private void BuildFilesTab(TabPage filesTab, AppSettings settings)
     {
-        Cursor = Cursors.WaitCursor;
-
-        try
+        var dataFolderLabel = new Label
         {
-            _registeredFileTypes = RegisteredFileTypeReader.GetRegisteredFileTypes();
+            Text = "Data folder:",
+            Left = 16,
+            Top = 20,
+            Width = 100
+        };
 
-            _registeredFileTypesListBox.BeginUpdate();
-            _registeredFileTypesListBox.Items.Clear();
+        _dataFolderTextBox.Left = 120;
+        _dataFolderTextBox.Top = 16;
+        _dataFolderTextBox.Width = 560;
+        _dataFolderTextBox.Text = settings.DataFolderPath;
 
-            foreach (var fileType in _registeredFileTypes)
-            {
-                _registeredFileTypesListBox.Items.Add(fileType);
-            }
-        }
-        finally
+        var browseButton = new Button
         {
-            _registeredFileTypesListBox.EndUpdate();
-            Cursor = Cursors.Default;
-        }
+            Text = "Browse...",
+            Left = 690,
+            Top = 14,
+            Width = 95
+        };
+
+        browseButton.Click += (_, _) => BrowseForDataFolder();
+
+        var databaseLabel = new Label
+        {
+            Text = "Database: DeskPulse.db   |   Excel export: DeskPulse-export.xlsx",
+            Left = 120,
+            Top = 45,
+            Width = 620,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        _ignoreTempFoldersCheckBox.Left = 120;
+        _ignoreTempFoldersCheckBox.Top = 72;
+        _ignoreTempFoldersCheckBox.Width = 520;
+        _ignoreTempFoldersCheckBox.Text = "Ignore temporary-folder activity";
+        _ignoreTempFoldersCheckBox.Checked = settings.IgnoreTempFolders;
+
+        var tempHintLabel = new Label
+        {
+            Text = "Recommended: keep this enabled. Turn it off only if you deliberately want to log file activity inside Windows temp folders.",
+            Left = 145,
+            Top = 96,
+            Width = 620,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var availableLabel = new Label
+        {
+            Text = "Registered Windows file types:",
+            Left = 16,
+            Top = 130,
+            Width = 300
+        };
+
+        _availableExtensionsListBox.Left = 16;
+        _availableExtensionsListBox.Top = 152;
+        _availableExtensionsListBox.Width = 350;
+        _availableExtensionsListBox.Height = 250;
+        _availableExtensionsListBox.DisplayMember = nameof(RegisteredFileTypeInfo.DisplayName);
+        _availableExtensionsListBox.SelectionMode = SelectionMode.One;
+        _availableExtensionsListBox.MouseDown += ListBoxMouseDown;
+        _availableExtensionsListBox.AllowDrop = true;
+        _availableExtensionsListBox.DragEnter += ListBoxDragEnter;
+        _availableExtensionsListBox.DragDrop += (_, e) => RemoveDraggedExtension(e);
+
+        var monitoredLabel = new Label
+        {
+            Text = "Monitored file types:",
+            Left = 435,
+            Top = 130,
+            Width = 300
+        };
+
+        _monitoredExtensionsListBox.Left = 435;
+        _monitoredExtensionsListBox.Top = 152;
+        _monitoredExtensionsListBox.Width = 350;
+        _monitoredExtensionsListBox.Height = 250;
+        _monitoredExtensionsListBox.SelectionMode = SelectionMode.One;
+        _monitoredExtensionsListBox.MouseDown += ListBoxMouseDown;
+        _monitoredExtensionsListBox.AllowDrop = true;
+        _monitoredExtensionsListBox.DragEnter += ListBoxDragEnter;
+        _monitoredExtensionsListBox.DragDrop += (_, e) => AddDraggedExtension(e);
+
+        var addButton = new Button
+        {
+            Text = "Add >",
+            Left = 372,
+            Top = 210,
+            Width = 56
+        };
+
+        addButton.Click += (_, _) => AddSelectedExtension();
+
+        var removeButton = new Button
+        {
+            Text = "< Remove",
+            Left = 372,
+            Top = 250,
+            Width = 56
+        };
+
+        removeButton.Click += (_, _) => RemoveSelectedExtension();
+
+        filesTab.Controls.AddRange(new Control[]
+        {
+            dataFolderLabel,
+            _dataFolderTextBox,
+            browseButton,
+            databaseLabel,
+            _ignoreTempFoldersCheckBox,
+            tempHintLabel,
+            availableLabel,
+            _availableExtensionsListBox,
+            addButton,
+            removeButton,
+            monitoredLabel,
+            _monitoredExtensionsListBox
+        });
     }
 
-    private void LoadMonitoredExtensions(HashSet<string> monitoredExtensions)
+    private void LoadExtensionLists(AppSettings settings)
     {
-        _monitoredExtensionsListBox.BeginUpdate();
-        _monitoredExtensionsListBox.Items.Clear();
+        var registered = RegisteredFileTypeReader.ReadRegisteredFileTypes();
 
-        foreach (var extension in monitoredExtensions.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-        {
+        foreach (var item in registered)
+            _availableExtensionsListBox.Items.Add(item);
+
+        foreach (var extension in settings.ExtensionsToMonitor.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             _monitoredExtensionsListBox.Items.Add(extension);
-        }
-
-        _monitoredExtensionsListBox.EndUpdate();
     }
 
-    private void AddSelectedRegisteredFileTypes()
+    private void BrowseForDataFolder()
     {
-        foreach (var selectedItem in _registeredFileTypesListBox.SelectedItems)
+        using var dialog = new FolderBrowserDialog
         {
-            if (selectedItem is RegisteredFileTypeInfo fileType)
-            {
-                AddExtensionToMonitoredList(fileType.Extension);
-            }
-        }
+            Description = "Choose the DeskPulse data folder",
+            SelectedPath = Directory.Exists(_dataFolderTextBox.Text.Trim())
+                ? _dataFolderTextBox.Text.Trim()
+                : AppSettings.GetDefaultDataFolderPath(),
+            ShowNewFolderButton = true
+        };
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+            _dataFolderTextBox.Text = dialog.SelectedPath;
     }
 
-    private void RemoveSelectedMonitoredExtensions()
+    private void AddSelectedExtension()
     {
-        var itemsToRemove = _monitoredExtensionsListBox.SelectedItems.Cast<object>().ToList();
+        if (_availableExtensionsListBox.SelectedItem is RegisteredFileTypeInfo info)
+            AddExtensionToMonitoredList(info.Extension);
+    }
 
-        foreach (var item in itemsToRemove)
-        {
-            _monitoredExtensionsListBox.Items.Remove(item);
-        }
+    private void RemoveSelectedExtension()
+    {
+        var selected = _monitoredExtensionsListBox.SelectedItem;
+
+        if (selected != null)
+            _monitoredExtensionsListBox.Items.Remove(selected);
     }
 
     private void AddExtensionToMonitoredList(string extension)
@@ -1574,10 +1775,10 @@ public sealed class SettingsForm : Form
         if (string.IsNullOrWhiteSpace(extension))
             return;
 
-        extension = extension.Trim();
-
         if (!extension.StartsWith(".", StringComparison.Ordinal))
             extension = "." + extension;
+
+        extension = extension.ToLowerInvariant();
 
         foreach (var item in _monitoredExtensionsListBox.Items)
         {
@@ -1586,6 +1787,28 @@ public sealed class SettingsForm : Form
         }
 
         _monitoredExtensionsListBox.Items.Add(extension);
+    }
+
+    private HashSet<string> GetMonitoredExtensionsFromList()
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in _monitoredExtensionsListBox.Items)
+        {
+            var text = item.ToString();
+
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
+
+            var extension = text.Trim();
+
+            if (!extension.StartsWith(".", StringComparison.Ordinal))
+                extension = "." + extension;
+
+            result.Add(extension.ToLowerInvariant());
+        }
+
+        return result;
     }
 
     private void ListBoxMouseDown(object? sender, MouseEventArgs e)
@@ -1608,13 +1831,7 @@ public sealed class SettingsForm : Form
 
     private void ListBoxDragEnter(object? sender, DragEventArgs e)
     {
-        if (e.Data != null && e.Data.GetDataPresent(typeof(RegisteredFileTypeInfo)))
-        {
-            e.Effect = DragDropEffects.Move;
-            return;
-        }
-
-        if (e.Data != null && e.Data.GetDataPresent(typeof(string)))
+        if (e.Data != null && (e.Data.GetDataPresent(typeof(RegisteredFileTypeInfo)) || e.Data.GetDataPresent(typeof(string))))
         {
             e.Effect = DragDropEffects.Move;
             return;
@@ -1628,97 +1845,39 @@ public sealed class SettingsForm : Form
         if (e.Data == null)
             return;
 
-        if (e.Data.GetData(typeof(RegisteredFileTypeInfo)) is RegisteredFileTypeInfo fileType)
+        if (e.Data.GetData(typeof(RegisteredFileTypeInfo)) is RegisteredFileTypeInfo info)
         {
-            AddExtensionToMonitoredList(fileType.Extension);
+            AddExtensionToMonitoredList(info.Extension);
             return;
         }
 
         if (e.Data.GetData(typeof(string)) is string text)
-        {
             AddExtensionToMonitoredList(text);
-        }
     }
 
     private void RemoveDraggedExtension(DragEventArgs e)
     {
-        if (e.Data == null)
+        if (e.Data?.GetData(typeof(string)) is not string text)
             return;
 
-        if (e.Data.GetData(typeof(string)) is string text)
+        foreach (var item in _monitoredExtensionsListBox.Items.Cast<object>().ToList())
         {
-            foreach (var item in _monitoredExtensionsListBox.Items.Cast<object>().ToList())
+            if (string.Equals(item.ToString(), text, StringComparison.OrdinalIgnoreCase))
             {
-                if (string.Equals(item.ToString(), text, StringComparison.OrdinalIgnoreCase))
-                {
-                    _monitoredExtensionsListBox.Items.Remove(item);
-                    return;
-                }
+                _monitoredExtensionsListBox.Items.Remove(item);
+                return;
             }
-        }
-    }
-
-    private void BrowseForLogFile()
-    {
-        var currentPath = _logFilePathTextBox.Text.Trim();
-
-        var initialDirectory = Path.GetDirectoryName(currentPath);
-
-        if (string.IsNullOrWhiteSpace(initialDirectory) || !Directory.Exists(initialDirectory))
-        {
-            initialDirectory = AppSettings.GetDefaultLogFolderPath();
-        }
-
-        if (string.IsNullOrWhiteSpace(initialDirectory) || !Directory.Exists(initialDirectory))
-        {
-            initialDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        }
-
-        var currentFileName = Path.GetFileName(currentPath);
-
-        if (string.IsNullOrWhiteSpace(currentFileName))
-        {
-            currentFileName = "DeskPulse-log.csv";
-        }
-
-        using var dialog = new SaveFileDialog
-        {
-            Title = "Choose log CSV file",
-            Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
-            InitialDirectory = initialDirectory,
-            FileName = currentFileName,
-            OverwritePrompt = false
-        };
-
-        if (dialog.ShowDialog() == DialogResult.OK)
-        {
-            _logFilePathTextBox.Text = dialog.FileName;
         }
     }
 
     private void SaveSettings()
     {
-        var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dataFolder = _dataFolderTextBox.Text.Trim();
 
-        foreach (var item in _monitoredExtensionsListBox.Items)
-        {
-            var value = item.ToString();
-
-            if (string.IsNullOrWhiteSpace(value))
-                continue;
-
-            value = value.Trim();
-
-            if (!value.StartsWith(".", StringComparison.Ordinal))
-                value = "." + value;
-
-            extensions.Add(value);
-        }
-
-        if (extensions.Count == 0)
+        if (string.IsNullOrWhiteSpace(dataFolder))
         {
             MessageBox.Show(
-                "Please select at least one monitored file type.",
+                "Please enter a data folder.",
                 "Settings",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning
@@ -1728,40 +1887,10 @@ public sealed class SettingsForm : Form
             return;
         }
 
-        var logFilePath = _logFilePathTextBox.Text.Trim();
-
-        if (string.IsNullOrWhiteSpace(logFilePath))
+        if (!Path.IsPathFullyQualified(dataFolder))
         {
             MessageBox.Show(
-                $"Please enter a log file path.\n\nDefault path:\n{AppSettings.GetDefaultLogFilePath()}",
-                "Settings",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning
-            );
-
-            DialogResult = DialogResult.None;
-            return;
-        }
-
-        if (!Path.IsPathFullyQualified(logFilePath))
-        {
-            MessageBox.Show(
-                $"Please enter a full log file path, for example:\n\n{AppSettings.GetDefaultLogFilePath()}",
-                "Settings",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning
-            );
-
-            DialogResult = DialogResult.None;
-            return;
-        }
-
-        var logFolder = Path.GetDirectoryName(logFilePath);
-
-        if (string.IsNullOrWhiteSpace(logFolder))
-        {
-            MessageBox.Show(
-                $"The log file path must include a folder and filename.\n\nDefault path:\n{AppSettings.GetDefaultLogFilePath()}",
+                "Please enter a full data folder path, for example:\n\nC:\\Users\\YourName\\Documents\\DeskPulse",
                 "Settings",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning
@@ -1773,12 +1902,12 @@ public sealed class SettingsForm : Form
 
         try
         {
-            Directory.CreateDirectory(logFolder);
+            Directory.CreateDirectory(dataFolder);
         }
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"The log folder could not be created or accessed.\n\nFolder:\n{logFolder}\n\nError:\n{ex.Message}",
+                $"The data folder could not be created or accessed.\n\n{ex.Message}",
                 "Settings",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
@@ -1788,19 +1917,177 @@ public sealed class SettingsForm : Form
             return;
         }
 
-        var extension = Path.GetExtension(logFilePath);
+        var extensions = GetMonitoredExtensionsFromList();
 
-        if (string.IsNullOrWhiteSpace(extension))
+        if (extensions.Count == 0)
         {
-            logFilePath += ".csv";
+            MessageBox.Show(
+                "Please add at least one monitored file extension.",
+                "Settings",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+
+            DialogResult = DialogResult.None;
+            return;
         }
 
         var settings = new AppSettings
         {
-            LogFilePath = logFilePath,
+            DataFolderPath = dataFolder,
+            IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             ExtensionsToMonitor = extensions
         };
 
         settings.Save();
+    }
+}
+
+public sealed class RegisteredFileTypeInfo
+{
+    public string Extension { get; set; } = "";
+    public string Description { get; set; } = "";
+
+    public string DisplayName
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Description))
+                return Extension;
+
+            return $"{Extension} - {Description}";
+        }
+    }
+
+    public override string ToString()
+    {
+        return Extension;
+    }
+}
+
+public static class RegisteredFileTypeReader
+{
+    public static List<RegisteredFileTypeInfo> ReadRegisteredFileTypes()
+    {
+        var result = new List<RegisteredFileTypeInfo>();
+
+        try
+        {
+            foreach (var subKeyName in Registry.ClassesRoot.GetSubKeyNames())
+            {
+                if (!subKeyName.StartsWith(".", StringComparison.Ordinal))
+                    continue;
+
+                if (subKeyName.Length < 2)
+                    continue;
+
+                var description = "";
+
+                try
+                {
+                    using var extensionKey = Registry.ClassesRoot.OpenSubKey(subKeyName);
+                    var className = extensionKey?.GetValue(null)?.ToString() ?? "";
+
+                    if (!string.IsNullOrWhiteSpace(className))
+                    {
+                        using var classKey = Registry.ClassesRoot.OpenSubKey(className);
+                        description = classKey?.GetValue(null)?.ToString() ?? "";
+                    }
+                }
+                catch
+                {
+                    description = "";
+                }
+
+                result.Add(new RegisteredFileTypeInfo
+                {
+                    Extension = subKeyName.ToLowerInvariant(),
+                    Description = description
+                });
+            }
+        }
+        catch
+        {
+            // Return whatever could be read.
+        }
+
+        return result
+            .GroupBy(x => x.Extension, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .OrderBy(x => x.Extension, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+}
+
+public sealed class AboutForm : Form
+{
+    public AboutForm()
+    {
+        Text = "About DeskPulse";
+        Width = 430;
+        Height = 210;
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimizeBox = false;
+        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+
+        var title = new Label
+        {
+            Text = $"{AppInfo.AppName} {AppInfo.Version}",
+            Left = 20,
+            Top = 20,
+            Width = 360,
+            Font = new System.Drawing.Font(Font.FontFamily, 12, System.Drawing.FontStyle.Bold)
+        };
+
+        var description = new Label
+        {
+            Text = "Windows tray activity monitor using ETW file I/O tracing, SQLite storage, and XLSX export.",
+            Left = 20,
+            Top = 55,
+            Width = 370,
+            Height = 40
+        };
+
+        var link = new LinkLabel
+        {
+            Text = AppInfo.GitHubUrl,
+            Left = 20,
+            Top = 102,
+            Width = 370
+        };
+
+        link.Links.Add(0, AppInfo.GitHubUrl.Length, AppInfo.GitHubUrl);
+
+        link.LinkClicked += (_, e) =>
+        {
+            if (e.Link?.LinkData is string url)
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+        };
+
+        var okButton = new Button
+        {
+            Text = "OK",
+            Left = 310,
+            Top = 130,
+            Width = 80,
+            DialogResult = DialogResult.OK
+        };
+
+        Controls.AddRange(new Control[]
+        {
+            title,
+            description,
+            link,
+            okButton
+        });
+
+        AcceptButton = okButton;
     }
 }
