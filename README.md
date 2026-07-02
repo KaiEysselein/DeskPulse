@@ -2,34 +2,40 @@
 
 DeskPulse is a Windows tray application built with C# / .NET 8 WinForms.
 
-It monitors selected file activity through Windows ETW file I/O tracing and logs the results to a CSV file that can be opened in Excel.
+It monitors selected file activity through Windows ETW file I/O tracing and stores the results in a local SQLite database. Excel is used as an export/viewing format only, not as the live log file.
 
 ## Version
 
-Current version: `0.0.1`
+Current version: `0.0.2`
 
 ## Current Features
 
 - Windows system tray application
 - File open/write/close activity monitoring
-- Settings window with registered Windows file types
+- ETW-based Windows file I/O tracing
+- SQLite live storage using `DeskPulse.db`
+- XLSX export for Excel viewing/reporting
+- Exported worksheet name: `File Activity`
+- Settings window with tabs
+- `Files` settings tab
+- Registered Windows file type list
 - Two-list file type selector for monitored extensions
-- CSV logging
-- Excel-safe log viewing through a copied `-view.csv` file
-- Temporary folder file activity exclusion
-- Default log folder: `%USERPROFILE%\Documents\DeskPulse\`
-- Default log file: `DeskPulse-log.csv`
+- Right-hand monitored file type list used as the source of truth
+- Temporary-folder file activity exclusion
+- Registry-backed option to switch temporary-folder exclusion on/off
+- Hardcoded exclusion for file activity created by DeskPulse itself
+- DeskPulse database/export files excluded from monitoring to avoid recursive logging
+- Path export split into:
+  - `Full Path`
+  - `Folder Path`
+  - `File Name`
+  - `Extension`
+- Network paths reported through `LanmanRedirector` are normalized where possible into mapped-drive style paths
+- Startup/error fallback diagnostics written to `%TEMP%\DeskPulse-startup.log`
 
-## Requirements
+## Default Data Location
 
-- Windows 11
-- .NET 8 SDK
-- Administrator rights when running
+Default data folder:
 
-DeskPulse currently requires Administrator privileges because Windows kernel ETW file I/O tracing requires elevation.
-
-## Build
-
-```powershell
-dotnet clean
-dotnet build
+```text
+%USERPROFILE%\Documents\DeskPulse\
