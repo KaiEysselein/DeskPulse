@@ -1,3 +1,9 @@
+
+---
+
+## `CHANGELOG.md`
+
+```markdown
 # Changelog
 
 All notable changes to DeskPulse will be documented in this file.
@@ -7,12 +13,14 @@ The format is loosely based on Keep a Changelog, and this project currently foll
 ## [0.0.2] - 2026-07-02
 
 ### Summary
+
 Version 0.0.2 implements the SQLite storage solution and changes Excel from a live log file into an export/reporting format.
 
 ### Changed
+
 - Replaced CSV-based live logging with SQLite database storage.
 - Changed the primary live storage file to `DeskPulse.db`.
-- Changed the previous "Open log file in Excel" workflow so that Excel opens an exported workbook instead of the live storage file.
+- Changed the previous `Open log file in Excel` workflow so that Excel opens an exported workbook instead of the live storage file.
 - Changed the default storage concept from a direct log file path to a DeskPulse data folder.
 - Changed the Excel export to use an `.xlsx` workbook instead of a CSV snapshot.
 - Kept the exported worksheet name as `File Activity`.
@@ -30,6 +38,7 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 - Updated the About text to describe SQLite storage and XLSX export.
 
 ### Added
+
 - Added SQLite database initialization on startup.
 - Added `ActivityEvents` database table for file activity and error records.
 - Added database migration logic for new columns required by v0.0.2.
@@ -46,6 +55,7 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
   - `ClosedXML`
 
 ### Fixed
+
 - Fixed the XLSX export temporary-file issue by ensuring temporary workbook files still use the `.xlsx` extension.
 - Fixed the nullable warning in the About window GitHub link handler.
 - Prevented DeskPulse-created/opened/closed files from being logged.
@@ -53,15 +63,18 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 - Improved exported file path readability for network files reported through `LanmanRedirector`.
 
 ### Notes
+
 - SQLite is now the live data store.
 - Excel is used only as an export/view/report format.
 - CSV is no longer the primary live logging format.
 - The app still requires Administrator rights because ETW kernel file I/O tracing requires elevation.
 - Deployment packaging is still to be treated carefully; v0.0.2 can be considered a working source/build baseline before formal installer packaging.
+- Development of this version used AI-assisted coding support, with final decisions, testing, and release responsibility remaining with the maintainer.
 
 ## [0.0.1] - 2026-07-02
 
 ### Initial baseline
+
 - Created the first DeskPulse source baseline.
 - Implemented DeskPulse as a Windows tray application written in C# / .NET 8 WinForms.
 - Implemented ETW-based file I/O tracing using `Microsoft.Diagnostics.Tracing.TraceEvent`.
@@ -96,6 +109,7 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
   - `%USERPROFILE%\Documents\DeskPulse\DeskPulse-log-view.csv`
 
 ### Project files
+
 - Added/confirmed the main source file:
   - `Program.cs`
 - Added/confirmed the project file:
@@ -112,6 +126,7 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
   - SPDX: `GPL-3.0-or-later`
 
 ### Known limitations
+
 - Program start/stop monitoring was removed from the current baseline.
 - Run-at-startup code was removed from the app.
 - Windows autostart should be handled externally for now, preferably through Windows Task Scheduler.
@@ -122,6 +137,7 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 - The source/build-folder version was the known working baseline.
 
 ### Deployment notes
+
 - The build-folder executable could work when run from its build folder because adjacent dependency files were available.
 - Copying only the build-folder EXE elsewhere was not considered valid.
 - Proper publish-folder, portable ZIP, single-file EXE, or installer deployment still needed to be stabilized.
