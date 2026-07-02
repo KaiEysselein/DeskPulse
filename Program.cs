@@ -18,8 +18,10 @@ namespace DeskPulse;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        AppRuntime.Configure(args);
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -32,8 +34,120 @@ internal static class Program
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.0.2";
+    public const string Version = "0.0.3";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
+}
+
+public static class AppRuntime
+{
+    public static bool DebugLoggingEnabled { get; private set; }
+    public static bool DebugSkippedLoggingEnabled { get; private set; }
+
+    public static void Configure(string[] args)
+    {
+        DebugLoggingEnabled = args.Any(arg =>
+            string.Equals(arg, "-debug", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "--debug", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "/debug", StringComparison.OrdinalIgnoreCase));
+
+        DebugSkippedLoggingEnabled = args.Any(arg =>
+            string.Equals(arg, "-debug-skipped", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "--debug-skipped", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "/debug-skipped", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+public static class DiagnosticLogger
+{
+    private static readonly object LogLock = new();
+
+    public static string GetDiagnosticLogFilePath()
+    {
+        return Path.Combine(AppSettings.GetDefaultDataFolderPath(), "DeskPulse-diagnostics.log");
+    }
+
+    public static void WriteStartupEntry(AppSettings settings)
+    {
+        if (!AppRuntime.DebugLoggingEnabled)
+            return;
+
+        WriteLine("START",
+            "DeskPulse diagnostic logging enabled. " +
+            "Normal debug mode logs accepted monitored events and errors only. " +
+            "Use -debug-skipped as an additional switch only when full skip-reason tracing is required.",
+            settings);
+    }
+
+    public static void WriteFileDecision(
+        string decision,
+        string reason,
+        string operation,
+        string rawPath,
+        string normalizedPath,
+        string fullPath,
+        string detectedExtension,
+        string processName,
+        int processId,
+        AppSettings settings)
+    {
+        if (!AppRuntime.DebugLoggingEnabled)
+            return;
+
+        if (string.Equals(decision, "SKIP", StringComparison.OrdinalIgnoreCase) && !AppRuntime.DebugSkippedLoggingEnabled)
+            return;
+
+        var message =
+            $"Decision={decision}; Reason={reason}; Operation={operation}; Process={processName}; ProcessId={processId}; " +
+            $"DetectedExtension={detectedExtension}; RawPath={rawPath}; NormalizedPath={normalizedPath}; FullPath={fullPath}";
+
+        WriteLine("FILE", message, settings);
+    }
+
+    public static void WriteException(string context, Exception ex)
+    {
+        if (!AppRuntime.DebugLoggingEnabled)
+            return;
+
+        try
+        {
+            var settings = AppSettings.Load();
+            WriteLine("ERROR", context + Environment.NewLine + ex, settings);
+        }
+        catch
+        {
+            // Diagnostic logging must never crash DeskPulse.
+        }
+    }
+
+    private static void WriteLine(string category, string message, AppSettings settings)
+    {
+        try
+        {
+            var logFilePath = Path.Combine(settings.DataFolderPath, "DeskPulse-diagnostics.log");
+            Directory.CreateDirectory(settings.DataFolderPath);
+
+            var activeExtensions = string.Join(", ", settings.ExtensionsToMonitor.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+
+            var line =
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture) +
+                " | " + category +
+                " | Debug=True" +
+                " | DebugSkipped=" + AppRuntime.DebugSkippedLoggingEnabled +
+                " | IgnoreTempFolders=" + settings.IgnoreTempFolders +
+                " | ActiveExtensions=" + activeExtensions +
+                " | " + message +
+                Environment.NewLine;
+
+            lock (LogLock)
+            {
+                File.AppendAllText(logFilePath, line);
+            }
+        }
+        catch
+        {
+            // Diagnostic logging must never crash DeskPulse.
+        }
+    }
 }
 
 public sealed class TrayAppContext : ApplicationContext
@@ -64,7 +178,9 @@ public sealed class TrayAppContext : ApplicationContext
         try
         {
             _monitor.Start();
-            ShowBalloon("Activity monitoring started.");
+            ShowBalloon(AppRuntime.DebugLoggingEnabled
+                ? "Activity monitoring started. Diagnostic logging is enabled."
+                : "Activity monitoring started.");
         }
         catch (Exception ex)
         {
@@ -181,6 +297,8 @@ public sealed class FileIoMonitor : IDisposable
 
         _database = new DeskPulseDatabase(_settings.DatabaseFilePath);
         _database.Initialize();
+
+        DiagnosticLogger.WriteStartupEntry(_settings);
     }
 
     public void Start()
@@ -216,6 +334,8 @@ public sealed class FileIoMonitor : IDisposable
             }
 
             _database.Initialize();
+
+            DiagnosticLogger.WriteStartupEntry(_settings);
         }
     }
 
@@ -298,11 +418,14 @@ public sealed class FileIoMonitor : IDisposable
         var rawFileName = TryGetPayloadString(data, "FileName");
 
         if (string.IsNullOrWhiteSpace(rawFileName))
+        {
+            LogFileDecision("SKIP", "ETW FileName payload was empty", operation, rawFileName ?? "", "", "", "", processName, processId);
             return;
+        }
 
         var normalizedPath = PathUtilities.NormalizeEtwPath(rawFileName);
 
-        if (!ShouldMonitorFile(normalizedPath))
+        if (!ShouldMonitorFile(rawFileName, normalizedPath, operation, processName, processId))
             return;
 
         var fullPath = GetSafeFullPath(normalizedPath);
@@ -319,14 +442,31 @@ public sealed class FileIoMonitor : IDisposable
 
         if (operation == "OPEN")
         {
+            var sizeAtOpening = TryGetFileSize(fullPath);
+
             RegisterOpenFileEvent(
                 key,
                 new FileOpenInfo
                 {
                     OpenedTime = eventTime,
-                    SizeAtOpening = TryGetFileSize(fullPath)
+                    SizeAtOpening = sizeAtOpening
                 }
             );
+
+            WriteEvent(new ActivityEventRecord
+            {
+                ActivityType = "File",
+                FullPath = fullPath,
+                FolderPath = folderPath,
+                FileName = fileNameOnly,
+                Extension = extension,
+                OpenedTime = eventTime,
+                SizeAtOpening = sizeAtOpening,
+                InferredAction = "Opened/read only",
+                ProcessName = processName,
+                ProcessId = processId,
+                Note = "Open event logged immediately; close events may not contain a usable filename on all systems"
+            });
 
             return;
         }
@@ -336,25 +476,24 @@ public sealed class FileIoMonitor : IDisposable
             var writeSize = TryGetFileSize(fullPath);
             var writeWasAttachedToOpenSession = RegisterFileWriteEvent(key, eventTime, writeSize);
 
-            if (!writeWasAttachedToOpenSession)
+            WriteEvent(new ActivityEventRecord
             {
-                WriteEvent(new ActivityEventRecord
-                {
-                    ActivityType = "File",
-                    FullPath = fullPath,
-                    FolderPath = folderPath,
-                    FileName = fileNameOnly,
-                    Extension = extension,
-                    FirstWriteTime = eventTime,
-                    LastWriteTime = eventTime,
-                    WriteCount = 1,
-                    SizeAtLastWrite = writeSize,
-                    InferredAction = "Save/write detected",
-                    ProcessName = processName,
-                    ProcessId = processId,
-                    Note = "Write event seen, but matching open event was not found"
-                });
-            }
+                ActivityType = "File",
+                FullPath = fullPath,
+                FolderPath = folderPath,
+                FileName = fileNameOnly,
+                Extension = extension,
+                FirstWriteTime = eventTime,
+                LastWriteTime = eventTime,
+                WriteCount = 1,
+                SizeAtLastWrite = writeSize,
+                InferredAction = "Save/write detected",
+                ProcessName = processName,
+                ProcessId = processId,
+                Note = writeWasAttachedToOpenSession
+                    ? "Write event logged immediately and matched to an open session"
+                    : "Write event logged immediately, but matching open event was not found"
+            });
 
             return;
         }
@@ -364,26 +503,6 @@ public sealed class FileIoMonitor : IDisposable
             var closingSize = TryGetFileSize(fullPath);
             var openInfo = TryConsumeOpenFileEvent(key);
 
-            if (openInfo == null)
-            {
-                WriteEvent(new ActivityEventRecord
-                {
-                    ActivityType = "File",
-                    FullPath = fullPath,
-                    FolderPath = folderPath,
-                    FileName = fileNameOnly,
-                    Extension = extension,
-                    ClosedTime = eventTime,
-                    SizeAtClosing = closingSize,
-                    InferredAction = "Unknown close action",
-                    ProcessName = processName,
-                    ProcessId = processId,
-                    Note = "Close event seen, but matching open event was not found"
-                });
-
-                return;
-            }
-
             WriteEvent(new ActivityEventRecord
             {
                 ActivityType = "File",
@@ -391,18 +510,22 @@ public sealed class FileIoMonitor : IDisposable
                 FolderPath = folderPath,
                 FileName = fileNameOnly,
                 Extension = extension,
-                OpenedTime = openInfo.OpenedTime,
-                SizeAtOpening = openInfo.SizeAtOpening,
-                FirstWriteTime = openInfo.FirstWriteTime,
-                LastWriteTime = openInfo.LastWriteTime,
-                WriteCount = openInfo.WriteCount,
-                SizeAtLastWrite = openInfo.SizeAtLastWrite,
+                OpenedTime = openInfo?.OpenedTime,
+                SizeAtOpening = openInfo?.SizeAtOpening,
+                FirstWriteTime = openInfo?.FirstWriteTime,
+                LastWriteTime = openInfo?.LastWriteTime,
+                WriteCount = openInfo?.WriteCount ?? 0,
+                SizeAtLastWrite = openInfo?.SizeAtLastWrite,
                 ClosedTime = eventTime,
                 SizeAtClosing = closingSize,
-                InferredAction = InferFileAction(openInfo.SizeAtOpening, closingSize, openInfo.WriteCount),
+                InferredAction = openInfo == null
+                    ? "Closed"
+                    : InferFileAction(openInfo.SizeAtOpening, closingSize, openInfo.WriteCount),
                 ProcessName = processName,
                 ProcessId = processId,
-                Note = ""
+                Note = openInfo == null
+                    ? "Close event logged, but matching open event was not found"
+                    : "Close event logged with matched open/write session"
             });
         }
     }
@@ -548,42 +671,91 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    private bool ShouldMonitorFile(string fileName)
+    private bool ShouldMonitorFile(string rawFileName, string normalizedFileName, string operation, string processName, int processId)
     {
+        var settings = GetSettingsSnapshot();
+        var ext = PathUtilities.GetExtension(normalizedFileName);
+        var fullPath = GetSafeFullPath(normalizedFileName) ?? "";
+
         try
         {
-            var settings = GetSettingsSnapshot();
-            var ext = PathUtilities.GetExtension(fileName);
-
             if (string.IsNullOrWhiteSpace(ext))
+            {
+                LogFileDecision("SKIP", "Detected extension is empty", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
                 return false;
+            }
 
             if (!settings.ExtensionsToMonitor.Contains(ext))
+            {
+                LogFileDecision("SKIP", "Detected extension is not in active monitored extensions", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
                 return false;
-
-            var fullPath = GetSafeFullPath(fileName);
+            }
 
             if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                LogFileDecision("SKIP", "Full path is empty after normalization", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
                 return false;
+            }
 
             if (settings.IgnoreTempFolders && PathExclusions.IsInTempFolder(fullPath))
+            {
+                LogFileDecision("SKIP", "File is inside a temporary folder and IgnoreTempFolders is enabled", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
                 return false;
+            }
 
             var dbPath = Path.GetFullPath(settings.DatabaseFilePath);
             var exportPath = Path.GetFullPath(settings.ExcelExportFilePath);
 
             if (string.Equals(fullPath, dbPath, StringComparison.OrdinalIgnoreCase))
+            {
+                LogFileDecision("SKIP", "File is the DeskPulse SQLite database", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
                 return false;
+            }
 
             if (string.Equals(fullPath, exportPath, StringComparison.OrdinalIgnoreCase))
+            {
+                LogFileDecision("SKIP", "File is the DeskPulse Excel export", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
                 return false;
+            }
 
+            LogFileDecision("ACCEPT", "File passed monitoring filters", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            LogFileDecision("SKIP", "Exception while evaluating file: " + ex.Message, operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
             return false;
         }
+    }
+
+    private void LogFileDecision(string decision, string reason, string operation, string rawPath, string normalizedPath, string fullPath, string detectedExtension, string processName, int processId)
+    {
+        DiagnosticLogger.WriteFileDecision(
+            decision,
+            reason,
+            operation,
+            rawPath,
+            normalizedPath,
+            fullPath,
+            detectedExtension,
+            processName,
+            processId,
+            GetSettingsSnapshot());
+    }
+
+    private static void LogFileDecision(string decision, string reason, string operation, string rawPath, string normalizedPath, string fullPath, string detectedExtension, string processName, int processId, AppSettings settings)
+    {
+        DiagnosticLogger.WriteFileDecision(
+            decision,
+            reason,
+            operation,
+            rawPath,
+            normalizedPath,
+            fullPath,
+            detectedExtension,
+            processName,
+            processId,
+            settings);
     }
 
     private static string BuildOpenFileKey(string fullPath, int processId, string processName)
@@ -1464,6 +1636,23 @@ public sealed class AppSettings
         key.SetValue("IgnoreTempFolders", IgnoreTempFolders ? 1 : 0, RegistryValueKind.DWord);
     }
 
+    public static string GetRegistryPathForDisplay()
+    {
+        return @"HKCU\" + RegistryPath;
+    }
+
+    public static void DeleteRegistrySettings()
+    {
+        try
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(RegistryPath, false);
+        }
+        catch (ArgumentException)
+        {
+            // The key does not exist. Treat this as successful cleanup.
+        }
+    }
+
     public static HashSet<string> ParseExtensions(string text)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1549,7 +1738,7 @@ public sealed class SettingsForm : Form
     {
         Text = "DeskPulse Settings";
         Width = 860;
-        Height = 560;
+        Height = 650;
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
         MaximizeBox = false;
@@ -1562,7 +1751,7 @@ public sealed class SettingsForm : Form
             Left = 12,
             Top = 12,
             Width = 820,
-            Height = 450
+            Height = 540
         };
 
         var filesTab = new TabPage
@@ -1570,15 +1759,22 @@ public sealed class SettingsForm : Form
             Text = "Files"
         };
 
+        var maintenanceTab = new TabPage
+        {
+            Text = "Maintenance"
+        };
+
         tabControl.TabPages.Add(filesTab);
+        tabControl.TabPages.Add(maintenanceTab);
 
         BuildFilesTab(filesTab, settings);
+        BuildMaintenanceTab(maintenanceTab, settings);
 
         var okButton = new Button
         {
             Text = "OK",
             Left = 650,
-            Top = 475,
+            Top = 565,
             Width = 80,
             DialogResult = DialogResult.OK
         };
@@ -1589,7 +1785,7 @@ public sealed class SettingsForm : Form
         {
             Text = "Cancel",
             Left = 744,
-            Top = 475,
+            Top = 565,
             Width = 80,
             DialogResult = DialogResult.Cancel
         };
@@ -1728,6 +1924,301 @@ public sealed class SettingsForm : Form
             monitoredLabel,
             _monitoredExtensionsListBox
         });
+    }
+
+    private void BuildMaintenanceTab(TabPage maintenanceTab, AppSettings settings)
+    {
+        var headingLabel = new Label
+        {
+            Text = "Maintenance and portable-app cleanup",
+            Left = 16,
+            Top = 20,
+            Width = 740,
+            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
+        };
+
+        var explanationLabel = new Label
+        {
+            Text = "These options are for the portable version of DeskPulse. They do not use an installer and they do not delete the program folder automatically.",
+            Left = 16,
+            Top = 48,
+            Width = 760,
+            Height = 35,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var autostartHeadingLabel = new Label
+        {
+            Text = "Windows startup",
+            Left = 16,
+            Top = 95,
+            Width = 300,
+            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
+        };
+
+        var autostartCheckBox = new CheckBox
+        {
+            Text = "Start DeskPulse with Windows",
+            Left = 32,
+            Top = 122,
+            Width = 300,
+            Enabled = false
+        };
+
+        var autostartHintLabel = new Label
+        {
+            Text = "Coming in a future version. This will use Windows Task Scheduler so DeskPulse can start with the required Administrator privileges.",
+            Left = 55,
+            Top = 147,
+            Width = 700,
+            Height = 35,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var foldersHeadingLabel = new Label
+        {
+            Text = "Folders",
+            Left = 16,
+            Top = 198,
+            Width = 300,
+            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
+        };
+
+        var openDataFolderButton = new Button
+        {
+            Text = "Open DeskPulse Data Folder",
+            Left = 32,
+            Top = 225,
+            Width = 230,
+            Height = 30
+        };
+
+        openDataFolderButton.Click += (_, _) => OpenFolder(settings.DataFolderPath, "DeskPulse data folder");
+
+        var openProgramFolderButton = new Button
+        {
+            Text = "Open DeskPulse Program Folder",
+            Left = 280,
+            Top = 225,
+            Width = 230,
+            Height = 30
+        };
+
+        openProgramFolderButton.Click += (_, _) => OpenFolder(AppContext.BaseDirectory, "DeskPulse program folder");
+
+        var diagnosticsHeadingLabel = new Label
+        {
+            Text = "Diagnostics",
+            Left = 16,
+            Top = 285,
+            Width = 300,
+            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
+        };
+
+        var diagnosticsStatusLabel = new Label
+        {
+            Text = AppRuntime.DebugLoggingEnabled
+                ? "Diagnostic logging is ON. Normal -debug logs accepted monitored events only. Add -debug-skipped only for full skip tracing."
+                : "Diagnostic logging is OFF. Start DeskPulse with -debug to record accepted monitored ETW file events.",
+            Left = 32,
+            Top = 312,
+            Width = 720,
+            ForeColor = AppRuntime.DebugLoggingEnabled
+                ? System.Drawing.SystemColors.ControlText
+                : System.Drawing.SystemColors.GrayText
+        };
+
+        var openDiagnosticsLogButton = new Button
+        {
+            Text = "Open Diagnostic Log",
+            Left = 32,
+            Top = 342,
+            Width = 200,
+            Height = 30
+        };
+
+        openDiagnosticsLogButton.Click += (_, _) => OpenFile(DiagnosticLogger.GetDiagnosticLogFilePath(), "DeskPulse diagnostic log");
+
+        var activeExtensionsButton = new Button
+        {
+            Text = "Show Active Extensions",
+            Left = 250,
+            Top = 342,
+            Width = 200,
+            Height = 30
+        };
+
+        activeExtensionsButton.Click += (_, _) => ShowActiveExtensions();
+
+        var cleanupHeadingLabel = new Label
+        {
+            Text = "Cleanup",
+            Left = 16,
+            Top = 395,
+            Width = 300,
+            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
+        };
+
+        var registryPathLabel = new Label
+        {
+            Text = "Registry settings location: " + AppSettings.GetRegistryPathForDisplay(),
+            Left = 32,
+            Top = 422,
+            Width = 720,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var removeRegistrySettingsButton = new Button
+        {
+            Text = "Remove DeskPulse Registry Settings",
+            Left = 32,
+            Top = 452,
+            Width = 260,
+            Height = 32
+        };
+
+        removeRegistrySettingsButton.Click += (_, _) => RemoveRegistrySettings();
+
+        var cleanupHintLabel = new Label
+        {
+            Text = "This removes DeskPulse settings from the current Windows user only. It does not delete the app, database, Excel export, or other files.",
+            Left = 310,
+            Top = 452,
+            Width = 450,
+            Height = 45,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        maintenanceTab.Controls.AddRange(new Control[]
+        {
+            headingLabel,
+            explanationLabel,
+            autostartHeadingLabel,
+            autostartCheckBox,
+            autostartHintLabel,
+            foldersHeadingLabel,
+            openDataFolderButton,
+            openProgramFolderButton,
+            diagnosticsHeadingLabel,
+            diagnosticsStatusLabel,
+            openDiagnosticsLogButton,
+            activeExtensionsButton,
+            cleanupHeadingLabel,
+            registryPathLabel,
+            removeRegistrySettingsButton,
+            cleanupHintLabel
+        });
+    }
+
+
+    private static void OpenFile(string filePath, string fileDescription)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new InvalidOperationException("The file path is empty.");
+
+            var folder = Path.GetDirectoryName(filePath);
+
+            if (!string.IsNullOrWhiteSpace(folder))
+                Directory.CreateDirectory(folder);
+
+            if (!File.Exists(filePath))
+                File.WriteAllText(filePath, "DeskPulse diagnostic log has not recorded entries yet." + Environment.NewLine);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = filePath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"The {fileDescription} could not be opened.\n\n{ex.Message}",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
+    }
+
+    private static void ShowActiveExtensions()
+    {
+        var settings = AppSettings.Load();
+        var extensions = string.Join(Environment.NewLine, settings.ExtensionsToMonitor.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+
+        MessageBox.Show(
+            "Active monitored extensions:" + Environment.NewLine + Environment.NewLine + extensions,
+            "DeskPulse Diagnostics",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information
+        );
+    }
+
+    private static void OpenFolder(string folderPath, string folderDescription)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(folderPath))
+                throw new InvalidOperationException("The folder path is empty.");
+
+            Directory.CreateDirectory(folderPath);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = folderPath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"The {folderDescription} could not be opened.\n\n{ex.Message}",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
+    }
+
+    private static void RemoveRegistrySettings()
+    {
+        var confirm = MessageBox.Show(
+            "This will remove DeskPulse settings from the Windows registry for the current user.\n\n" +
+            "It will not delete the DeskPulse program files.\n" +
+            "It will not delete the SQLite database or Excel export.\n\n" +
+            "If you click OK in the Settings window afterwards, settings may be created again. " +
+            "For a clean portable-app reset, close DeskPulse after removing the registry settings.\n\n" +
+            "Continue?",
+            "Remove DeskPulse Registry Settings",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning
+        );
+
+        if (confirm != DialogResult.Yes)
+            return;
+
+        try
+        {
+            AppSettings.DeleteRegistrySettings();
+
+            MessageBox.Show(
+                "DeskPulse registry settings were removed for the current Windows user.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"DeskPulse registry settings could not be removed.\n\n{ex.Message}",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
     }
 
     private void LoadExtensionLists(AppSettings settings)

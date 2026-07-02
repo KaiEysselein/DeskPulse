@@ -1,14 +1,64 @@
-
----
-
-## `CHANGELOG.md`
-
-```markdown
 # Changelog
 
 All notable changes to DeskPulse will be documented in this file.
 
 The format is loosely based on Keep a Changelog, and this project currently follows early pre-release versioning.
+
+## [0.0.3] - 2026-07-02
+
+### Summary
+
+Version 0.0.3 updates DeskPulse as a portable-app maintenance release.
+
+This version aligns the app, project metadata, and documentation to `0.0.3`, and adds a new `Maintenance` tab to the settings window. The new tab allows basic portable-app cleanup without relying on an installer.
+
+### Changed
+
+- Updated the application version constant to `0.0.3`.
+- Updated project metadata in `DeskPulse.csproj` to `0.0.3`.
+- Updated README, changelog, and handover documentation to refer to version `0.0.3`.
+- Expanded the settings window from a single `Files` tab to include a second `Maintenance` tab.
+
+### Added
+
+- Added a `Maintenance` settings tab.
+- Added an `Open DeskPulse Data Folder` button.
+- Added an `Open DeskPulse Program Folder` button.
+- Added a `Remove DeskPulse Registry Settings` button.
+- Added confirmation text explaining that registry cleanup does not delete:
+  - the program files
+  - the SQLite database
+  - the Excel export
+  - the data folder
+- Added a disabled placeholder checkbox for future Windows startup/autostart settings.
+- Added explanatory UI text noting that future autostart should use Windows Task Scheduler because DeskPulse requires Administrator privileges for ETW tracing.
+- Added `AppSettings.GetRegistryPathForDisplay()`.
+- Added `AppSettings.DeleteRegistrySettings()`.
+
+### Notes
+
+- This version does not implement Windows autostart yet.
+- This version does not create or remove Task Scheduler entries yet.
+- This version does not delete the DeskPulse data folder or database automatically.
+- This version does not use an installer for cleanup.
+- Registry cleanup applies only to the current Windows user under `HKCU\Software\DeskPulse`.
+
+
+### Added
+
+- Added command-line diagnostic logging with `-debug`, `--debug`, or `/debug`.
+- Added optional full skip-reason tracing with `-debug-skipped`, `--debug-skipped`, or `/debug-skipped`.
+- Added `DeskPulse-diagnostics.log` for ETW file-filter troubleshooting.
+- Added diagnostic entries for accepted monitored events, raw ETW path, normalized path, detected extension, active monitored extensions, and process information.
+- Added Maintenance tab buttons to open the diagnostic log and show active monitored extensions.
+
+### Fixed
+
+- Fixed monitored extensions such as `.pad` and `.zip` not appearing in the Excel export when ETW close events arrived without a usable filename.
+- Changed accepted `OPEN` events to write an activity row immediately.
+- Changed accepted `WRITE` events to write an activity row immediately.
+- Kept `CLOSE` event handling when the close event contains a usable filename.
+- Reduced normal `-debug` log volume by logging accepted monitored events only; skipped events are now logged only when `-debug-skipped` is also used.
 
 ## [0.0.2] - 2026-07-02
 
