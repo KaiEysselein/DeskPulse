@@ -6,19 +6,22 @@ It monitors selected file activity through Windows ETW file I/O tracing and stor
 
 ## Version
 
-Current version: `0.0.3`
+Current version: `0.0.4`
 
 ## Current Features
 
 - Windows system tray application
 - File open/write/close activity monitoring
+- User/session activity logging for DeskPulse start/stop, PC lock/unlock, and Windows session changes
 - ETW-based Windows file I/O tracing
 - SQLite live storage using `DeskPulse.db`
 - XLSX export for Excel viewing/reporting
+- Configurable Excel worksheet selection and worksheet order
 - Exported worksheet name: `File Activity`
 - Settings window with tabs
 - `Files` settings tab
-- `Maintenance` settings tab
+- `Export Options` settings tab
+- Hidden `Maintenance` settings tab available only with `-maintenance`
 - Registered Windows file type list
 - Two-list file type selector for monitored extensions
 - Right-hand monitored file type list used as the source of truth
@@ -73,10 +76,11 @@ DataFolderPath
 DatabaseFilePath
 ExcelExportFilePath
 ExtensionsToMonitor
+ExportSheets
 IgnoreTempFolders
 ```
 
-Version `0.0.3` adds a `Maintenance` settings tab with a button to remove these registry settings for the current Windows user.
+Version `0.0.4` adds configurable Excel export worksheets and stores the selected worksheet list/order in the registry. Maintenance tools are hidden during normal use and are available only when DeskPulse is started with `-maintenance`.
 
 Removing registry settings does not delete:
 
@@ -95,7 +99,46 @@ The `Files` tab controls:
 - temporary-folder exclusion
 - monitored file extensions
 
+### Export Options
+
+The `Export Options` tab controls the Excel export layout used by `Open log file in Excel`.
+
+It allows the user to:
+
+- tick which worksheets are created
+- sort the worksheet order with Up/Down controls
+- open a field sub-tab for each ticked worksheet
+- tick which fields/columns appear in each worksheet
+- sort the field/column order for each worksheet
+
+Available worksheet options:
+
+- `File Activity`
+- `Daily Summary`
+- `Summary by Extension`
+- `Summary by Process`
+- `Errors`
+- `User`
+
+The `User` worksheet can include DeskPulse start/stop records, PC lock/unlock records, Windows session logon/logoff records, user name, computer name, process information, app version, and notes.
+- `User`
+
+The ticked worksheet list controls which Excel worksheets are created and in what order. Inside each worksheet field tab, the checked fields control which columns are exported and in what order. The default remains `File Activity` only with all standard fields enabled.
+
 ### Maintenance
+
+The `Maintenance` tab is hidden during normal use. To show it, start DeskPulse from Command Prompt or PowerShell with:
+
+```powershell
+DeskPulse.exe -maintenance
+```
+
+Also accepted:
+
+```text
+--maintenance
+/maintenance
+```
 
 The `Maintenance` tab is for portable-app administration and cleanup.
 
@@ -103,6 +146,8 @@ Current functions:
 
 - open the DeskPulse data folder
 - open the DeskPulse program folder
+- open the diagnostic log
+- show active monitored extensions
 - remove DeskPulse registry settings for the current Windows user
 
 The tab also contains a disabled placeholder for:
@@ -149,6 +194,20 @@ Run from Administrator PowerShell or Administrator VS Code terminal:
 dotnet run
 ```
 
+Run with hidden maintenance tools enabled:
+
+```powershell
+dotnet run -- -maintenance
+```
+
+Run portable cleanup and exit:
+
+```powershell
+DeskPulse.exe -uninstall
+```
+
+The `-uninstall` mode removes current-user registry settings and generated log/report files, but preserves the SQLite database data.
+
 ## Publish Instructions
 
 Recommended current publish method is a portable folder publish.
@@ -158,20 +217,20 @@ dotnet publish .\DeskPulse.csproj `
   --configuration Release `
   --runtime win-x64 `
   --self-contained true `
-  --output ".\publish\v0.0.3" `
+  --output ".\publish\v0.0.4" `
   /p:PublishSingleFile=false
 ```
 
 Published executable:
 
 ```text
-publish\v0.0.3\DeskPulse.exe
+publish\v0.0.4\DeskPulse.exe
 ```
 
 Run from Administrator PowerShell:
 
 ```powershell
-cd ".\publish\v0.0.3"
+cd ".\publish\v0.0.4"
 .\DeskPulse.exe
 ```
 

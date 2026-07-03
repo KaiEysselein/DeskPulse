@@ -1,20 +1,18 @@
-# DeskPulse Handover Document
+# DeskPulse Handover Document — Version 0.0.4
 
 ## 1. Project Overview
 
 DeskPulse is a Windows tray application built with C# / .NET 8 WinForms.
 
-The application monitors selected file activity on a Windows machine using Windows ETW file I/O tracing. It records file open, write/save, and close activity for selected file extensions and stores the results in a local SQLite database.
-
-Excel is not used as the live log file. Excel is only used as an export/reporting format.
+It monitors selected file activity on a Windows machine using Windows ETW file I/O tracing and stores the results in a local SQLite database. Excel is not the live log file; Excel is used only for export/reporting.
 
 Current version:
 
 ```text
-0.0.3
+0.0.4
 ```
 
-Project repository:
+Repository:
 
 ```text
 https://github.com/KaiEysselein/DeskPulse
@@ -26,115 +24,142 @@ Maintainer:
 Kai Eysselein
 ```
 
-The project is currently an early pre-release working baseline.
+Development status:
+
+```text
+Early pre-release / working baseline
+```
+
+Important note:
+
+```text
+This 0.0.4 package was prepared as source/documentation files. It was not compile-tested inside the AI environment because dotnet/.NET SDK was not available there. Compile and test locally before committing or publishing.
+```
 
 ---
 
-## 2. Current Status
+## 2. Version 0.0.4 Summary
 
-Version 0.0.3 is the current working baseline.
+Version 0.0.4 extends the 0.0.3 baseline with:
 
-Version 0.0.2 introduced the SQLite storage baseline. Version 0.0.3 keeps that architecture and adds a new `Maintenance` settings tab for portable-app cleanup and future startup/autostart controls.
+- configurable Excel export worksheets
+- configurable Excel export fields/columns per worksheet
+- sorting of selected worksheets
+- sorting of fields/columns within each selected worksheet
+- hidden Maintenance tab available only from a command-line switch
+- portable cleanup command-line mode
+- user/session activity logging
+- new `User` export worksheet
+- less technical About window wording
 
-The app currently works as a Windows tray application and can monitor selected file activity. The main storage design remains SQLite database storage, with Excel export through an `.xlsx` workbook.
-
-The app requires Administrator rights because Windows kernel ETW file I/O tracing requires elevation.
-
-The current version is not yet packaged as a formal installer. The safest current deployment method is a portable publish folder rather than copying only the EXE.
+The main live storage remains SQLite. Excel remains export/reporting only.
 
 ---
 
-## 3. Main Design Decisions
+## 3. Files Included in the 0.0.4 Package
 
-### 3.1 SQLite is the live storage format
+The current 0.0.4 package contains:
 
-CSV was used in the earlier 0.0.1 baseline, but this was replaced in 0.0.2.
+```text
+Program.cs
+DeskPulse.csproj
+README.md
+CHANGELOG.md
+```
 
-Reason:
+The package file is:
 
-- CSV is fragile for live logging.
-- CSV does not support multiple worksheets.
-- CSV can be awkward when Excel opens/locks it.
-- SQLite is better suited for append-style structured logging.
-- SQLite can store events reliably and later export to Excel.
+```text
+DeskPulse-0.0.4-updated-files.zip
+```
 
-Current live database:
+Important:
+
+```text
+Use the files from the latest ZIP package as the source of truth for this handover.
+```
+
+---
+
+## 4. Current Version References
+
+Version references were updated to 0.0.4 in:
+
+```text
+Program.cs
+DeskPulse.csproj
+README.md
+CHANGELOG.md
+```
+
+Expected values:
+
+```text
+AppInfo.Version = "0.0.4"
+DeskPulse.csproj Version = 0.0.4
+DeskPulse.csproj AssemblyVersion = 0.0.4.0
+DeskPulse.csproj FileVersion = 0.0.4.0
+DeskPulse.csproj InformationalVersion = 0.0.4
+```
+
+Historical `0.0.3`, `0.0.2`, and `0.0.1` references should remain in the changelog history.
+
+---
+
+## 5. Main Design Decisions Preserved
+
+### 5.1 SQLite remains the live data store
+
+The live database remains:
 
 ```text
 %USERPROFILE%\Documents\DeskPulse\DeskPulse.db
 ```
 
-### 3.2 Excel is export/reporting only
+Do not reintroduce CSV as the live storage mechanism.
 
-Excel is no longer the live log file.
+### 5.2 Excel remains export/reporting only
 
-The tray command:
-
-```text
-Open log file in Excel
-```
-
-exports the SQLite database to:
+The Excel export remains:
 
 ```text
 %USERPROFILE%\Documents\DeskPulse\DeskPulse-export.xlsx
 ```
 
-and opens the exported workbook.
-
-The exported worksheet must be named:
+The tray menu item remains:
 
 ```text
-File Activity
+Open log file in Excel
 ```
 
-### 3.3 The app must not log its own activity
+This exports from SQLite to Excel, then opens the exported workbook.
 
-DeskPulse creates and opens its own SQLite database and Excel export. These must not be logged, otherwise the app creates recursive/self-generated noise.
+### 5.3 DeskPulse must not log its own file activity
 
-The code therefore excludes:
+The app must continue excluding:
 
-- activity generated by the DeskPulse process itself
-- the SQLite database file
-- the Excel export file
-- temporary-folder activity when the setting is enabled
+- the DeskPulse process itself
+- `DeskPulse.db`
+- `DeskPulse-export.xlsx`
+- temp folders when the setting is enabled
 
-### 3.4 File extension must be its own field
+### 5.4 File extension remains its own export field
 
-The user specifically wanted the file extension in a separate exported column.
-
-Example:
-
-```text
-.dwg
-.docx
-.xlsx
-.pdf
-```
-
-The export therefore includes:
+The file extension must remain separately available as:
 
 ```text
 Extension
 ```
 
-as a separate column.
-
-### 3.5 Long ETW paths must be normalized and split
-
-ETW can report network/mapped drive paths in a verbose form, for example:
+The user-facing label in the export options can be more understandable:
 
 ```text
-\;LanmanRedirector\;W:0000000000136c30\lce-host-svr\Work\Projects - Current\538 - Various Small Jobs\538-A60 - House Prein Swk\Drawings\C&S Eng\538-A60-SE (2026-06-19).dwg
+File Type / Extension
 ```
 
-The app should normalize this into a readable mapped-drive style path where possible, for example:
+### 5.5 Full path is still split
 
-```text
-W:\Work\Projects - Current\538 - Various Small Jobs\538-A60 - House Prein Swk\Drawings\C&S Eng\538-A60-SE (2026-06-19).dwg
-```
-
-The export should then split the path into:
+File paths must remain split into:
 
 ```text
 Full Path
@@ -143,279 +168,430 @@ File Name
 Extension
 ```
 
-### 3.6 Portable cleanup is handled inside the app
-
-Version 0.0.3 adds a `Maintenance` settings tab.
-
-The current cleanup approach is deliberately conservative:
-
-- removing registry settings is allowed
-- opening the program folder is allowed
-- opening the data folder is allowed
-- deleting program files is not attempted by the running app
-- deleting database/export files is not automatic
-- installer-based uninstall is not required for now
-
 ---
 
-## 4. Current Features
+## 6. Command-Line Switches
 
-DeskPulse currently includes:
+DeskPulse 0.0.4 supports these command-line switches.
 
-- Windows system tray application
-- C# / .NET 8 WinForms
-- ETW-based Windows file I/O tracing
-- file open/write/close monitoring
-- selected-extension monitoring
-- SQLite live storage
-- Excel `.xlsx` export
-- worksheet name `File Activity`
-- settings window
-- `Files` settings tab
-- `Maintenance` settings tab
-- registered Windows file type list
-- two-list selector for monitored file extensions
-- right-hand monitored file list as the source of truth
-- temporary-folder exclusion checkbox
-- registry-backed settings
-- in-app current-user registry cleanup
-- buttons to open DeskPulse data folder and program folder
-- disabled placeholder for future Windows startup/autostart settings
-- hardcoded self-exclusion for DeskPulse activity
-- database/export file exclusion
-- path normalization for `LanmanRedirector`
-- file path split into full path, folder path, file name, and extension
-- process name and process ID capture
-- fallback startup/error log
+### 6.1 Normal mode
 
----
-
-## 5. Current Main Files
-
-Important project files:
-
-```text
-Program.cs
-DeskPulse.csproj
-app.manifest
-file-logger.ico
-README.md
-CHANGELOG.md
-LICENSE
-HANDOVER.md
+```powershell
+DeskPulse.exe
 ```
 
-Current source structure is still simple. Most application logic is currently in:
+Behavior:
 
-```text
-Program.cs
+- starts tray app
+- shows normal settings tabs
+- hides Maintenance tab
+- starts monitoring if running as Administrator
+
+### 6.2 Debug mode
+
+```powershell
+DeskPulse.exe -debug
 ```
 
-This is acceptable for the early baseline, but later versions may benefit from splitting classes into separate files.
-
----
-
-## 6. Important NuGet Packages
-
-The project depends on:
+Also accepted:
 
 ```text
-Microsoft.Diagnostics.Tracing.TraceEvent
-Microsoft.Data.Sqlite
-SQLitePCLRaw.bundle_e_sqlite3
-ClosedXML
+--debug
+/debug
 ```
 
-Purpose:
+Behavior:
+
+- enables accepted-event diagnostic logging
+- does not automatically show Maintenance tab
+
+Diagnostic log:
 
 ```text
-Microsoft.Diagnostics.Tracing.TraceEvent
-ETW tracing and Windows file I/O event capture.
-
-Microsoft.Data.Sqlite
-SQLite database access.
-
-SQLitePCLRaw.bundle_e_sqlite3
-SQLite native bundle support.
-
-ClosedXML
-Creation of Excel .xlsx export files.
+%USERPROFILE%\Documents\DeskPulse\DeskPulse-diagnostics.log
 ```
 
----
+### 6.3 Full skipped-event debug mode
 
-## 7. Runtime Data Locations
+```powershell
+DeskPulse.exe -debug -debug-skipped
+```
 
-Default DeskPulse data folder:
+Also accepted:
 
 ```text
-%USERPROFILE%\Documents\DeskPulse\
+--debug-skipped
+/debug-skipped
 ```
 
-Default SQLite database:
+Behavior:
+
+- logs accepted monitored events
+- also logs skipped ETW events and skip reasons
+- can grow very quickly
+- use only for short troubleshooting runs
+
+### 6.4 Maintenance mode
+
+```powershell
+DeskPulse.exe -maintenance
+```
+
+Also accepted:
+
+```text
+--maintenance
+/maintenance
+```
+
+Behavior:
+
+- starts normal tray app
+- makes the hidden `Maintenance` settings tab visible
+- does not automatically enable diagnostic logging
+
+Reason:
+
+```text
+Maintenance tools should only be available when deliberately started from Command Prompt / PowerShell, so ordinary users do not easily access cleanup/admin functions.
+```
+
+### 6.5 Portable cleanup / uninstall mode
+
+```powershell
+DeskPulse.exe -uninstall
+```
+
+Also accepted:
+
+```text
+--uninstall
+/uninstall
+```
+
+Behavior:
+
+- runs portable cleanup
+- exits without starting tray monitoring
+
+The intended cleanup is conservative:
+
+Deletes/clears:
+
+```text
+HKCU\Software\DeskPulse
+%TEMP%\DeskPulse-startup.log
+%USERPROFILE%\Documents\DeskPulse\DeskPulse-diagnostics.log
+%USERPROFILE%\Documents\DeskPulse\DeskPulse-export.xlsx
+```
+
+Keeps:
 
 ```text
 %USERPROFILE%\Documents\DeskPulse\DeskPulse.db
 ```
 
-Default Excel export:
+Meaning:
 
 ```text
-%USERPROFILE%\Documents\DeskPulse\DeskPulse-export.xlsx
-```
-
-Fallback startup/error log:
-
-```text
-%TEMP%\DeskPulse-startup.log
+Settings, diagnostics, and generated reports are removed. The actual SQLite activity data remains.
 ```
 
 ---
 
-## 8. Registry Settings
+## 7. Settings Window Structure
 
-DeskPulse stores settings here:
-
-```text
-HKCU\Software\DeskPulse
-```
-
-Important registry values:
+The 0.0.4 settings window has these tabs:
 
 ```text
-AppVersion
-DataFolderPath
-DatabaseFilePath
-ExcelExportFilePath
-ExtensionsToMonitor
-IgnoreTempFolders
+Files
+Export Options
+Maintenance  [hidden unless started with -maintenance]
 ```
 
-`IgnoreTempFolders`:
+### 7.1 Files tab
+
+Controls:
+
+- data folder path
+- temporary-folder exclusion
+- registered Windows file types
+- monitored file type list
+
+The right-hand monitored file type list remains the source of truth.
+
+### 7.2 Export Options tab
+
+Purpose:
 
 ```text
-1 = ignore temporary-folder activity
-0 = include temporary-folder activity
+Controls which worksheets and columns are created in the Excel export.
 ```
 
-Default monitored extensions:
+Behavior:
+
+- user can tick/select which worksheets are created
+- user can sort selected worksheet order with Up/Down buttons
+- each selected worksheet has a field sub-tab
+- each worksheet field sub-tab lists available fields/columns
+- fields can be checked/unchecked
+- field order can be sorted
+
+The default remains:
 
 ```text
-.txt
-.pdf
-.docx
-.xlsx
-.dwg
-.jpg
-.png
-.cs
+File Activity only, with standard/default fields enabled
 ```
 
-Version 0.0.3 adds app-side deletion of this current-user registry key through the `Maintenance` settings tab.
+### 7.3 Maintenance tab
 
-Important behavior:
+Hidden during normal use.
 
-- deleting registry settings does not delete program files
-- deleting registry settings does not delete the SQLite database
-- deleting registry settings does not delete the Excel export
-- clicking OK in the settings window after deletion may recreate settings
-- for a clean portable-app reset, close DeskPulse after removing registry settings
+Visible only when launched with:
+
+```powershell
+DeskPulse.exe -maintenance
+```
+
+Controls include:
+
+- open data folder
+- open program folder
+- open diagnostic log
+- show active monitored extensions
+- remove registry settings
+- disabled placeholder for future Task Scheduler autostart
 
 ---
 
-## 9. Tray Menu
+## 8. Export Worksheets
 
-Current tray menu items:
+0.0.4 supports the following export worksheet options:
 
 ```text
-Open log file in Excel
-Settings...
-About
-Exit
+File Activity
+Daily Summary
+Summary by Extension
+Summary by Process
+Errors
+User
 ```
 
-Expected user behavior:
+### 8.1 File Activity
 
-- App appears in Windows tray.
-- App may be inside hidden tray icons menu.
-- App does not appear as a normal taskbar window.
-- User right-clicks tray icon to access menu.
+Purpose:
+
+```text
+Detailed file open/write/close activity.
+```
+
+Available fields include:
+
+```text
+Id
+Created At
+Activity Type
+Full Path
+Folder Path
+File Name
+File Type / Extension
+Date Opened
+Time Opened
+Size At Opening
+First Write Date
+First Write Time
+Last Write Date
+Last Write Time
+Write Count
+Size At Last Write
+Date Closed
+Time Closed
+Size At Closing
+Inferred Action
+Process
+Process ID
+Note
+```
+
+Worksheet name:
+
+```text
+File Activity
+```
+
+Important:
+
+```text
+Keep this worksheet name exactly as File Activity unless the user explicitly changes the design.
+```
+
+### 8.2 Daily Summary
+
+Purpose:
+
+```text
+Summarizes activity per day.
+```
+
+Available fields include:
+
+```text
+Date
+Events
+Open Events
+Write Events
+Close Events
+Error Events
+Distinct Files
+Distinct Processes
+```
+
+### 8.3 Summary by Extension
+
+Purpose:
+
+```text
+Summarizes file activity by file type/extension.
+```
+
+Available fields include:
+
+```text
+File Type / Extension
+Events
+Distinct Files
+Write Events
+Last Event
+```
+
+### 8.4 Summary by Process
+
+Purpose:
+
+```text
+Summarizes file activity by process/application.
+```
+
+Available fields include:
+
+```text
+Process
+Process ID
+Events
+Distinct Files
+Write Events
+Last Event
+```
+
+### 8.5 Errors
+
+Purpose:
+
+```text
+Exports DeskPulse monitor/application error records from the activity table.
+```
+
+Available fields include:
+
+```text
+Id
+Created At
+Item / Full Path
+Process
+Process ID
+Note
+```
+
+### 8.6 User
+
+Purpose:
+
+```text
+Exports DeskPulse start/stop and Windows user/session activity.
+```
+
+Available fields include:
+
+```text
+Id
+Created At
+Date
+Time
+Event Type
+Event
+User
+Computer
+Process
+Process ID
+App Version
+Note
+```
+
+This worksheet should be labelled exactly:
+
+```text
+User
+```
 
 ---
 
-## 10. Settings Window
+## 9. User / Session Activity Logging
 
-Current settings UI:
+0.0.4 adds a new user/session activity logging concept.
 
-- uses tabs
-- has a `Files` tab
-- has a `Maintenance` tab
-- shows registered Windows file types
-- shows monitored file types
-- allows moving extensions into the monitored list
-- has a checkbox for temporary-folder exclusion
-- has buttons to open data/program folders
-- has a button to remove registry settings
-- has a disabled placeholder for future autostart settings
-- no manual monitored-extension text box
+The app logs:
 
-Important design decision:
+```text
+DeskPulse started
+DeskPulse stopped
+PC locked
+PC unlocked
+User logged on
+User logging off
+Console session connected
+Console session disconnected
+Remote session connected
+Remote session disconnected
+```
 
-The right-hand monitored file type list is the source of truth.
+Implementation approach:
 
-Do not reintroduce the manual monitored-extension text field unless there is a strong reason.
+```csharp
+Microsoft.Win32.SystemEvents.SessionSwitch
+```
+
+Key session switch reasons handled:
+
+```text
+SessionLock
+SessionUnlock
+SessionLogon
+SessionLogoff
+ConsoleConnect
+ConsoleDisconnect
+RemoteConnect
+RemoteDisconnect
+```
+
+Important limitation:
+
+```text
+DeskPulse is a tray app. It logs session activity while it is running in the user's Windows session. It is not a Windows service and does not monitor all users on the machine globally.
+```
 
 ---
 
-## 11. Maintenance Tab
+## 10. Database Design
 
-Version 0.0.3 adds the `Maintenance` tab.
+### 10.1 Existing ActivityEvents table
 
-Current controls:
-
-```text
-Start DeskPulse with Windows
-```
-
-This is visible but disabled. It is a placeholder only.
-
-```text
-Open DeskPulse Data Folder
-```
-
-Opens the configured DeskPulse data folder.
-
-```text
-Open DeskPulse Program Folder
-```
-
-Opens the folder from which DeskPulse is running.
-
-```text
-Remove DeskPulse Registry Settings
-```
-
-Deletes:
-
-```text
-HKCU\Software\DeskPulse
-```
-
-The button shows a confirmation dialog before deleting.
-
-This does not delete program files or data files.
-
----
-
-## 12. Database Design
-
-Main SQLite table:
+The main file activity table remains:
 
 ```text
 ActivityEvents
 ```
 
-Current important fields:
+Key fields:
 
 ```text
 Id
@@ -444,143 +620,105 @@ ProcessId
 Note
 ```
 
-Important note:
+Important:
 
 ```text
-Item
+Item is retained as a legacy/internal compatibility field. Do not remove it casually.
 ```
 
-is retained as a legacy/internal compatibility field and currently stores the full path.
+### 10.2 New UserEvents table
 
-Do not remove `Item` casually unless the database migration/export logic is also cleaned up properly.
-
----
-
-## 13. Excel Export Design
-
-The Excel export file is:
+0.0.4 adds:
 
 ```text
-DeskPulse-export.xlsx
+UserEvents
 ```
 
-The workbook contains a worksheet named:
-
-```text
-File Activity
-```
-
-Typical exported columns:
+Fields:
 
 ```text
 Id
-Created At
-Activity Type
-Full Path
-Folder Path
-File Name
-Extension
-Date Opened
-Time Opened
-Size At Opening
-First Write Date
-First Write Time
-Last Write Date
-Last Write Time
-Write Count
-Size At Last Write
-Date Closed
-Time Closed
-Size At Closing
-Inferred Action
-Process
-Process ID
+CreatedAt
+EventDate
+EventTime
+EventType
+EventDescription
+UserName
+MachineName
+ProcessName
+ProcessId
+AppVersion
 Note
 ```
 
-Important:
-
-The worksheet name must remain:
+Indexes:
 
 ```text
-File Activity
+IX_UserEvents_CreatedAt
+IX_UserEvents_EventType
 ```
-
-This was specifically requested.
 
 ---
 
-## 14. File Activity Logic
+## 11. Registry Settings
 
-The ETW event handlers monitor:
+DeskPulse stores settings here:
 
 ```text
-OPEN
-WRITE
-CLOSE
+HKCU\Software\DeskPulse
 ```
 
-The app attempts to correlate open/write/close events using:
+Important registry values:
 
 ```text
-FullPath + ProcessId + ProcessName
-```
-
-The goal is to infer actions such as:
-
-```text
-Opened/read only
-Edited/saved
-Edited/saved, file size changed
-Save/write detected
-Unknown close action
-```
-
-A write without a matching open event is still logged, with a note.
-
-A close without a matching open event is also logged, with a note.
-
----
-
-## 15. Exclusion Logic
-
-DeskPulse currently excludes:
-
-### 15.1 DeskPulse process itself
-
-The app should not log file activity generated by itself.
-
-This prevents noise when DeskPulse writes to SQLite or exports Excel.
-
-### 15.2 SQLite database file
-
-The app should not log:
-
-```text
-DeskPulse.db
-```
-
-### 15.3 Excel export file
-
-The app should not log:
-
-```text
-DeskPulse-export.xlsx
-```
-
-### 15.4 Temp folders
-
-If enabled, temporary-folder file activity is ignored.
-
-This is controlled by:
-
-```text
+AppVersion
+DataFolderPath
+DatabaseFilePath
+ExcelExportFilePath
+ExtensionsToMonitor
+ExportSheets
 IgnoreTempFolders
 ```
 
+### 11.1 ExportSheets
+
+0.0.4 adds/uses:
+
+```text
+ExportSheets
+```
+
+Purpose:
+
+```text
+Stores selected export worksheets, worksheet order, and selected/sorted fields per worksheet.
+```
+
+Default:
+
+```text
+File Activity only
+```
+
 ---
 
-## 16. Build Instructions
+## 12. About Window Text
+
+The About window was intentionally made less technical.
+
+Preferred wording:
+
+```text
+DeskPulse quietly tracks selected file activity while you work.
+
+It helps you review what was opened, changed, or saved, and can export clear reports to Excel whenever needed.
+```
+
+Avoid making the About window sound like developer documentation. Do not mention ETW, SQLite, or XLSX in the main description unless specifically requested.
+
+---
+
+## 13. Build Instructions
 
 From the repository folder:
 
@@ -596,59 +734,172 @@ Expected result:
 Build succeeded.
 ```
 
+If there are errors, fix from the top of the build output first.
+
 ---
 
-## 17. Run From Source
+## 14. Run From Source
 
-Run from Administrator PowerShell or Administrator VS Code terminal:
+Run from an Administrator PowerShell or Administrator VS Code terminal:
 
 ```powershell
 dotnet run
 ```
 
-The app must be elevated.
+Run from source with Maintenance visible:
 
-If it is not elevated, it should fail with an Administrator/elevation message because ETW kernel tracing requires Administrator rights.
+```powershell
+dotnet run -- -maintenance
+```
+
+Run from source with debug logging:
+
+```powershell
+dotnet run -- -debug
+```
 
 ---
 
-## 18. Publish Instructions
+## 15. Publish Instructions
 
-Recommended v0.0.3 publish method is a portable folder publish.
-
-Run:
+Recommended publish method remains a portable folder publish.
 
 ```powershell
 dotnet publish .\DeskPulse.csproj `
   --configuration Release `
   --runtime win-x64 `
   --self-contained true `
-  --output ".\publish\v0.0.3" `
+  --output ".\publish\v0.0.4" `
   /p:PublishSingleFile=false
 ```
 
 Published executable:
 
 ```text
-publish\v0.0.3\DeskPulse.exe
+publish\v0.0.4\DeskPulse.exe
 ```
 
 Run from Administrator PowerShell:
 
 ```powershell
-cd ".\publish\v0.0.3"
+cd ".\publish\v0.0.4"
 .\DeskPulse.exe
+```
+
+Run with hidden Maintenance tab:
+
+```powershell
+.\DeskPulse.exe -maintenance
+```
+
+Run portable cleanup:
+
+```powershell
+.\DeskPulse.exe -uninstall
 ```
 
 Important:
 
-Do not just copy the EXE alone unless single-file publishing has been properly tested. The safer current deployment is the full publish folder.
+```text
+Do not copy only the EXE unless single-file publishing has been separately tested. The safer current deployment is the full publish folder.
+```
 
 ---
 
-## 19. GitHub / Commit Notes
+## 16. Testing Checklist for 0.0.4
 
-Source and documentation files that may be committed:
+### 16.1 Build and startup
+
+- `dotnet clean` succeeds
+- `dotnet restore` succeeds
+- `dotnet build` succeeds
+- published folder builds
+- app runs as Administrator
+- tray icon appears
+- normal startup does not show Maintenance tab
+- `-maintenance` startup shows Maintenance tab
+- `-debug` enables diagnostics without necessarily showing Maintenance tab
+- `-uninstall` performs cleanup and exits
+
+### 16.2 File monitoring
+
+- default monitored extensions still load
+- added monitored extensions persist in registry
+- `.dwg` logging still works
+- `.zip` and `.pad` logging still work after the 0.0.3 immediate OPEN/WRITE fix
+- temporary-folder exclusion still works
+- DeskPulse does not log its own database/export files
+- network/LanmanRedirector path normalization still works acceptably
+
+### 16.3 Export Options
+
+- Settings opens without error
+- Export Options tab is visible in normal mode
+- worksheet selection works
+- worksheet sorting works
+- field sub-tabs appear for selected worksheets
+- field check/uncheck works
+- field sorting works
+- export creates only selected worksheets
+- export worksheet order follows configured order
+- export columns follow configured field order
+- default/reset returns to File Activity only
+
+### 16.4 User worksheet
+
+- DeskPulse start event is logged
+- DeskPulse stop event is logged on clean exit
+- PC lock event is logged
+- PC unlock event is logged
+- session logoff/logon behavior is checked realistically
+- User worksheet appears when selected
+- User worksheet exports expected fields
+
+### 16.5 Maintenance
+
+- Maintenance tab hidden in normal startup
+- Maintenance tab visible with `-maintenance`
+- Open data folder works
+- Open program folder works
+- Open diagnostic log works
+- Show active extensions works
+- remove registry settings works after confirmation
+- registry cleanup does not delete the database
+
+### 16.6 Documentation
+
+- README says current version `0.0.4`
+- README publish folder uses `v0.0.4`
+- CHANGELOG has a `0.0.4` section
+- historical changelog entries remain intact
+- AI-assisted development note remains present
+
+---
+
+## 17. Known Limitations / Items to Watch
+
+- The 0.0.4 package was not compile-tested in the AI environment.
+- DeskPulse is still an early pre-release.
+- No formal installer exists yet.
+- Windows Task Scheduler autostart is still a placeholder and has not been implemented.
+- The app must run as Administrator for ETW tracing.
+- User/session activity logging is tray-app/session based, not service/global-machine based.
+- Some session/logoff events may depend on Windows shutdown/logoff timing.
+- Complex app save behavior may produce multiple file activity rows.
+- Complex network paths may still need more normalization later.
+- Portable folder publish remains safer than copying only the EXE.
+
+Minor documentation cleanup to consider:
+
+```text
+README may contain a duplicate `User` bullet in the Export Options worksheet list. Remove the duplicate if present before final commit.
+```
+
+---
+
+## 18. GitHub / Commit Notes
+
+Files suitable for commit:
 
 ```text
 Program.cs
@@ -693,228 +944,72 @@ publish/
 .vs/
 ```
 
-Suitable commit message for this step:
+Suggested commit message:
 
 ```text
-Release DeskPulse v0.0.3 maintenance tab
+Release DeskPulse v0.0.4 export options and user activity logging
+```
+
+Alternative shorter commit message:
+
+```text
+Add DeskPulse v0.0.4 export options
 ```
 
 ---
 
-## 20. README Status
+## 19. Suggested Next Iteration
 
-The README should describe:
-
-- DeskPulse purpose
-- current version 0.0.3
-- SQLite live storage
-- Excel export
-- Administrator requirement
-- build/run/publish instructions
-- data folder
-- settings registry location
-- Maintenance tab
-- AI-assisted development note
-- git hygiene
-
-The README should no longer say CSV is the live logging format.
-
----
-
-## 21. CHANGELOG Status
-
-The changelog should contain:
+The next sensible version could be:
 
 ```text
-0.0.3
-0.0.2
-0.0.1
+DeskPulse 0.0.5
 ```
 
-0.0.3 should mention:
-
-- version alignment to 0.0.3
-- new Maintenance settings tab
-- open data folder button
-- open program folder button
-- remove registry settings button
-- disabled future autostart placeholder
-- no Task Scheduler implementation yet
-- no installer-based uninstall yet
-
-0.0.2 should mention:
-
-- SQLite database storage
-- XLSX export
-- worksheet name `File Activity`
-- full path/folder/file/extension split
-- LanmanRedirector normalization
-- temp-folder checkbox
-- self-exclusion
-- recursive logging prevention
-- AI-assisted development note
-
-0.0.1 should describe the original CSV baseline.
-
----
-
-## 22. AI-Assisted Development Note
-
-The project publicly notes AI-assisted development.
-
-Preferred wording:
+Recommended focus:
 
 ```text
-DeskPulse was developed with AI-assisted coding support.
-
-AI was used to help draft code, explore implementation options, review errors, improve documentation, and speed up iteration. Final decisions, testing, project direction, and release responsibility remain with the project maintainer.
+Implement Windows Task Scheduler autostart from the hidden Maintenance tab.
 ```
 
-This wording is intentional. It avoids saying “AI wrote the code” and instead frames AI as a development aid.
+Expected 0.0.5 scope:
+
+- enable `Start DeskPulse with Windows`
+- create/update/remove a Task Scheduler task
+- start DeskPulse elevated at user logon
+- keep portable-folder deployment
+- do not use the Startup folder
+- show current autostart status in Maintenance
+- export/debug any Task Scheduler setup errors clearly
 
 ---
 
-## 23. Current Known Limitations
-
-The current v0.0.3 baseline has the following limitations:
-
-- early pre-release / working baseline
-- no formal installer yet
-- no built-in Windows autostart implementation yet
-- autostart placeholder exists but is disabled
-- Task Scheduler task creation/removal is not implemented yet
-- program open/close monitoring is not currently included
-- email activity monitoring is not currently included
-- single-file deployment is not the preferred deployment route yet
-- portable folder publish is safer
-- ETW file event interpretation may not be perfect in all programs
-- some apps may create temporary files or perform indirect writes
-- complex network paths may need further normalization later
-- tray icon/branding may need refinement
-- UI is functional but still early
-
----
-
-## 24. Possible Future Improvements
-
-Possible future development items:
-
-### 24.1 Packaging
-
-- formal installer
-- GitHub Releases packaging
-- optional signed executable
-- better portable ZIP release
-
-### 24.2 Autostart
-
-- built-in autostart option
-- Task Scheduler setup helper
-- startup status display
-- create/update/remove scheduled task from the app
-
-### 24.3 User Interface
-
-- clear/reset database button
-- delete Excel export button
-- export date range option
-- export selected extensions only
-- status window
-- better tray icon branding
-- better notification behavior
-
-### 24.4 Reporting
-
-- summary worksheet
-- per-extension summary
-- per-process summary
-- daily activity summary
-- date range exports
-- filtered exports
-
-### 24.5 Monitoring
-
-- program open/close monitoring
-- optional process allowlist/watchlist
-- better write/save interpretation
-- improved detection of temporary-file save patterns
-- improved handling of Office/AutoCAD save behavior
-- better UNC and mapped-drive support
-
-### 24.6 Data
-
-- database cleanup/retention policy
-- archive/export old records
-- configurable database location
-- database viewer window
-
----
-
-## 25. Important Instructions for Future AI Assistance
+## 20. Instructions for Future AI Assistance
 
 When continuing this project with an AI assistant:
 
-1. Always provide full replacement files when code changes are requested.
-2. Do not provide only small snippets unless explicitly requested.
-3. Preserve the current architecture unless a change is clearly requested.
-4. Do not reintroduce CSV live logging.
-5. Do not make Excel the live data store.
-6. Keep SQLite as the live store.
-7. Keep Excel as an export/report format.
-8. Keep the Excel worksheet name as `File Activity`.
-9. Keep extension as its own column.
-10. Keep path split into `Full Path`, `Folder Path`, `File Name`, and `Extension`.
-11. Keep DeskPulse self-exclusion.
-12. Keep database/export file exclusion.
-13. Be careful with deployment assumptions.
+1. Provide full replacement files when code changes are requested.
+2. Do not provide only tiny snippets unless the user explicitly asks for snippets.
+3. Preserve SQLite as the live store.
+4. Preserve Excel as export/reporting only.
+5. Keep `File Activity` as the worksheet name for file activity exports.
+6. Keep `Extension` / `File Type` as a separate field.
+7. Keep the path split into `Full Path`, `Folder Path`, `File Name`, and `Extension`.
+8. Keep DeskPulse self-exclusion.
+9. Keep database/export file exclusion.
+10. Keep Maintenance hidden unless launched with `-maintenance`.
+11. Keep `-debug` and `-maintenance` as separate concepts.
+12. Preserve the database when using `-uninstall`.
+13. Treat the app as a portable pre-release until a formal installer exists.
 14. Do not assume copying only the EXE is valid.
-15. Prefer portable folder publish for now.
-16. Remember the user prefers full copy/paste code files.
-17. Treat the Maintenance tab as portable-app cleanup, not a full installer uninstall.
-18. Do not implement autostart through the Startup folder; future autostart should use Windows Task Scheduler.
+15. Prefer portable publish folder for release builds.
+16. Remember that the user prefers full copy/paste code files.
+17. Keep About text user-friendly, not overly technical.
+18. Future autostart should use Windows Task Scheduler, not the Startup folder.
 
 ---
 
-## 26. Recommended Next Step
-
-The next sensible step after v0.0.3 is one of:
-
-```text
-Implement Windows Task Scheduler autostart from the Maintenance tab.
-```
-
-or:
-
-```text
-Stabilize v0.0.3 deployment and confirm the published portable folder works reliably.
-```
-
-Suggested testing checklist:
-
-- build succeeds
-- published folder runs
-- app requests/runs with Administrator rights
-- tray icon appears
-- settings window opens
-- `Files` tab opens
-- `Maintenance` tab opens
-- data folder button opens the data folder
-- program folder button opens the running app folder
-- remove registry settings button asks for confirmation
-- registry key is removed when confirmed
-- file extension selection still works
-- temp-folder checkbox still works
-- `.dwg` file activity logs
-- network path normalization works acceptably
-- Excel export opens
-- worksheet is named `File Activity`
-- export contains `Full Path`, `Folder Path`, `File Name`, `Extension`
-- DeskPulse does not log its own database/export file activity
-- GitHub repo does not include generated files
-
----
-
-## 27. License
+## 21. License
 
 License intention:
 
@@ -927,62 +1022,3 @@ SPDX identifier:
 ```text
 GPL-3.0-or-later
 ```
-
-
----
-
-## Diagnostic Debug Logging Added During 0.0.3 Troubleshooting
-
-DeskPulse can be launched with a command-line debug switch:
-
-```powershell
-DeskPulse.exe -debug
-```
-
-Also accepted:
-
-```text
---debug
-/debug
-```
-
-Normal `-debug` mode logs accepted monitored ETW file events only. This prevents the diagnostic log from growing too quickly during normal troubleshooting.
-
-Full skip-reason tracing is available with an additional switch:
-
-```powershell
-DeskPulse.exe -debug -debug-skipped
-```
-
-Also accepted:
-
-```text
---debug-skipped
-/debug-skipped
-```
-
-Use full skip tracing only for short troubleshooting runs because Windows ETW can generate many skipped background events very quickly.
-
-When enabled, DeskPulse writes:
-
-```text
-%USERPROFILE%\Documents\DeskPulse\DeskPulse-diagnostics.log
-```
-
-Normal diagnostics record accepted monitored events, including raw ETW path, normalized path, full path, detected extension, process name, process ID, active monitored extensions, and accept reason.
-
-This was added because newly added monitored extensions such as `.pad` and `.zip` were being saved in the registry but were not appearing in the normal activity export. The diagnostic log showed that those extensions were accepted by the filter, but many ETW `CLOSE` events arrived without a usable filename.
-
-Corrective 0.0.3 patch:
-
-- Accepted `OPEN` events are now written to the database immediately.
-- Accepted `WRITE` events are now written to the database immediately.
-- `CLOSE` handling remains, but DeskPulse no longer relies on `CLOSE` as the only point where a database row is created.
-- This fixes `.pad` and `.zip` activity not appearing in the Excel export when the relevant ETW close event has an empty `FileName` payload.
-
-Settings > Maintenance now includes:
-
-- Open Diagnostic Log
-- Show Active Extensions
-
-Normal DeskPulse use remains quiet unless started with the debug switch.

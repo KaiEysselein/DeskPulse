@@ -25,6 +25,12 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        if (AppRuntime.UninstallModeEnabled)
+        {
+            PortableUninstaller.RunInteractiveCleanup();
+            return;
+        }
+
         SQLitePCL.Batteries_V2.Init();
 
         Application.Run(new TrayAppContext());
@@ -34,7 +40,7 @@ internal static class Program
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.0.3";
+    public const string Version = "0.0.4";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
 }
 
@@ -42,18 +48,23 @@ public static class AppRuntime
 {
     public static bool DebugLoggingEnabled { get; private set; }
     public static bool DebugSkippedLoggingEnabled { get; private set; }
+    public static bool MaintenanceModeEnabled { get; private set; }
+    public static bool UninstallModeEnabled { get; private set; }
 
     public static void Configure(string[] args)
     {
-        DebugLoggingEnabled = args.Any(arg =>
-            string.Equals(arg, "-debug", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(arg, "--debug", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(arg, "/debug", StringComparison.OrdinalIgnoreCase));
+        DebugLoggingEnabled = HasSwitch(args, "debug");
+        DebugSkippedLoggingEnabled = HasSwitch(args, "debug-skipped");
+        MaintenanceModeEnabled = HasSwitch(args, "maintenance");
+        UninstallModeEnabled = HasSwitch(args, "uninstall");
+    }
 
-        DebugSkippedLoggingEnabled = args.Any(arg =>
-            string.Equals(arg, "-debug-skipped", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(arg, "--debug-skipped", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(arg, "/debug-skipped", StringComparison.OrdinalIgnoreCase));
+    private static bool HasSwitch(string[] args, string switchName)
+    {
+        return args.Any(arg =>
+            string.Equals(arg, "-" + switchName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "--" + switchName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "/" + switchName, StringComparison.OrdinalIgnoreCase));
     }
 }
 
@@ -146,6 +157,81 @@ public static class DiagnosticLogger
         catch
         {
             // Diagnostic logging must never crash DeskPulse.
+        }
+    }
+}
+
+public static class PortableUninstaller
+{
+    public static void RunInteractiveCleanup()
+    {
+        try
+        {
+            var settings = AppSettings.Load();
+
+            var confirm = MessageBox.Show(
+                "This will remove DeskPulse current-user registry settings and generated log/report files.\n\n" +
+                "The DeskPulse SQLite database will be preserved.\n\n" +
+                "Files preserved:\n" +
+                settings.DatabaseFilePath + "\n" +
+                settings.DatabaseFilePath + "-wal\n" +
+                settings.DatabaseFilePath + "-shm\n\n" +
+                "Continue?",
+                "DeskPulse Portable Uninstall",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (confirm != DialogResult.Yes)
+                return;
+
+            var deletedFiles = new List<string>();
+            var skippedFiles = new List<string>();
+
+            DeleteFileIfExists(Path.Combine(Path.GetTempPath(), "DeskPulse-startup.log"), deletedFiles, skippedFiles);
+            DeleteFileIfExists(DiagnosticLogger.GetDiagnosticLogFilePath(), deletedFiles, skippedFiles);
+            DeleteFileIfExists(settings.ExcelExportFilePath, deletedFiles, skippedFiles);
+
+            AppSettings.DeleteRegistrySettings();
+
+            var message =
+                "DeskPulse portable cleanup completed.\n\n" +
+                "Removed current-user registry settings.\n" +
+                "Preserved the SQLite data database.\n\n" +
+                "Deleted files: " + deletedFiles.Count + "\n" +
+                "Skipped files: " + skippedFiles.Count;
+
+            if (skippedFiles.Count > 0)
+                message += "\n\nSome files could not be deleted, usually because another program still has them open.";
+
+            MessageBox.Show(
+                message,
+                "DeskPulse Portable Uninstall",
+                MessageBoxButtons.OK,
+                skippedFiles.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse portable cleanup could not be completed.\n\n" + ex.Message,
+                "DeskPulse Portable Uninstall",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static void DeleteFileIfExists(string filePath, List<string> deletedFiles, List<string> skippedFiles)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return;
+
+            File.Delete(filePath);
+            deletedFiles.Add(filePath);
+        }
+        catch
+        {
+            skippedFiles.Add(filePath);
         }
     }
 }
@@ -287,6 +373,7 @@ public sealed class FileIoMonitor : IDisposable
     private DeskPulseDatabase _database;
     private TraceEventSession? _session;
     private Thread? _workerThread;
+    private bool _sessionEventsSubscribed;
     private bool _disposed;
 
     public FileIoMonitor()
@@ -299,6 +386,80 @@ public sealed class FileIoMonitor : IDisposable
         _database.Initialize();
 
         DiagnosticLogger.WriteStartupEntry(_settings);
+        WriteUserEvent("AppStarted", "DeskPulse started", "Application startup completed");
+        SubscribeSessionEvents();
+    }
+
+    private void SubscribeSessionEvents()
+    {
+        if (_sessionEventsSubscribed)
+            return;
+
+        SystemEvents.SessionSwitch += OnSessionSwitch;
+        _sessionEventsSubscribed = true;
+    }
+
+    private void UnsubscribeSessionEvents()
+    {
+        if (!_sessionEventsSubscribed)
+            return;
+
+        SystemEvents.SessionSwitch -= OnSessionSwitch;
+        _sessionEventsSubscribed = false;
+    }
+
+    private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+    {
+        switch (e.Reason)
+        {
+            case SessionSwitchReason.SessionLock:
+                WriteUserEvent("SessionLocked", "PC locked", "Windows session was locked");
+                break;
+            case SessionSwitchReason.SessionUnlock:
+                WriteUserEvent("SessionUnlocked", "PC unlocked", "Windows session was unlocked");
+                break;
+            case SessionSwitchReason.SessionLogon:
+                WriteUserEvent("SessionLogon", "User logged on", "Windows session logon detected");
+                break;
+            case SessionSwitchReason.SessionLogoff:
+                WriteUserEvent("SessionLogoff", "User logging off", "Windows session logoff detected");
+                break;
+            case SessionSwitchReason.ConsoleConnect:
+                WriteUserEvent("ConsoleConnect", "Console connected", "Console session connected");
+                break;
+            case SessionSwitchReason.ConsoleDisconnect:
+                WriteUserEvent("ConsoleDisconnect", "Console disconnected", "Console session disconnected");
+                break;
+            case SessionSwitchReason.RemoteConnect:
+                WriteUserEvent("RemoteConnect", "Remote session connected", "Remote session connected");
+                break;
+            case SessionSwitchReason.RemoteDisconnect:
+                WriteUserEvent("RemoteDisconnect", "Remote session disconnected", "Remote session disconnected");
+                break;
+        }
+    }
+
+    private void WriteUserEvent(string eventType, string eventDescription, string note)
+    {
+        try
+        {
+            GetDatabaseSnapshot().InsertUserEvent(new UserEventRecord
+            {
+                EventTime = DateTime.Now,
+                EventType = eventType,
+                EventDescription = eventDescription,
+                UserName = Environment.UserName,
+                MachineName = Environment.MachineName,
+                ProcessName = AppInfo.AppName,
+                ProcessId = Environment.ProcessId,
+                AppVersion = AppInfo.Version,
+                Note = note
+            });
+        }
+        catch (Exception ex)
+        {
+            TryWriteStartupDiagnostic(ex);
+        }
     }
 
     public void Start()
@@ -352,7 +513,7 @@ public sealed class FileIoMonitor : IDisposable
 
         EnsureDataFolderExists(settings.DataFolderPath);
 
-        database.ExportToExcel(settings.ExcelExportFilePath);
+        database.ExportToExcel(settings.ExcelExportFilePath, settings.ExportSheets);
 
         Process.Start(new ProcessStartInfo
         {
@@ -833,6 +994,24 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
+            WriteUserEvent("AppStopped", "DeskPulse stopped", "Application shutdown started");
+        }
+        catch
+        {
+            // Ignore shutdown logging errors.
+        }
+
+        try
+        {
+            UnsubscribeSessionEvents();
+        }
+        catch
+        {
+            // Ignore shutdown errors.
+        }
+
+        try
+        {
             _session?.Dispose();
         }
         catch
@@ -928,6 +1107,25 @@ public sealed class DeskPulseDatabase : IDisposable
             EnsureColumnExists(connection, "ActivityEvents", "FileName", "TEXT NULL");
             EnsureColumnExists(connection, "ActivityEvents", "Extension", "TEXT NULL");
 
+            ExecuteNonQuery(connection,
+                """
+                CREATE TABLE IF NOT EXISTS UserEvents
+                (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CreatedAt TEXT NOT NULL,
+                    EventDate TEXT NULL,
+                    EventTime TEXT NULL,
+                    EventType TEXT NOT NULL,
+                    EventDescription TEXT NULL,
+                    UserName TEXT NULL,
+                    MachineName TEXT NULL,
+                    ProcessName TEXT NULL,
+                    ProcessId INTEGER NULL,
+                    AppVersion TEXT NULL,
+                    Note TEXT NULL
+                );
+                """);
+
             ExecuteNonQuery(
                 connection,
                 "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_CreatedAt ON ActivityEvents (CreatedAt);"
@@ -946,6 +1144,16 @@ public sealed class DeskPulseDatabase : IDisposable
             ExecuteNonQuery(
                 connection,
                 "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_Extension ON ActivityEvents (Extension);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_UserEvents_CreatedAt ON UserEvents (CreatedAt);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_UserEvents_EventType ON UserEvents (EventType);"
             );
         }
     }
@@ -1045,7 +1253,68 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
-    public void ExportToExcel(string excelFilePath)
+    public void InsertUserEvent(UserEventRecord record)
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText =
+                """
+                INSERT INTO UserEvents
+                (
+                    CreatedAt,
+                    EventDate,
+                    EventTime,
+                    EventType,
+                    EventDescription,
+                    UserName,
+                    MachineName,
+                    ProcessName,
+                    ProcessId,
+                    AppVersion,
+                    Note
+                )
+                VALUES
+                (
+                    $CreatedAt,
+                    $EventDate,
+                    $EventTime,
+                    $EventType,
+                    $EventDescription,
+                    $UserName,
+                    $MachineName,
+                    $ProcessName,
+                    $ProcessId,
+                    $AppVersion,
+                    $Note
+                );
+                """;
+
+            var eventTime = record.EventTime == default ? DateTime.Now : record.EventTime;
+
+            AddText(command, "$CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+            AddText(command, "$EventDate", eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            AddText(command, "$EventTime", eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+            AddText(command, "$EventType", record.EventType);
+            AddText(command, "$EventDescription", record.EventDescription);
+            AddText(command, "$UserName", record.UserName);
+            AddText(command, "$MachineName", record.MachineName);
+            AddText(command, "$ProcessName", record.ProcessName);
+            AddInteger(command, "$ProcessId", record.ProcessId);
+            AddText(command, "$AppVersion", record.AppVersion);
+            AddText(command, "$Note", record.Note);
+
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void ExportToExcel(string excelFilePath, IReadOnlyList<ExportSheetOption> exportSheets)
     {
         lock (_dbLock)
         {
@@ -1055,80 +1324,29 @@ public sealed class DeskPulseDatabase : IDisposable
                 Directory.CreateDirectory(folder);
 
             var rows = ReadAllRows();
+            var userRows = ReadAllUserRows();
+            var selectedSheets = ExportSheetOption.NormalizeList(exportSheets);
 
             using var workbook = new XLWorkbook();
-            var sheet = workbook.Worksheets.Add("File Activity");
 
-            var headers = new[]
+            foreach (var sheetOption in selectedSheets)
             {
-                "Id",
-                "Created At",
-                "Activity Type",
-                "Full Path",
-                "Folder Path",
-                "File Name",
-                "Extension",
-                "Date Opened",
-                "Time Opened",
-                "Size At Opening",
-                "First Write Date",
-                "First Write Time",
-                "Last Write Date",
-                "Last Write Time",
-                "Write Count",
-                "Size At Last Write",
-                "Date Closed",
-                "Time Closed",
-                "Size At Closing",
-                "Inferred Action",
-                "Process",
-                "Process ID",
-                "Note"
-            };
-
-            for (var col = 0; col < headers.Length; col++)
-            {
-                sheet.Cell(1, col + 1).Value = headers[col];
-                sheet.Cell(1, col + 1).Style.Font.Bold = true;
+                if (sheetOption.Id == ExportSheetOption.FileActivityId)
+                    AddFileActivityWorksheet(workbook, rows, sheetOption);
+                else if (sheetOption.Id == ExportSheetOption.DailySummaryId)
+                    AddDailySummaryWorksheet(workbook, rows, sheetOption);
+                else if (sheetOption.Id == ExportSheetOption.ExtensionSummaryId)
+                    AddExtensionSummaryWorksheet(workbook, rows, sheetOption);
+                else if (sheetOption.Id == ExportSheetOption.ProcessSummaryId)
+                    AddProcessSummaryWorksheet(workbook, rows, sheetOption);
+                else if (sheetOption.Id == ExportSheetOption.ErrorsId)
+                    AddErrorsWorksheet(workbook, rows, sheetOption);
+                else if (sheetOption.Id == ExportSheetOption.UserId)
+                    AddUserWorksheet(workbook, userRows, sheetOption);
             }
 
-            var rowNumber = 2;
-
-            foreach (var row in rows)
-            {
-                sheet.Cell(rowNumber, 1).Value = row.Id;
-                sheet.Cell(rowNumber, 2).Value = row.CreatedAt;
-                sheet.Cell(rowNumber, 3).Value = row.ActivityType;
-                sheet.Cell(rowNumber, 4).Value = row.FullPath;
-                sheet.Cell(rowNumber, 5).Value = row.FolderPath;
-                sheet.Cell(rowNumber, 6).Value = row.FileName;
-                sheet.Cell(rowNumber, 7).Value = row.Extension;
-                sheet.Cell(rowNumber, 8).Value = row.DateOpened;
-                sheet.Cell(rowNumber, 9).Value = row.TimeOpened;
-                SetCellValue(sheet.Cell(rowNumber, 10), row.SizeAtOpening);
-                sheet.Cell(rowNumber, 11).Value = row.FirstWriteDate;
-                sheet.Cell(rowNumber, 12).Value = row.FirstWriteTime;
-                sheet.Cell(rowNumber, 13).Value = row.LastWriteDate;
-                sheet.Cell(rowNumber, 14).Value = row.LastWriteTime;
-                SetCellValue(sheet.Cell(rowNumber, 15), row.WriteCount);
-                SetCellValue(sheet.Cell(rowNumber, 16), row.SizeAtLastWrite);
-                sheet.Cell(rowNumber, 17).Value = row.DateClosed;
-                sheet.Cell(rowNumber, 18).Value = row.TimeClosed;
-                SetCellValue(sheet.Cell(rowNumber, 19), row.SizeAtClosing);
-                sheet.Cell(rowNumber, 20).Value = row.InferredAction;
-                sheet.Cell(rowNumber, 21).Value = row.ProcessName;
-                SetCellValue(sheet.Cell(rowNumber, 22), row.ProcessId);
-                sheet.Cell(rowNumber, 23).Value = row.Note;
-
-                rowNumber++;
-            }
-
-            sheet.SheetView.FreezeRows(1);
-
-            if (sheet.RangeUsed() != null)
-                sheet.RangeUsed()!.SetAutoFilter();
-
-            sheet.Columns().AdjustToContents(1, Math.Min(rowNumber, 250));
+            if (!workbook.Worksheets.Any())
+                AddFileActivityWorksheet(workbook, rows, ExportSheetOption.GetDefaultOptions()[0]);
 
             var exportFolder = Path.GetDirectoryName(excelFilePath) ?? AppContext.BaseDirectory;
             var exportFileNameWithoutExtension = Path.GetFileNameWithoutExtension(excelFilePath);
@@ -1147,12 +1365,376 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
+    private static void AddFileActivityWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var rowNumber = 2;
+
+        foreach (var row in rows)
+        {
+            for (var col = 0; col < fields.Count; col++)
+                WriteFileActivityCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
+
+            rowNumber++;
+        }
+
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void AddDailySummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var summaryRows = rows
+            .GroupBy(row => GetRowDate(row))
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var rowNumber = 2;
+
+        foreach (var group in summaryRows)
+        {
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["date"] = group.Key,
+                ["events"] = group.LongCount(),
+                ["open-events"] = group.LongCount(row => !string.IsNullOrWhiteSpace(row.DateOpened)),
+                ["write-events"] = group.LongCount(row => row.WriteCount.GetValueOrDefault() > 0 || ContainsText(row.InferredAction, "write") || ContainsText(row.InferredAction, "saved")),
+                ["close-events"] = group.LongCount(row => !string.IsNullOrWhiteSpace(row.DateClosed)),
+                ["error-events"] = group.LongCount(row => string.Equals(row.ActivityType, "Error", StringComparison.OrdinalIgnoreCase)),
+                ["distinct-files"] = group.Select(row => row.FullPath).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
+                ["distinct-processes"] = group.Select(row => row.ProcessName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).LongCount()
+            };
+
+            WriteDictionaryRow(sheet, rowNumber, fields, values);
+            rowNumber++;
+        }
+
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void AddExtensionSummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var summaryRows = rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.Extension))
+            .GroupBy(row => row.Extension, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.LongCount())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var rowNumber = 2;
+
+        foreach (var group in summaryRows)
+        {
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["extension"] = group.Key,
+                ["events"] = group.LongCount(),
+                ["distinct-files"] = group.Select(row => row.FullPath).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
+                ["write-events"] = group.LongCount(row => row.WriteCount.GetValueOrDefault() > 0 || ContainsText(row.InferredAction, "write") || ContainsText(row.InferredAction, "saved")),
+                ["last-event"] = group.Max(row => row.CreatedAt)
+            };
+
+            WriteDictionaryRow(sheet, rowNumber, fields, values);
+            rowNumber++;
+        }
+
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void AddProcessSummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var summaryRows = rows
+            .GroupBy(row => new { row.ProcessName, ProcessId = row.ProcessId ?? 0 })
+            .OrderByDescending(group => group.LongCount())
+            .ThenBy(group => group.Key.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var rowNumber = 2;
+
+        foreach (var group in summaryRows)
+        {
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["process"] = string.IsNullOrWhiteSpace(group.Key.ProcessName) ? "UnknownProcess" : group.Key.ProcessName,
+                ["process-id"] = group.Key.ProcessId == 0 ? null : group.Key.ProcessId,
+                ["events"] = group.LongCount(),
+                ["distinct-files"] = group.Select(row => row.FullPath).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).LongCount(),
+                ["write-events"] = group.LongCount(row => row.WriteCount.GetValueOrDefault() > 0 || ContainsText(row.InferredAction, "write") || ContainsText(row.InferredAction, "saved")),
+                ["last-event"] = group.Max(row => row.CreatedAt)
+            };
+
+            WriteDictionaryRow(sheet, rowNumber, fields, values);
+            rowNumber++;
+        }
+
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void AddErrorsWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var errorRows = rows
+            .Where(row => string.Equals(row.ActivityType, "Error", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(row => row.Id)
+            .ToList();
+
+        var rowNumber = 2;
+
+        foreach (var row in errorRows)
+        {
+            for (var col = 0; col < fields.Count; col++)
+                WriteFileActivityCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
+
+            rowNumber++;
+        }
+
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void AddUserWorksheet(XLWorkbook workbook, List<UserExportRow> rows, ExportSheetOption sheetOption)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var rowNumber = 2;
+
+        foreach (var row in rows)
+        {
+            for (var col = 0; col < fields.Count; col++)
+                WriteUserCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
+
+            rowNumber++;
+        }
+
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void WriteDictionaryRow(IXLWorksheet sheet, int rowNumber, IReadOnlyList<ExportFieldOption> fields, IReadOnlyDictionary<string, object?> values)
+    {
+        for (var col = 0; col < fields.Count; col++)
+        {
+            values.TryGetValue(fields[col].Id, out var value);
+            SetAnyCellValue(sheet.Cell(rowNumber, col + 1), value);
+        }
+    }
+
+    private static void WriteFileActivityCell(IXLCell cell, ExcelExportRow row, string fieldId)
+    {
+        switch (fieldId)
+        {
+            case "id":
+                SetCellValue(cell, row.Id);
+                break;
+            case "created-at":
+                cell.Value = row.CreatedAt;
+                break;
+            case "activity-type":
+                cell.Value = row.ActivityType;
+                break;
+            case "full-path":
+            case "item":
+                cell.Value = row.FullPath;
+                break;
+            case "folder-path":
+                cell.Value = row.FolderPath;
+                break;
+            case "file-name":
+                cell.Value = row.FileName;
+                break;
+            case "extension":
+                cell.Value = row.Extension;
+                break;
+            case "date-opened":
+                cell.Value = row.DateOpened;
+                break;
+            case "time-opened":
+                cell.Value = row.TimeOpened;
+                break;
+            case "size-at-opening":
+                SetCellValue(cell, row.SizeAtOpening);
+                break;
+            case "first-write-date":
+                cell.Value = row.FirstWriteDate;
+                break;
+            case "first-write-time":
+                cell.Value = row.FirstWriteTime;
+                break;
+            case "last-write-date":
+                cell.Value = row.LastWriteDate;
+                break;
+            case "last-write-time":
+                cell.Value = row.LastWriteTime;
+                break;
+            case "write-count":
+                SetCellValue(cell, row.WriteCount);
+                break;
+            case "size-at-last-write":
+                SetCellValue(cell, row.SizeAtLastWrite);
+                break;
+            case "date-closed":
+                cell.Value = row.DateClosed;
+                break;
+            case "time-closed":
+                cell.Value = row.TimeClosed;
+                break;
+            case "size-at-closing":
+                SetCellValue(cell, row.SizeAtClosing);
+                break;
+            case "inferred-action":
+                cell.Value = row.InferredAction;
+                break;
+            case "process-name":
+            case "process":
+                cell.Value = row.ProcessName;
+                break;
+            case "process-id":
+                SetCellValue(cell, row.ProcessId);
+                break;
+            case "note":
+                cell.Value = row.Note;
+                break;
+            default:
+                cell.Value = "";
+                break;
+        }
+    }
+
+    private static void WriteUserCell(IXLCell cell, UserExportRow row, string fieldId)
+    {
+        switch (fieldId)
+        {
+            case "id":
+                SetCellValue(cell, row.Id);
+                break;
+            case "created-at":
+                cell.Value = row.CreatedAt;
+                break;
+            case "event-date":
+                cell.Value = row.EventDate;
+                break;
+            case "event-time":
+                cell.Value = row.EventTime;
+                break;
+            case "event-type":
+                cell.Value = row.EventType;
+                break;
+            case "event-description":
+                cell.Value = row.EventDescription;
+                break;
+            case "user-name":
+                cell.Value = row.UserName;
+                break;
+            case "machine-name":
+                cell.Value = row.MachineName;
+                break;
+            case "process-name":
+            case "process":
+                cell.Value = row.ProcessName;
+                break;
+            case "process-id":
+                SetCellValue(cell, row.ProcessId);
+                break;
+            case "app-version":
+                cell.Value = row.AppVersion;
+                break;
+            case "note":
+                cell.Value = row.Note;
+                break;
+            default:
+                cell.Value = "";
+                break;
+        }
+    }
+
+    private static void WriteHeaders(IXLWorksheet sheet, string[] headers)
+    {
+        for (var col = 0; col < headers.Length; col++)
+        {
+            sheet.Cell(1, col + 1).Value = headers[col];
+            sheet.Cell(1, col + 1).Style.Font.Bold = true;
+        }
+    }
+
+    private static void FinishWorksheet(IXLWorksheet sheet, int rowNumber)
+    {
+        sheet.SheetView.FreezeRows(1);
+
+        if (sheet.RangeUsed() != null)
+            sheet.RangeUsed()!.SetAutoFilter();
+
+        sheet.Columns().AdjustToContents(1, Math.Min(rowNumber, 250));
+    }
+
+    private static string GetRowDate(ExcelExportRow row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.DateOpened))
+            return row.DateOpened;
+
+        if (!string.IsNullOrWhiteSpace(row.FirstWriteDate))
+            return row.FirstWriteDate;
+
+        if (!string.IsNullOrWhiteSpace(row.DateClosed))
+            return row.DateClosed;
+
+        if (!string.IsNullOrWhiteSpace(row.CreatedAt) && row.CreatedAt.Length >= 10)
+            return row.CreatedAt.Substring(0, 10);
+
+        return "Unknown";
+    }
+
+    private static bool ContainsText(string value, string searchText)
+    {
+        return value.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     private static void SetCellValue(IXLCell cell, long? value)
     {
         if (value == null)
             cell.Value = "";
         else
             cell.Value = value.Value;
+    }
+
+    private static void SetAnyCellValue(IXLCell cell, object? value)
+    {
+        if (value == null)
+        {
+            cell.Value = "";
+            return;
+        }
+
+        if (value is long longValue)
+        {
+            SetCellValue(cell, longValue);
+            return;
+        }
+
+        if (value is int intValue)
+        {
+            SetCellValue(cell, intValue);
+            return;
+        }
+
+        cell.Value = value.ToString() ?? "";
     }
 
     private List<ExcelExportRow> ReadAllRows()
@@ -1247,6 +1829,60 @@ public sealed class DeskPulseDatabase : IDisposable
                 ProcessName = ReadText(reader, 21),
                 ProcessId = ReadNullableLong(reader, 22),
                 Note = ReadText(reader, 23)
+            });
+        }
+
+        return result;
+    }
+
+    private List<UserExportRow> ReadAllUserRows()
+    {
+        var result = new List<UserExportRow>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText =
+            """
+            SELECT
+                Id,
+                CreatedAt,
+                EventDate,
+                EventTime,
+                EventType,
+                EventDescription,
+                UserName,
+                MachineName,
+                ProcessName,
+                ProcessId,
+                AppVersion,
+                Note
+            FROM UserEvents
+            ORDER BY Id;
+            """;
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            result.Add(new UserExportRow
+            {
+                Id = ReadLong(reader, 0),
+                CreatedAt = ReadText(reader, 1),
+                EventDate = ReadText(reader, 2),
+                EventTime = ReadText(reader, 3),
+                EventType = ReadText(reader, 4),
+                EventDescription = ReadText(reader, 5),
+                UserName = ReadText(reader, 6),
+                MachineName = ReadText(reader, 7),
+                ProcessName = ReadText(reader, 8),
+                ProcessId = ReadNullableLong(reader, 9),
+                AppVersion = ReadText(reader, 10),
+                Note = ReadText(reader, 11)
             });
         }
 
@@ -1382,6 +2018,343 @@ public sealed class ExcelExportRow
     public string InferredAction { get; set; } = "";
     public string ProcessName { get; set; } = "";
     public long? ProcessId { get; set; }
+    public string Note { get; set; } = "";
+}
+
+public sealed class ExportFieldOption
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string HeaderName { get; set; } = "";
+
+    public override string ToString()
+    {
+        return DisplayName;
+    }
+}
+
+public sealed class ExportSheetOption
+{
+    public const string FileActivityId = "file-activity";
+    public const string DailySummaryId = "daily-summary";
+    public const string ExtensionSummaryId = "extension-summary";
+    public const string ProcessSummaryId = "process-summary";
+    public const string ErrorsId = "errors";
+    public const string UserId = "user";
+
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string WorksheetName { get; set; } = "";
+    public List<string> FieldIds { get; set; } = new();
+
+    public override string ToString()
+    {
+        return DisplayName;
+    }
+
+    public List<ExportFieldOption> GetAvailableFields()
+    {
+        return GetAvailableFields(Id);
+    }
+
+    public List<ExportFieldOption> GetSelectedFields()
+    {
+        return NormalizeFieldList(Id, FieldIds);
+    }
+
+    public static List<ExportSheetOption> GetAllOptions()
+    {
+        return new List<ExportSheetOption>
+        {
+            CreateOption(FileActivityId, "File Activity", "File Activity"),
+            CreateOption(DailySummaryId, "Daily Summary", "Daily Summary"),
+            CreateOption(ExtensionSummaryId, "Summary by Extension", "By Extension"),
+            CreateOption(ProcessSummaryId, "Summary by Process", "By Process"),
+            CreateOption(ErrorsId, "Errors", "Errors"),
+            CreateOption(UserId, "User", "User")
+        };
+    }
+
+    public static List<ExportSheetOption> GetDefaultOptions()
+    {
+        return GetAllOptions()
+            .Where(option => option.Id == FileActivityId)
+            .ToList();
+    }
+
+    private static ExportSheetOption CreateOption(string id, string displayName, string worksheetName)
+    {
+        return new ExportSheetOption
+        {
+            Id = id,
+            DisplayName = displayName,
+            WorksheetName = worksheetName,
+            FieldIds = GetDefaultFieldIds(id)
+        };
+    }
+
+    public static List<ExportFieldOption> GetAvailableFields(string sheetId)
+    {
+        if (string.Equals(sheetId, DailySummaryId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ExportFieldOption>
+            {
+                Field("date", "Date", "Date"),
+                Field("events", "Events", "Events"),
+                Field("open-events", "Open Events", "Open Events"),
+                Field("write-events", "Write Events", "Write Events"),
+                Field("close-events", "Close Events", "Close Events"),
+                Field("error-events", "Error Events", "Error Events"),
+                Field("distinct-files", "Distinct Files", "Distinct Files"),
+                Field("distinct-processes", "Distinct Processes", "Distinct Processes")
+            };
+        }
+
+        if (string.Equals(sheetId, ExtensionSummaryId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ExportFieldOption>
+            {
+                Field("extension", "File Type / Extension", "Extension"),
+                Field("events", "Events", "Events"),
+                Field("distinct-files", "Distinct Files", "Distinct Files"),
+                Field("write-events", "Write Events", "Write Events"),
+                Field("last-event", "Last Event", "Last Event")
+            };
+        }
+
+        if (string.Equals(sheetId, ProcessSummaryId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ExportFieldOption>
+            {
+                Field("process", "Process", "Process"),
+                Field("process-id", "Process ID", "Process ID"),
+                Field("events", "Events", "Events"),
+                Field("distinct-files", "Distinct Files", "Distinct Files"),
+                Field("write-events", "Write Events", "Write Events"),
+                Field("last-event", "Last Event", "Last Event")
+            };
+        }
+
+        if (string.Equals(sheetId, ErrorsId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ExportFieldOption>
+            {
+                Field("id", "Id", "Id"),
+                Field("created-at", "Created At", "Created At"),
+                Field("item", "Item / Full Path", "Item"),
+                Field("process", "Process", "Process"),
+                Field("process-id", "Process ID", "Process ID"),
+                Field("note", "Note", "Note")
+            };
+        }
+
+        if (string.Equals(sheetId, UserId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ExportFieldOption>
+            {
+                Field("id", "Id", "Id"),
+                Field("created-at", "Created At", "Created At"),
+                Field("event-date", "Date", "Date"),
+                Field("event-time", "Time", "Time"),
+                Field("event-type", "Event Type", "Event Type"),
+                Field("event-description", "Event", "Event"),
+                Field("user-name", "User", "User"),
+                Field("machine-name", "Computer", "Computer"),
+                Field("process-name", "Process", "Process"),
+                Field("process-id", "Process ID", "Process ID"),
+                Field("app-version", "App Version", "App Version"),
+                Field("note", "Note", "Note")
+            };
+        }
+
+        return new List<ExportFieldOption>
+        {
+            Field("id", "Id", "Id"),
+            Field("created-at", "Created At", "Created At"),
+            Field("activity-type", "Activity Type", "Activity Type"),
+            Field("full-path", "Full Path", "Full Path"),
+            Field("folder-path", "Folder Path", "Folder Path"),
+            Field("file-name", "File Name", "File Name"),
+            Field("extension", "File Type / Extension", "Extension"),
+            Field("date-opened", "Date Opened", "Date Opened"),
+            Field("time-opened", "Time Opened", "Time Opened"),
+            Field("size-at-opening", "Size At Opening", "Size At Opening"),
+            Field("first-write-date", "First Write Date", "First Write Date"),
+            Field("first-write-time", "First Write Time", "First Write Time"),
+            Field("last-write-date", "Last Write Date", "Last Write Date"),
+            Field("last-write-time", "Last Write Time", "Last Write Time"),
+            Field("write-count", "Write Count", "Write Count"),
+            Field("size-at-last-write", "Size At Last Write", "Size At Last Write"),
+            Field("date-closed", "Date Closed", "Date Closed"),
+            Field("time-closed", "Time Closed", "Time Closed"),
+            Field("size-at-closing", "Size At Closing", "Size At Closing"),
+            Field("inferred-action", "Inferred Action", "Inferred Action"),
+            Field("process-name", "Process", "Process"),
+            Field("process-id", "Process ID", "Process ID"),
+            Field("note", "Note", "Note")
+        };
+    }
+
+    public static List<string> GetDefaultFieldIds(string sheetId)
+    {
+        return GetAvailableFields(sheetId).Select(field => field.Id).ToList();
+    }
+
+    public static List<ExportFieldOption> NormalizeFieldList(string sheetId, IReadOnlyList<string>? fieldIds)
+    {
+        var availableFields = GetAvailableFields(sheetId);
+
+        if (fieldIds == null || fieldIds.Count == 0)
+            return availableFields;
+
+        var result = new List<ExportFieldOption>();
+
+        foreach (var fieldId in fieldIds)
+        {
+            var field = availableFields.FirstOrDefault(x => string.Equals(x.Id, fieldId, StringComparison.OrdinalIgnoreCase));
+
+            if (field == null)
+                continue;
+
+            if (result.Any(x => string.Equals(x.Id, field.Id, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            result.Add(field);
+        }
+
+        if (result.Count == 0)
+            return availableFields;
+
+        return result;
+    }
+
+    public static List<ExportSheetOption> ParseList(string text)
+    {
+        var allOptions = GetAllOptions();
+        var result = new List<ExportSheetOption>();
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var entries = text
+                .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x));
+
+            foreach (var entry in entries)
+            {
+                var sheetId = entry;
+                var fieldsPart = "";
+                var separatorIndex = entry.IndexOf(':');
+
+                if (separatorIndex >= 0)
+                {
+                    sheetId = entry.Substring(0, separatorIndex).Trim();
+                    fieldsPart = entry.Substring(separatorIndex + 1).Trim();
+                }
+
+                var template = allOptions.FirstOrDefault(x => string.Equals(x.Id, sheetId, StringComparison.OrdinalIgnoreCase));
+
+                if (template == null)
+                    continue;
+
+                if (result.Any(x => string.Equals(x.Id, template.Id, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                var selectedFieldIds = string.IsNullOrWhiteSpace(fieldsPart)
+                    ? GetDefaultFieldIds(template.Id)
+                    : fieldsPart.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+
+                result.Add(new ExportSheetOption
+                {
+                    Id = template.Id,
+                    DisplayName = template.DisplayName,
+                    WorksheetName = template.WorksheetName,
+                    FieldIds = NormalizeFieldList(template.Id, selectedFieldIds).Select(field => field.Id).ToList()
+                });
+            }
+        }
+
+        if (result.Count == 0)
+            result = GetDefaultOptions();
+
+        return result;
+    }
+
+    public static List<ExportSheetOption> NormalizeList(IReadOnlyList<ExportSheetOption>? options)
+    {
+        if (options == null || options.Count == 0)
+            return GetDefaultOptions();
+
+        var allOptions = GetAllOptions();
+        var result = new List<ExportSheetOption>();
+
+        foreach (var option in options)
+        {
+            var matched = allOptions.FirstOrDefault(x => string.Equals(x.Id, option.Id, StringComparison.OrdinalIgnoreCase));
+
+            if (matched == null)
+                continue;
+
+            if (result.Any(x => string.Equals(x.Id, matched.Id, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            result.Add(new ExportSheetOption
+            {
+                Id = matched.Id,
+                DisplayName = matched.DisplayName,
+                WorksheetName = matched.WorksheetName,
+                FieldIds = NormalizeFieldList(matched.Id, option.FieldIds).Select(field => field.Id).ToList()
+            });
+        }
+
+        if (result.Count == 0)
+            result = GetDefaultOptions();
+
+        return result;
+    }
+
+    public static string ToRegistryText(IReadOnlyList<ExportSheetOption> options)
+    {
+        return string.Join(",", NormalizeList(options).Select(option => option.Id + ":" + string.Join("|", NormalizeFieldList(option.Id, option.FieldIds).Select(field => field.Id))));
+    }
+
+    private static ExportFieldOption Field(string id, string displayName, string headerName)
+    {
+        return new ExportFieldOption
+        {
+            Id = id,
+            DisplayName = displayName,
+            HeaderName = headerName
+        };
+    }
+}
+
+public sealed class UserEventRecord
+{
+    public DateTime EventTime { get; set; }
+    public string EventType { get; set; } = "";
+    public string EventDescription { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string MachineName { get; set; } = "";
+    public string ProcessName { get; set; } = "";
+    public int ProcessId { get; set; }
+    public string AppVersion { get; set; } = "";
+    public string Note { get; set; } = "";
+}
+
+public sealed class UserExportRow
+{
+    public long Id { get; set; }
+    public string CreatedAt { get; set; } = "";
+    public string EventDate { get; set; } = "";
+    public string EventTime { get; set; } = "";
+    public string EventType { get; set; } = "";
+    public string EventDescription { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string MachineName { get; set; } = "";
+    public string ProcessName { get; set; } = "";
+    public long? ProcessId { get; set; }
+    public string AppVersion { get; set; } = "";
     public string Note { get; set; } = "";
 }
 
@@ -1547,6 +2520,8 @@ public sealed class AppSettings
         ".cs"
     };
 
+    public List<ExportSheetOption> ExportSheets { get; set; } = ExportSheetOption.GetDefaultOptions();
+
     public string DatabaseFilePath => Path.Combine(DataFolderPath, "DeskPulse.db");
 
     public string ExcelExportFilePath => Path.Combine(DataFolderPath, "DeskPulse-export.xlsx");
@@ -1560,7 +2535,8 @@ public sealed class AppSettings
         {
             DataFolderPath = DataFolderPath,
             IgnoreTempFolders = IgnoreTempFolders,
-            ExtensionsToMonitor = new HashSet<string>(ExtensionsToMonitor, StringComparer.OrdinalIgnoreCase)
+            ExtensionsToMonitor = new HashSet<string>(ExtensionsToMonitor, StringComparer.OrdinalIgnoreCase),
+            ExportSheets = ExportSheetOption.NormalizeList(ExportSheets)
         };
     }
 
@@ -1598,6 +2574,9 @@ public sealed class AppSettings
 
         settings.IgnoreTempFolders = ReadBool(key, "IgnoreTempFolders", true);
 
+        var exportSheetsText = ReadString(key, "ExportSheets", ExportSheetOption.ToRegistryText(settings.ExportSheets));
+        settings.ExportSheets = ExportSheetOption.ParseList(exportSheetsText);
+
         var extensionsText = ReadString(key, "ExtensionsToMonitor", settings.ExtensionsAsText);
         settings.ExtensionsToMonitor = ParseExtensions(extensionsText);
 
@@ -1633,6 +2612,7 @@ public sealed class AppSettings
         key.SetValue("DatabaseFilePath", DatabaseFilePath, RegistryValueKind.String);
         key.SetValue("ExcelExportFilePath", ExcelExportFilePath, RegistryValueKind.String);
         key.SetValue("ExtensionsToMonitor", ExtensionsAsText, RegistryValueKind.String);
+        key.SetValue("ExportSheets", ExportSheetOption.ToRegistryText(ExportSheets), RegistryValueKind.String);
         key.SetValue("IgnoreTempFolders", IgnoreTempFolders ? 1 : 0, RegistryValueKind.DWord);
     }
 
@@ -1733,6 +2713,10 @@ public sealed class SettingsForm : Form
     private readonly ListBox _availableExtensionsListBox = new();
     private readonly ListBox _monitoredExtensionsListBox = new();
     private readonly CheckBox _ignoreTempFoldersCheckBox = new();
+    private readonly CheckedListBox _exportSheetsCheckedListBox = new();
+    private readonly TabControl _exportFieldTabControl = new();
+    private readonly Dictionary<string, CheckedListBox> _exportFieldListsBySheetId = new(StringComparer.OrdinalIgnoreCase);
+    private bool _updatingExportUi;
 
     public SettingsForm()
     {
@@ -1759,16 +2743,27 @@ public sealed class SettingsForm : Form
             Text = "Files"
         };
 
-        var maintenanceTab = new TabPage
+        var exportOptionsTab = new TabPage
         {
-            Text = "Maintenance"
+            Text = "Export Options"
         };
 
         tabControl.TabPages.Add(filesTab);
-        tabControl.TabPages.Add(maintenanceTab);
+        tabControl.TabPages.Add(exportOptionsTab);
 
         BuildFilesTab(filesTab, settings);
-        BuildMaintenanceTab(maintenanceTab, settings);
+        BuildExportOptionsTab(exportOptionsTab, settings);
+
+        if (AppRuntime.MaintenanceModeEnabled)
+        {
+            var maintenanceTab = new TabPage
+            {
+                Text = "Maintenance"
+            };
+
+            tabControl.TabPages.Add(maintenanceTab);
+            BuildMaintenanceTab(maintenanceTab, settings);
+        }
 
         var okButton = new Button
         {
@@ -1924,6 +2919,174 @@ public sealed class SettingsForm : Form
             monitoredLabel,
             _monitoredExtensionsListBox
         });
+    }
+
+    private void BuildExportOptionsTab(TabPage exportOptionsTab, AppSettings settings)
+    {
+        var headingLabel = new Label
+        {
+            Text = "Excel export layout",
+            Left = 16,
+            Top = 20,
+            Width = 740,
+            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
+        };
+
+        var explanationLabel = new Label
+        {
+            Text = "Tick the worksheets to create. Each ticked worksheet gets its own field tab where you can choose and sort the exported columns.",
+            Left = 16,
+            Top = 48,
+            Width = 760,
+            Height = 35,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var worksheetLabel = new Label
+        {
+            Text = "Worksheets:",
+            Left = 16,
+            Top = 96,
+            Width = 240
+        };
+
+        _exportSheetsCheckedListBox.Left = 16;
+        _exportSheetsCheckedListBox.Top = 118;
+        _exportSheetsCheckedListBox.Width = 260;
+        _exportSheetsCheckedListBox.Height = 300;
+        _exportSheetsCheckedListBox.DisplayMember = nameof(ExportSheetOption.DisplayName);
+        _exportSheetsCheckedListBox.CheckOnClick = true;
+        _exportSheetsCheckedListBox.SelectionMode = SelectionMode.One;
+        _exportSheetsCheckedListBox.ItemCheck += (_, _) =>
+        {
+            if (_updatingExportUi)
+                return;
+
+            if (IsHandleCreated)
+                BeginInvoke(new Action(RebuildExportFieldTabs));
+            else
+                RebuildExportFieldTabs();
+        };
+
+        var sheetUpButton = new Button
+        {
+            Text = "Up",
+            Left = 16,
+            Top = 430,
+            Width = 60,
+            Height = 28
+        };
+
+        sheetUpButton.Click += (_, _) => MoveSelectedExportSheet(-1);
+
+        var sheetDownButton = new Button
+        {
+            Text = "Down",
+            Left = 84,
+            Top = 430,
+            Width = 60,
+            Height = 28
+        };
+
+        sheetDownButton.Click += (_, _) => MoveSelectedExportSheet(1);
+
+        var resetButton = new Button
+        {
+            Text = "Reset Export Options",
+            Left = 154,
+            Top = 430,
+            Width = 122,
+            Height = 28
+        };
+
+        resetButton.Click += (_, _) => ResetExportSheetsToDefault();
+
+        var fieldTabsLabel = new Label
+        {
+            Text = "Fields for selected worksheets:",
+            Left = 300,
+            Top = 96,
+            Width = 360
+        };
+
+        _exportFieldTabControl.Left = 300;
+        _exportFieldTabControl.Top = 118;
+        _exportFieldTabControl.Width = 485;
+        _exportFieldTabControl.Height = 300;
+
+        var fieldUpButton = new Button
+        {
+            Text = "Move Field Up",
+            Left = 300,
+            Top = 430,
+            Width = 120,
+            Height = 28
+        };
+
+        fieldUpButton.Click += (_, _) => MoveSelectedExportField(-1);
+
+        var fieldDownButton = new Button
+        {
+            Text = "Move Field Down",
+            Left = 430,
+            Top = 430,
+            Width = 130,
+            Height = 28
+        };
+
+        fieldDownButton.Click += (_, _) => MoveSelectedExportField(1);
+
+        var selectAllFieldsButton = new Button
+        {
+            Text = "Select All Fields",
+            Left = 570,
+            Top = 430,
+            Width = 105,
+            Height = 28
+        };
+
+        selectAllFieldsButton.Click += (_, _) => SetCurrentExportFieldChecks(true);
+
+        var clearFieldsButton = new Button
+        {
+            Text = "Clear Fields",
+            Left = 685,
+            Top = 430,
+            Width = 100,
+            Height = 28
+        };
+
+        clearFieldsButton.Click += (_, _) => SetCurrentExportFieldChecks(false);
+
+        var hintLabel = new Label
+        {
+            Text = "Tip: the order shown in each field list becomes the column order in that Excel worksheet.",
+            Left = 300,
+            Top = 468,
+            Width = 480,
+            Height = 35,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        exportOptionsTab.Controls.AddRange(new Control[]
+        {
+            headingLabel,
+            explanationLabel,
+            worksheetLabel,
+            _exportSheetsCheckedListBox,
+            sheetUpButton,
+            sheetDownButton,
+            resetButton,
+            fieldTabsLabel,
+            _exportFieldTabControl,
+            fieldUpButton,
+            fieldDownButton,
+            selectAllFieldsButton,
+            clearFieldsButton,
+            hintLabel
+        });
+
+        LoadExportOptions(settings);
     }
 
     private void BuildMaintenanceTab(TabPage maintenanceTab, AppSettings settings)
@@ -2232,6 +3395,296 @@ public sealed class SettingsForm : Form
             _monitoredExtensionsListBox.Items.Add(extension);
     }
 
+    private void LoadExportOptions(AppSettings settings)
+    {
+        _updatingExportUi = true;
+
+        try
+        {
+            _exportSheetsCheckedListBox.Items.Clear();
+            _exportFieldTabControl.TabPages.Clear();
+            _exportFieldListsBySheetId.Clear();
+
+            var allOptions = ExportSheetOption.GetAllOptions();
+            var selectedOptions = ExportSheetOption.NormalizeList(settings.ExportSheets);
+            var orderedOptions = new List<ExportSheetOption>();
+
+            foreach (var selected in selectedOptions)
+            {
+                var template = allOptions.FirstOrDefault(x => string.Equals(x.Id, selected.Id, StringComparison.OrdinalIgnoreCase));
+
+                if (template == null)
+                    continue;
+
+                orderedOptions.Add(new ExportSheetOption
+                {
+                    Id = template.Id,
+                    DisplayName = template.DisplayName,
+                    WorksheetName = template.WorksheetName,
+                    FieldIds = selected.FieldIds.ToList()
+                });
+            }
+
+            foreach (var option in allOptions)
+            {
+                if (orderedOptions.Any(x => string.Equals(x.Id, option.Id, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                orderedOptions.Add(option);
+            }
+
+            foreach (var option in orderedOptions)
+            {
+                var selectedOption = selectedOptions.FirstOrDefault(x => string.Equals(x.Id, option.Id, StringComparison.OrdinalIgnoreCase));
+                var item = selectedOption ?? option;
+                var itemIndex = _exportSheetsCheckedListBox.Items.Add(item);
+                _exportSheetsCheckedListBox.SetItemChecked(itemIndex, selectedOption != null);
+            }
+        }
+        finally
+        {
+            _updatingExportUi = false;
+        }
+
+        RebuildExportFieldTabs();
+    }
+
+    private void RebuildExportFieldTabs()
+    {
+        if (_updatingExportUi)
+            return;
+
+        var previousSelectedSheetId = "";
+
+        if (_exportFieldTabControl.SelectedTab?.Tag is string selectedSheetId)
+            previousSelectedSheetId = selectedSheetId;
+
+        var existingFieldSelections = ReadCurrentFieldSelections();
+
+        _exportFieldTabControl.TabPages.Clear();
+        _exportFieldListsBySheetId.Clear();
+
+        foreach (var option in GetCheckedExportSheetItems())
+        {
+            var fieldList = new CheckedListBox
+            {
+                Left = 8,
+                Top = 8,
+                Width = 455,
+                Height = 238,
+                CheckOnClick = true,
+                SelectionMode = SelectionMode.One,
+                DisplayMember = nameof(ExportFieldOption.DisplayName)
+            };
+
+            var fieldIds = existingFieldSelections.TryGetValue(option.Id, out var savedFieldIds)
+                ? savedFieldIds
+                : option.FieldIds;
+
+            var selectedFields = ExportSheetOption.NormalizeFieldList(option.Id, fieldIds);
+            var availableFields = option.GetAvailableFields();
+            var orderedFields = new List<ExportFieldOption>();
+
+            foreach (var selectedField in selectedFields)
+            {
+                var field = availableFields.FirstOrDefault(x => string.Equals(x.Id, selectedField.Id, StringComparison.OrdinalIgnoreCase));
+
+                if (field != null && !orderedFields.Any(x => string.Equals(x.Id, field.Id, StringComparison.OrdinalIgnoreCase)))
+                    orderedFields.Add(field);
+            }
+
+            foreach (var availableField in availableFields)
+            {
+                if (!orderedFields.Any(x => string.Equals(x.Id, availableField.Id, StringComparison.OrdinalIgnoreCase)))
+                    orderedFields.Add(availableField);
+            }
+
+            foreach (var field in orderedFields)
+            {
+                var checkedIndex = fieldList.Items.Add(field);
+                var isChecked = selectedFields.Any(x => string.Equals(x.Id, field.Id, StringComparison.OrdinalIgnoreCase));
+                fieldList.SetItemChecked(checkedIndex, isChecked);
+            }
+
+            var tabPage = new TabPage
+            {
+                Text = option.WorksheetName,
+                Tag = option.Id
+            };
+
+            tabPage.Controls.Add(fieldList);
+            _exportFieldTabControl.TabPages.Add(tabPage);
+            _exportFieldListsBySheetId[option.Id] = fieldList;
+
+            if (string.Equals(previousSelectedSheetId, option.Id, StringComparison.OrdinalIgnoreCase))
+                _exportFieldTabControl.SelectedTab = tabPage;
+        }
+    }
+
+    private List<ExportSheetOption> GetCheckedExportSheetItems()
+    {
+        var result = new List<ExportSheetOption>();
+
+        for (var i = 0; i < _exportSheetsCheckedListBox.Items.Count; i++)
+        {
+            if (!_exportSheetsCheckedListBox.GetItemChecked(i))
+                continue;
+
+            if (_exportSheetsCheckedListBox.Items[i] is ExportSheetOption option)
+                result.Add(option);
+        }
+
+        return result;
+    }
+
+    private Dictionary<string, List<string>> ReadCurrentFieldSelections()
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pair in _exportFieldListsBySheetId)
+            result[pair.Key] = GetCheckedFieldIds(pair.Value);
+
+        return result;
+    }
+
+    private static List<string> GetCheckedFieldIds(CheckedListBox fieldList)
+    {
+        var result = new List<string>();
+
+        for (var i = 0; i < fieldList.Items.Count; i++)
+        {
+            if (!fieldList.GetItemChecked(i))
+                continue;
+
+            if (fieldList.Items[i] is ExportFieldOption field)
+                result.Add(field.Id);
+        }
+
+        return result;
+    }
+
+    private void MoveSelectedExportSheet(int direction)
+    {
+        var selectedIndex = _exportSheetsCheckedListBox.SelectedIndex;
+
+        if (selectedIndex < 0)
+            return;
+
+        var newIndex = selectedIndex + direction;
+
+        if (newIndex < 0 || newIndex >= _exportSheetsCheckedListBox.Items.Count)
+            return;
+
+        var item = _exportSheetsCheckedListBox.Items[selectedIndex];
+        var wasChecked = _exportSheetsCheckedListBox.GetItemChecked(selectedIndex);
+        var otherWasChecked = _exportSheetsCheckedListBox.GetItemChecked(newIndex);
+
+        _updatingExportUi = true;
+
+        try
+        {
+            _exportSheetsCheckedListBox.Items.RemoveAt(selectedIndex);
+            _exportSheetsCheckedListBox.Items.Insert(newIndex, item);
+            _exportSheetsCheckedListBox.SetItemChecked(newIndex, wasChecked);
+
+            if (selectedIndex < _exportSheetsCheckedListBox.Items.Count)
+                _exportSheetsCheckedListBox.SetItemChecked(selectedIndex, otherWasChecked);
+
+            _exportSheetsCheckedListBox.SelectedIndex = newIndex;
+        }
+        finally
+        {
+            _updatingExportUi = false;
+        }
+
+        RebuildExportFieldTabs();
+    }
+
+    private void MoveSelectedExportField(int direction)
+    {
+        var fieldList = GetCurrentFieldList();
+
+        if (fieldList == null)
+            return;
+
+        var selectedIndex = fieldList.SelectedIndex;
+
+        if (selectedIndex < 0)
+            return;
+
+        var newIndex = selectedIndex + direction;
+
+        if (newIndex < 0 || newIndex >= fieldList.Items.Count)
+            return;
+
+        var item = fieldList.Items[selectedIndex];
+        var wasChecked = fieldList.GetItemChecked(selectedIndex);
+        var otherWasChecked = fieldList.GetItemChecked(newIndex);
+
+        fieldList.Items.RemoveAt(selectedIndex);
+        fieldList.Items.Insert(newIndex, item);
+        fieldList.SetItemChecked(newIndex, wasChecked);
+
+        if (selectedIndex < fieldList.Items.Count)
+            fieldList.SetItemChecked(selectedIndex, otherWasChecked);
+
+        fieldList.SelectedIndex = newIndex;
+    }
+
+    private void SetCurrentExportFieldChecks(bool isChecked)
+    {
+        var fieldList = GetCurrentFieldList();
+
+        if (fieldList == null)
+            return;
+
+        for (var i = 0; i < fieldList.Items.Count; i++)
+            fieldList.SetItemChecked(i, isChecked);
+    }
+
+    private CheckedListBox? GetCurrentFieldList()
+    {
+        if (_exportFieldTabControl.SelectedTab?.Tag is not string sheetId)
+            return null;
+
+        return _exportFieldListsBySheetId.TryGetValue(sheetId, out var fieldList)
+            ? fieldList
+            : null;
+    }
+
+    private void ResetExportSheetsToDefault()
+    {
+        var resetSettings = new AppSettings
+        {
+            ExportSheets = ExportSheetOption.GetDefaultOptions()
+        };
+
+        LoadExportOptions(resetSettings);
+    }
+
+    private List<ExportSheetOption> GetSelectedExportSheetsFromList()
+    {
+        var result = new List<ExportSheetOption>();
+        var currentFieldSelections = ReadCurrentFieldSelections();
+
+        foreach (var option in GetCheckedExportSheetItems())
+        {
+            var fieldIds = currentFieldSelections.TryGetValue(option.Id, out var selectedFieldIds)
+                ? selectedFieldIds
+                : option.FieldIds;
+
+            result.Add(new ExportSheetOption
+            {
+                Id = option.Id,
+                DisplayName = option.DisplayName,
+                WorksheetName = option.WorksheetName,
+                FieldIds = fieldIds
+            });
+        }
+
+        return ExportSheetOption.NormalizeList(result);
+    }
+
     private void BrowseForDataFolder()
     {
         using var dialog = new FolderBrowserDialog
@@ -2423,11 +3876,27 @@ public sealed class SettingsForm : Form
             return;
         }
 
+        var exportSheets = GetSelectedExportSheetsFromList();
+
+        if (exportSheets.Count == 0)
+        {
+            MessageBox.Show(
+                "Please select at least one Excel export worksheet.",
+                "Settings",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+
+            DialogResult = DialogResult.None;
+            return;
+        }
+
         var settings = new AppSettings
         {
             DataFolderPath = dataFolder,
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
-            ExtensionsToMonitor = extensions
+            ExtensionsToMonitor = extensions,
+            ExportSheets = exportSheets
         };
 
         settings.Save();
@@ -2516,7 +3985,7 @@ public sealed class AboutForm : Form
     {
         Text = "About DeskPulse";
         Width = 430;
-        Height = 210;
+        Height = 235;
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
         MaximizeBox = false;
@@ -2533,18 +4002,18 @@ public sealed class AboutForm : Form
 
         var description = new Label
         {
-            Text = "Windows tray activity monitor using ETW file I/O tracing, SQLite storage, and XLSX export.",
+            Text = "DeskPulse quietly tracks selected file activity while you work. It helps you review what was opened, changed, or saved, and exports clear reports to Excel when needed.",
             Left = 20,
             Top = 55,
             Width = 370,
-            Height = 40
+            Height = 60
         };
 
         var link = new LinkLabel
         {
             Text = AppInfo.GitHubUrl,
             Left = 20,
-            Top = 102,
+            Top = 122,
             Width = 370
         };
 
@@ -2566,7 +4035,7 @@ public sealed class AboutForm : Form
         {
             Text = "OK",
             Left = 310,
-            Top = 130,
+            Top = 150,
             Width = 80,
             DialogResult = DialogResult.OK
         };

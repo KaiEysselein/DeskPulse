@@ -4,6 +4,50 @@ All notable changes to DeskPulse will be documented in this file.
 
 The format is loosely based on Keep a Changelog, and this project currently follows early pre-release versioning.
 
+## [0.0.4] - 2026-07-03
+
+### Summary
+
+Version 0.0.4 adds configurable Excel export worksheets and separates normal settings from hidden maintenance/admin tools.
+
+### Changed
+
+- Updated the application version constant to `0.0.4`.
+- Updated project metadata in `DeskPulse.csproj` to `0.0.4`.
+- Added a normal-user `Export Options` settings tab.
+- Changed the first export-options design from a worksheet-only selector to a worksheet-plus-field selector.
+- Changed the `Maintenance` tab so it is hidden during normal use and visible only when DeskPulse is started with `-maintenance`, `--maintenance`, or `/maintenance`.
+- Changed Excel export generation so it creates worksheets according to the selected export options and order.
+
+### Added
+
+- Added registry-backed `ExportSheets` setting for worksheet order and selected fields.
+- Added selectable Excel worksheet options:
+  - `File Activity`
+  - `Daily Summary`
+  - `Summary by Extension`
+  - `Summary by Process`
+  - `Errors`
+  - `User`
+- Added Up/Down ordering controls for Excel worksheet order.
+- Added field sub-tabs for checked worksheets.
+- Added selectable and sortable fields/columns per worksheet, including fields such as file type/extension, dates, times, process, path, write count, and notes.
+- Added `-uninstall`, `--uninstall`, and `/uninstall` command-line cleanup mode.
+- Added portable cleanup for current-user registry settings and generated log/report files while preserving SQLite database data.
+- Added `UserEvents` SQLite table for user/session activity.
+- Added logging for DeskPulse started and DeskPulse stopped events.
+- Added logging for PC lock/unlock and Windows session logon/logoff events via Windows session switch events.
+- Added `User` Excel export worksheet with selectable/sortable fields.
+
+### Notes
+
+- Default export behaviour remains conservative: `File Activity` only.
+- Default field behaviour keeps all standard fields enabled unless the user changes them.
+- `File Activity` remains the worksheet name for the main detailed activity export.
+- The SQLite database remains the live store.
+- Excel remains export/reporting only.
+- `-debug` remains diagnostic logging only; it does not show the Maintenance tab by itself.
+
 ## [0.0.3] - 2026-07-02
 
 ### Summary
