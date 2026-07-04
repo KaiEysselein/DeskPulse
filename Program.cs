@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
@@ -40,7 +41,7 @@ internal static class Program
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.0.4";
+    public const string Version = "0.1.0";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
 }
 
@@ -239,6 +240,8 @@ public static class PortableUninstaller
 public sealed class TrayAppContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
+    private readonly ContextMenuStrip _leftClickMenu;
+    private readonly ContextMenuStrip _rightClickMenu;
     private readonly FileIoMonitor _monitor;
 
     public TrayAppContext()
@@ -252,21 +255,21 @@ public sealed class TrayAppContext : ApplicationContext
 
         _monitor = new FileIoMonitor();
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Open log file in Excel", null, (_, _) => OpenExcelReport());
-        menu.Items.Add("Settings...", null, (_, _) => OpenSettingsWindow());
-        menu.Items.Add("About", null, (_, _) => OpenAboutWindow());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitThread());
+        _leftClickMenu = new ContextMenuStrip();
+        _leftClickMenu.Items.Add("Export Activity Log", null, (_, _) => OpenExcelReport());
+        _leftClickMenu.Items.Add("Settings...", null, (_, _) => OpenSettingsWindow());
 
-        _trayIcon.ContextMenuStrip = menu;
+        _rightClickMenu = new ContextMenuStrip();
+        _rightClickMenu.Items.Add("About", null, (_, _) => OpenAboutWindow());
+        _rightClickMenu.Items.Add(new ToolStripSeparator());
+        _rightClickMenu.Items.Add("Exit", null, (_, _) => ExitThread());
+
+        _trayIcon.ContextMenuStrip = _rightClickMenu;
+        _trayIcon.MouseUp += OnTrayIconMouseUp;
 
         try
         {
             _monitor.Start();
-            ShowBalloon(AppRuntime.DebugLoggingEnabled
-                ? "Activity monitoring started. Diagnostic logging is enabled."
-                : "Activity monitoring started.");
         }
         catch (Exception ex)
         {
@@ -279,6 +282,15 @@ public sealed class TrayAppContext : ApplicationContext
 
             ExitThread();
         }
+    }
+
+
+    private void OnTrayIconMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left)
+            return;
+
+        _leftClickMenu.Show(Cursor.Position);
     }
 
     private static System.Drawing.Icon LoadTrayIcon()
@@ -312,19 +324,12 @@ public sealed class TrayAppContext : ApplicationContext
 
     private void OpenExcelReport()
     {
-        try
+        using var form = new ExportDateRangeForm((startDate, endDate, progress) =>
         {
-            _monitor.ExportAndOpenExcelReport();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                ex.Message,
-                "Could not open Excel report",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
-            );
-        }
+            _monitor.ExportAndOpenExcelReport(startDate, endDate, progress);
+        });
+
+        form.ShowDialog();
     }
 
     private void OpenSettingsWindow()
@@ -334,7 +339,6 @@ public sealed class TrayAppContext : ApplicationContext
         if (form.ShowDialog() == DialogResult.OK)
         {
             _monitor.ReloadSettings();
-            ShowBalloon("Settings saved.");
         }
     }
 
@@ -344,18 +348,15 @@ public sealed class TrayAppContext : ApplicationContext
         form.ShowDialog();
     }
 
-    private void ShowBalloon(string text)
-    {
-        _trayIcon.BalloonTipTitle = AppInfo.AppName;
-        _trayIcon.BalloonTipText = text;
-        _trayIcon.ShowBalloonTip(3000);
-    }
 
     protected override void ExitThreadCore()
     {
         _monitor.Dispose();
+        _trayIcon.MouseUp -= OnTrayIconMouseUp;
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+        _leftClickMenu.Dispose();
+        _rightClickMenu.Dispose();
 
         base.ExitThreadCore();
     }
@@ -371,6 +372,7 @@ public sealed class FileIoMonitor : IDisposable
 
     private AppSettings _settings;
     private DeskPulseDatabase _database;
+    private ProgramActivityMonitor _programActivityMonitor;
     private TraceEventSession? _session;
     private Thread? _workerThread;
     private bool _sessionEventsSubscribed;
@@ -384,6 +386,7 @@ public sealed class FileIoMonitor : IDisposable
 
         _database = new DeskPulseDatabase(_settings.DatabaseFilePath);
         _database.Initialize();
+        _programActivityMonitor = new ProgramActivityMonitor(GetSettingsSnapshot, GetDatabaseSnapshot);
 
         DiagnosticLogger.WriteStartupEntry(_settings);
         WriteUserEvent("AppStarted", "DeskPulse started", "Application startup completed");
@@ -478,6 +481,7 @@ public sealed class FileIoMonitor : IDisposable
         };
 
         _workerThread.Start();
+        _programActivityMonitor.Start();
     }
 
     public void ReloadSettings()
@@ -495,12 +499,13 @@ public sealed class FileIoMonitor : IDisposable
             }
 
             _database.Initialize();
+            _programActivityMonitor.ReloadSettings();
 
             DiagnosticLogger.WriteStartupEntry(_settings);
         }
     }
 
-    public void ExportAndOpenExcelReport()
+    public void ExportAndOpenExcelReport(DateTime startDate, DateTime endDate, IProgress<ExportProgressInfo>? progress = null)
     {
         AppSettings settings;
         DeskPulseDatabase database;
@@ -513,13 +518,17 @@ public sealed class FileIoMonitor : IDisposable
 
         EnsureDataFolderExists(settings.DataFolderPath);
 
-        database.ExportToExcel(settings.ExcelExportFilePath, settings.ExportSheets);
+        database.ExportToExcel(settings.ExcelExportFilePath, settings.ExportSheets, startDate, endDate, progress);
+
+        progress?.Report(new ExportProgressInfo(98, "98%  Opening exported workbook"));
 
         Process.Start(new ProcessStartInfo
         {
             FileName = settings.ExcelExportFilePath,
             UseShellExecute = true
         });
+
+        progress?.Report(new ExportProgressInfo(100, "100% Export complete"));
     }
 
     private AppSettings GetSettingsSnapshot()
@@ -1012,6 +1021,15 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
+            _programActivityMonitor.Dispose();
+        }
+        catch
+        {
+            // Ignore shutdown errors.
+        }
+
+        try
+        {
             _session?.Dispose();
         }
         catch
@@ -1027,6 +1045,289 @@ public sealed class FileIoMonitor : IDisposable
         {
             // Ignore shutdown errors.
         }
+    }
+}
+
+public sealed class ProgramActivityMonitor : IDisposable
+{
+    private readonly object _lock = new();
+    private readonly Func<AppSettings> _getSettings;
+    private readonly Func<DeskPulseDatabase> _getDatabase;
+    private readonly Dictionary<int, ProgramSnapshot> _knownProcesses = new();
+    private System.Threading.Timer? _timer;
+    private bool _disposed;
+    private bool _isScanning;
+
+    public ProgramActivityMonitor(Func<AppSettings> getSettings, Func<DeskPulseDatabase> getDatabase)
+    {
+        _getSettings = getSettings;
+        _getDatabase = getDatabase;
+    }
+
+    public void Start()
+    {
+        lock (_lock)
+        {
+            if (_disposed || _timer != null)
+                return;
+
+            if (!_getSettings().LogProgramActivity)
+                return;
+
+            _knownProcesses.Clear();
+
+            foreach (var process in CaptureCurrentSessionProcesses())
+                _knownProcesses[process.ProcessId] = process;
+
+            _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        }
+    }
+
+    public void ReloadSettings()
+    {
+        lock (_lock)
+        {
+            if (_disposed)
+                return;
+
+            if (_getSettings().LogProgramActivity)
+            {
+                if (_timer == null)
+                {
+                    _knownProcesses.Clear();
+
+                    foreach (var process in CaptureCurrentSessionProcesses())
+                        _knownProcesses[process.ProcessId] = process;
+
+                    _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+                }
+            }
+            else
+            {
+                _timer?.Dispose();
+                _timer = null;
+                _knownProcesses.Clear();
+            }
+        }
+    }
+
+    private void ScanProcesses()
+    {
+        if (_disposed)
+            return;
+
+        if (_isScanning)
+            return;
+
+        _isScanning = true;
+
+        try
+        {
+            if (!_getSettings().LogProgramActivity)
+                return;
+
+            var currentProcesses = CaptureCurrentSessionProcesses()
+                .ToDictionary(process => process.ProcessId);
+
+            List<ProgramSnapshot> startedProcesses;
+            List<ProgramSnapshot> stoppedProcesses;
+
+            lock (_lock)
+            {
+                startedProcesses = currentProcesses
+                    .Where(pair => !_knownProcesses.ContainsKey(pair.Key))
+                    .Select(pair => pair.Value)
+                    .ToList();
+
+                stoppedProcesses = _knownProcesses
+                    .Where(pair => !currentProcesses.ContainsKey(pair.Key))
+                    .Select(pair => pair.Value)
+                    .ToList();
+
+                _knownProcesses.Clear();
+
+                foreach (var pair in currentProcesses)
+                    _knownProcesses[pair.Key] = pair.Value;
+            }
+
+            foreach (var process in startedProcesses)
+                WriteProgramEvent("ProgramStarted", "Program started", process, process.StartTime ?? DateTime.Now, "Detected in the current interactive Windows session");
+
+            foreach (var process in stoppedProcesses)
+                WriteProgramEvent("ProgramStopped", "Program closed", process, DateTime.Now, "Process no longer detected in the current interactive Windows session");
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.WriteException("Program activity scan failed", ex);
+        }
+        finally
+        {
+            _isScanning = false;
+        }
+    }
+
+    private static List<ProgramSnapshot> CaptureCurrentSessionProcesses()
+    {
+        var result = new List<ProgramSnapshot>();
+        var currentSessionId = Process.GetCurrentProcess().SessionId;
+
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                if (process.Id == Environment.ProcessId)
+                    continue;
+
+                if (process.SessionId != currentSessionId)
+                    continue;
+
+                var processName = SafeGetProcessName(process);
+
+                if (string.IsNullOrWhiteSpace(processName))
+                    continue;
+
+                result.Add(new ProgramSnapshot
+                {
+                    ProcessId = process.Id,
+                    ProcessName = processName,
+                    FilePath = SafeGetMainModuleFileName(process),
+                    WindowTitle = SafeGetMainWindowTitle(process),
+                    StartTime = SafeGetStartTime(process),
+                    UserName = Environment.UserName,
+                    MachineName = Environment.MachineName
+                });
+            }
+            catch
+            {
+                // Some protected/system processes cannot be inspected. Skip them quietly.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return result;
+    }
+
+    private void WriteProgramEvent(string eventType, string eventDescription, ProgramSnapshot snapshot, DateTime eventTime, string note)
+    {
+        try
+        {
+            _getDatabase().InsertProgramEvent(new ProgramEventRecord
+            {
+                EventTime = eventTime,
+                EventType = eventType,
+                EventDescription = eventDescription,
+                ProgramName = snapshot.ProcessName,
+                ProcessId = snapshot.ProcessId,
+                FilePath = snapshot.FilePath,
+                WindowTitle = snapshot.WindowTitle,
+                UserName = snapshot.UserName,
+                MachineName = snapshot.MachineName,
+                AppVersion = AppInfo.Version,
+                Note = note
+            });
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.WriteException("Program activity event could not be written", ex);
+        }
+    }
+
+    private static string SafeGetProcessName(Process process)
+    {
+        try { return process.ProcessName ?? ""; }
+        catch { return ""; }
+    }
+
+    private static string SafeGetMainModuleFileName(Process process)
+    {
+        try { return process.MainModule?.FileName ?? ""; }
+        catch { return ""; }
+    }
+
+    private static string SafeGetMainWindowTitle(Process process)
+    {
+        try { return process.MainWindowTitle ?? ""; }
+        catch { return ""; }
+    }
+
+    private static DateTime? SafeGetStartTime(Process process)
+    {
+        try { return process.StartTime; }
+        catch { return null; }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        _timer?.Dispose();
+        _timer = null;
+    }
+}
+
+public sealed class ProgramSnapshot
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public string FilePath { get; set; } = "";
+    public string WindowTitle { get; set; } = "";
+    public DateTime? StartTime { get; set; }
+    public string UserName { get; set; } = "";
+    public string MachineName { get; set; } = "";
+}
+
+public sealed class ExportProgressInfo
+{
+    public ExportProgressInfo(int percent, string message)
+    {
+        Percent = Math.Max(0, Math.Min(100, percent));
+        Message = message;
+    }
+
+    public int Percent { get; }
+    public string Message { get; }
+}
+
+public sealed class ExcelExportProgressTracker
+{
+    private readonly IProgress<ExportProgressInfo>? _progress;
+    private readonly int _totalRowsToWrite;
+    private int _rowsWritten;
+    private int _lastPercent;
+
+    public ExcelExportProgressTracker(IProgress<ExportProgressInfo>? progress, int totalRowsToWrite)
+    {
+        _progress = progress;
+        _totalRowsToWrite = Math.Max(1, totalRowsToWrite);
+        Report(5, "5%   Writing worksheet rows");
+    }
+
+    public void ReportRowsWritten(int rowCount, string worksheetName)
+    {
+        _rowsWritten += Math.Max(0, rowCount);
+
+        var rowProgress = (double)_rowsWritten / _totalRowsToWrite;
+        var percent = 5 + (int)Math.Round(rowProgress * 88D, MidpointRounding.AwayFromZero);
+
+        Report(percent, $"{percent}%   Writing worksheet rows ({worksheetName}: {Math.Min(_rowsWritten, _totalRowsToWrite)} of {_totalRowsToWrite} rows)");
+    }
+
+    public void ReportWorksheetComplete(string worksheetName)
+    {
+        if (_rowsWritten == 0)
+            Report(10, $"10%  Writing worksheet rows ({worksheetName}: 0 rows for selected date range)");
+    }
+
+    private void Report(int percent, string message)
+    {
+        percent = Math.Max(_lastPercent, Math.Min(93, percent));
+        _lastPercent = percent;
+        _progress?.Report(new ExportProgressInfo(percent, message));
     }
 }
 
@@ -1146,6 +1447,27 @@ public sealed class DeskPulseDatabase : IDisposable
                 "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_Extension ON ActivityEvents (Extension);"
             );
 
+            ExecuteNonQuery(connection,
+                """
+                CREATE TABLE IF NOT EXISTS ProgramEvents
+                (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CreatedAt TEXT NOT NULL,
+                    EventDate TEXT NULL,
+                    EventTime TEXT NULL,
+                    EventType TEXT NOT NULL,
+                    EventDescription TEXT NULL,
+                    ProgramName TEXT NULL,
+                    ProcessId INTEGER NULL,
+                    FilePath TEXT NULL,
+                    WindowTitle TEXT NULL,
+                    UserName TEXT NULL,
+                    MachineName TEXT NULL,
+                    AppVersion TEXT NULL,
+                    Note TEXT NULL
+                );
+                """);
+
             ExecuteNonQuery(
                 connection,
                 "CREATE INDEX IF NOT EXISTS IX_UserEvents_CreatedAt ON UserEvents (CreatedAt);"
@@ -1154,6 +1476,21 @@ public sealed class DeskPulseDatabase : IDisposable
             ExecuteNonQuery(
                 connection,
                 "CREATE INDEX IF NOT EXISTS IX_UserEvents_EventType ON UserEvents (EventType);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_CreatedAt ON ProgramEvents (CreatedAt);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_EventType ON ProgramEvents (EventType);"
+            );
+
+            ExecuteNonQuery(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_ProgramName ON ProgramEvents (ProgramName);"
             );
         }
     }
@@ -1314,7 +1651,74 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
-    public void ExportToExcel(string excelFilePath, IReadOnlyList<ExportSheetOption> exportSheets)
+    public void InsertProgramEvent(ProgramEventRecord record)
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText =
+                """
+                INSERT INTO ProgramEvents
+                (
+                    CreatedAt,
+                    EventDate,
+                    EventTime,
+                    EventType,
+                    EventDescription,
+                    ProgramName,
+                    ProcessId,
+                    FilePath,
+                    WindowTitle,
+                    UserName,
+                    MachineName,
+                    AppVersion,
+                    Note
+                )
+                VALUES
+                (
+                    $CreatedAt,
+                    $EventDate,
+                    $EventTime,
+                    $EventType,
+                    $EventDescription,
+                    $ProgramName,
+                    $ProcessId,
+                    $FilePath,
+                    $WindowTitle,
+                    $UserName,
+                    $MachineName,
+                    $AppVersion,
+                    $Note
+                );
+                """;
+
+            var eventTime = record.EventTime == default ? DateTime.Now : record.EventTime;
+
+            AddText(command, "$CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+            AddText(command, "$EventDate", eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            AddText(command, "$EventTime", eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+            AddText(command, "$EventType", record.EventType);
+            AddText(command, "$EventDescription", record.EventDescription);
+            AddText(command, "$ProgramName", record.ProgramName);
+            AddInteger(command, "$ProcessId", record.ProcessId);
+            AddText(command, "$FilePath", record.FilePath);
+            AddText(command, "$WindowTitle", record.WindowTitle);
+            AddText(command, "$UserName", record.UserName);
+            AddText(command, "$MachineName", record.MachineName);
+            AddText(command, "$AppVersion", record.AppVersion);
+            AddText(command, "$Note", record.Note);
+
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void ExportToExcel(string excelFilePath, IReadOnlyList<ExportSheetOption> exportSheets, DateTime startDate, DateTime endDate, IProgress<ExportProgressInfo>? progress = null)
     {
         lock (_dbLock)
         {
@@ -1323,30 +1727,59 @@ public sealed class DeskPulseDatabase : IDisposable
             if (!string.IsNullOrWhiteSpace(folder))
                 Directory.CreateDirectory(folder);
 
-            var rows = ReadAllRows();
-            var userRows = ReadAllUserRows();
+            progress?.Report(new ExportProgressInfo(1, "1%   Reading activity records"));
+
+            var rangeStart = startDate.Date;
+            var rangeEnd = endDate.Date;
+
+            if (rangeEnd < rangeStart)
+            {
+                (rangeStart, rangeEnd) = (rangeEnd, rangeStart);
+            }
+
+            var rows = ReadAllRows()
+                .Where(row => IsActivityRowInsideDateRange(row, rangeStart, rangeEnd))
+                .ToList();
+
+            var userRows = ReadAllUserRows()
+                .Where(row => IsUserRowInsideDateRange(row, rangeStart, rangeEnd))
+                .ToList();
+
+            var programRows = ReadAllProgramRows()
+                .Where(row => IsProgramRowInsideDateRange(row, rangeStart, rangeEnd))
+                .ToList();
+
             var selectedSheets = ExportSheetOption.NormalizeList(exportSheets);
+
+            progress?.Report(new ExportProgressInfo(3, "3%   Counting rows to export"));
+
+            var totalRowsToWrite = CountRowsToWrite(selectedSheets, rows, userRows, programRows);
+            var progressTracker = new ExcelExportProgressTracker(progress, totalRowsToWrite);
 
             using var workbook = new XLWorkbook();
 
             foreach (var sheetOption in selectedSheets)
             {
                 if (sheetOption.Id == ExportSheetOption.FileActivityId)
-                    AddFileActivityWorksheet(workbook, rows, sheetOption);
+                    AddFileActivityWorksheet(workbook, rows, sheetOption, progressTracker);
                 else if (sheetOption.Id == ExportSheetOption.DailySummaryId)
-                    AddDailySummaryWorksheet(workbook, rows, sheetOption);
+                    AddDailySummaryWorksheet(workbook, rows, sheetOption, progressTracker);
                 else if (sheetOption.Id == ExportSheetOption.ExtensionSummaryId)
-                    AddExtensionSummaryWorksheet(workbook, rows, sheetOption);
+                    AddExtensionSummaryWorksheet(workbook, rows, sheetOption, progressTracker);
                 else if (sheetOption.Id == ExportSheetOption.ProcessSummaryId)
-                    AddProcessSummaryWorksheet(workbook, rows, sheetOption);
+                    AddProcessSummaryWorksheet(workbook, rows, sheetOption, progressTracker);
                 else if (sheetOption.Id == ExportSheetOption.ErrorsId)
-                    AddErrorsWorksheet(workbook, rows, sheetOption);
+                    AddErrorsWorksheet(workbook, rows, sheetOption, progressTracker);
                 else if (sheetOption.Id == ExportSheetOption.UserId)
-                    AddUserWorksheet(workbook, userRows, sheetOption);
+                    AddUserWorksheet(workbook, userRows, sheetOption, progressTracker);
+                else if (sheetOption.Id == ExportSheetOption.ProgramActivityId)
+                    AddProgramActivityWorksheet(workbook, programRows, sheetOption, progressTracker);
             }
 
             if (!workbook.Worksheets.Any())
-                AddFileActivityWorksheet(workbook, rows, ExportSheetOption.GetDefaultOptions()[0]);
+                AddFileActivityWorksheet(workbook, rows, ExportSheetOption.GetDefaultOptions()[0], progressTracker);
+
+            progress?.Report(new ExportProgressInfo(94, "94%  Saving workbook"));
 
             var exportFolder = Path.GetDirectoryName(excelFilePath) ?? AppContext.BaseDirectory;
             var exportFileNameWithoutExtension = Path.GetFileNameWithoutExtension(excelFilePath);
@@ -1358,6 +1791,8 @@ public sealed class DeskPulseDatabase : IDisposable
 
             workbook.SaveAs(tempFilePath);
 
+            progress?.Report(new ExportProgressInfo(97, "97%  Replacing previous export file"));
+
             if (File.Exists(excelFilePath))
                 File.Delete(excelFilePath);
 
@@ -1365,7 +1800,35 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
-    private static void AddFileActivityWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    private static int CountRowsToWrite(IReadOnlyList<ExportSheetOption> selectedSheets, List<ExcelExportRow> rows, List<UserExportRow> userRows, List<ProgramExportRow> programRows)
+    {
+        var totalRows = 0;
+
+        foreach (var sheetOption in selectedSheets)
+        {
+            if (sheetOption.Id == ExportSheetOption.FileActivityId)
+                totalRows += rows.Count;
+            else if (sheetOption.Id == ExportSheetOption.DailySummaryId)
+                totalRows += rows.GroupBy(row => GetRowDate(row)).Count();
+            else if (sheetOption.Id == ExportSheetOption.ExtensionSummaryId)
+                totalRows += rows.Where(row => !string.IsNullOrWhiteSpace(row.Extension)).GroupBy(row => row.Extension, StringComparer.OrdinalIgnoreCase).Count();
+            else if (sheetOption.Id == ExportSheetOption.ProcessSummaryId)
+                totalRows += rows.GroupBy(row => new { row.ProcessName, ProcessId = row.ProcessId ?? 0 }).Count();
+            else if (sheetOption.Id == ExportSheetOption.ErrorsId)
+                totalRows += rows.Count(row => string.Equals(row.ActivityType, "Error", StringComparison.OrdinalIgnoreCase));
+            else if (sheetOption.Id == ExportSheetOption.UserId)
+                totalRows += userRows.Count;
+            else if (sheetOption.Id == ExportSheetOption.ProgramActivityId)
+                totalRows += programRows.Count;
+        }
+
+        if (totalRows == 0)
+            return 1;
+
+        return totalRows;
+    }
+
+    private static void AddFileActivityWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
     {
         var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
         var fields = sheetOption.GetSelectedFields();
@@ -1380,12 +1843,14 @@ public sealed class DeskPulseDatabase : IDisposable
                 WriteFileActivityCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
 
             rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
         }
 
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
         FinishWorksheet(sheet, rowNumber);
     }
 
-    private static void AddDailySummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    private static void AddDailySummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
     {
         var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
         var fields = sheetOption.GetSelectedFields();
@@ -1414,12 +1879,14 @@ public sealed class DeskPulseDatabase : IDisposable
 
             WriteDictionaryRow(sheet, rowNumber, fields, values);
             rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
         }
 
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
         FinishWorksheet(sheet, rowNumber);
     }
 
-    private static void AddExtensionSummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    private static void AddExtensionSummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
     {
         var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
         var fields = sheetOption.GetSelectedFields();
@@ -1447,12 +1914,14 @@ public sealed class DeskPulseDatabase : IDisposable
 
             WriteDictionaryRow(sheet, rowNumber, fields, values);
             rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
         }
 
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
         FinishWorksheet(sheet, rowNumber);
     }
 
-    private static void AddProcessSummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    private static void AddProcessSummaryWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
     {
         var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
         var fields = sheetOption.GetSelectedFields();
@@ -1480,12 +1949,14 @@ public sealed class DeskPulseDatabase : IDisposable
 
             WriteDictionaryRow(sheet, rowNumber, fields, values);
             rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
         }
 
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
         FinishWorksheet(sheet, rowNumber);
     }
 
-    private static void AddErrorsWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption)
+    private static void AddErrorsWorksheet(XLWorkbook workbook, List<ExcelExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
     {
         var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
         var fields = sheetOption.GetSelectedFields();
@@ -1504,12 +1975,14 @@ public sealed class DeskPulseDatabase : IDisposable
                 WriteFileActivityCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
 
             rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
         }
 
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
         FinishWorksheet(sheet, rowNumber);
     }
 
-    private static void AddUserWorksheet(XLWorkbook workbook, List<UserExportRow> rows, ExportSheetOption sheetOption)
+    private static void AddUserWorksheet(XLWorkbook workbook, List<UserExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
     {
         var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
         var fields = sheetOption.GetSelectedFields();
@@ -1523,8 +1996,31 @@ public sealed class DeskPulseDatabase : IDisposable
                 WriteUserCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
 
             rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
         }
 
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
+        FinishWorksheet(sheet, rowNumber);
+    }
+
+    private static void AddProgramActivityWorksheet(XLWorkbook workbook, List<ProgramExportRow> rows, ExportSheetOption sheetOption, ExcelExportProgressTracker progressTracker)
+    {
+        var sheet = workbook.Worksheets.Add(sheetOption.WorksheetName);
+        var fields = sheetOption.GetSelectedFields();
+        WriteHeaders(sheet, fields.Select(field => field.HeaderName).ToArray());
+
+        var rowNumber = 2;
+
+        foreach (var row in rows)
+        {
+            for (var col = 0; col < fields.Count; col++)
+                WriteProgramCell(sheet.Cell(rowNumber, col + 1), row, fields[col].Id);
+
+            rowNumber++;
+            progressTracker.ReportRowsWritten(1, sheetOption.WorksheetName);
+        }
+
+        progressTracker.ReportWorksheetComplete(sheetOption.WorksheetName);
         FinishWorksheet(sheet, rowNumber);
     }
 
@@ -1665,6 +2161,60 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
+    private static void WriteProgramCell(IXLCell cell, ProgramExportRow row, string fieldId)
+    {
+        switch (fieldId)
+        {
+            case "id":
+                SetCellValue(cell, row.Id);
+                break;
+            case "created-at":
+                cell.Value = row.CreatedAt;
+                break;
+            case "event-date":
+                cell.Value = row.EventDate;
+                break;
+            case "event-time":
+                cell.Value = row.EventTime;
+                break;
+            case "event-type":
+                cell.Value = row.EventType;
+                break;
+            case "event-description":
+                cell.Value = row.EventDescription;
+                break;
+            case "program-name":
+            case "process-name":
+            case "process":
+                cell.Value = row.ProgramName;
+                break;
+            case "process-id":
+                SetCellValue(cell, row.ProcessId);
+                break;
+            case "file-path":
+                cell.Value = row.FilePath;
+                break;
+            case "window-title":
+                cell.Value = row.WindowTitle;
+                break;
+            case "user-name":
+                cell.Value = row.UserName;
+                break;
+            case "machine-name":
+                cell.Value = row.MachineName;
+                break;
+            case "app-version":
+                cell.Value = row.AppVersion;
+                break;
+            case "note":
+                cell.Value = row.Note;
+                break;
+            default:
+                cell.Value = "";
+                break;
+        }
+    }
+
     private static void WriteHeaders(IXLWorksheet sheet, string[] headers)
     {
         for (var col = 0; col < headers.Length; col++)
@@ -1700,6 +2250,53 @@ public sealed class DeskPulseDatabase : IDisposable
 
         return "Unknown";
     }
+    private static bool IsActivityRowInsideDateRange(ExcelExportRow row, DateTime rangeStart, DateTime rangeEnd)
+    {
+        return IsDateTextInsideRange(GetRowDate(row), rangeStart, rangeEnd);
+    }
+
+    private static bool IsUserRowInsideDateRange(UserExportRow row, DateTime rangeStart, DateTime rangeEnd)
+    {
+        var rowDate = !string.IsNullOrWhiteSpace(row.EventDate)
+            ? row.EventDate
+            : row.CreatedAt;
+
+        return IsDateTextInsideRange(rowDate, rangeStart, rangeEnd);
+    }
+
+    private static bool IsProgramRowInsideDateRange(ProgramExportRow row, DateTime rangeStart, DateTime rangeEnd)
+    {
+        var rowDate = !string.IsNullOrWhiteSpace(row.EventDate)
+            ? row.EventDate
+            : row.CreatedAt;
+
+        return IsDateTextInsideRange(rowDate, rangeStart, rangeEnd);
+    }
+
+    private static bool IsDateTextInsideRange(string dateText, DateTime rangeStart, DateTime rangeEnd)
+    {
+        if (string.IsNullOrWhiteSpace(dateText))
+            return false;
+
+        var candidate = dateText.Trim();
+
+        if (candidate.Length >= 10)
+            candidate = candidate.Substring(0, 10);
+
+        if (!DateTime.TryParseExact(
+                candidate,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var date))
+        {
+            return false;
+        }
+
+        var day = date.Date;
+        return day >= rangeStart && day <= rangeEnd;
+    }
+
 
     private static bool ContainsText(string value, string searchText)
     {
@@ -1889,6 +2486,64 @@ public sealed class DeskPulseDatabase : IDisposable
         return result;
     }
 
+    private List<ProgramExportRow> ReadAllProgramRows()
+    {
+        var result = new List<ProgramExportRow>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText =
+            """
+            SELECT
+                Id,
+                CreatedAt,
+                EventDate,
+                EventTime,
+                EventType,
+                EventDescription,
+                ProgramName,
+                ProcessId,
+                FilePath,
+                WindowTitle,
+                UserName,
+                MachineName,
+                AppVersion,
+                Note
+            FROM ProgramEvents
+            ORDER BY Id;
+            """;
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            result.Add(new ProgramExportRow
+            {
+                Id = ReadLong(reader, 0),
+                CreatedAt = ReadText(reader, 1),
+                EventDate = ReadText(reader, 2),
+                EventTime = ReadText(reader, 3),
+                EventType = ReadText(reader, 4),
+                EventDescription = ReadText(reader, 5),
+                ProgramName = ReadText(reader, 6),
+                ProcessId = ReadNullableLong(reader, 7),
+                FilePath = ReadText(reader, 8),
+                WindowTitle = ReadText(reader, 9),
+                UserName = ReadText(reader, 10),
+                MachineName = ReadText(reader, 11),
+                AppVersion = ReadText(reader, 12),
+                Note = ReadText(reader, 13)
+            });
+        }
+
+        return result;
+    }
+
     private static void EnsureColumnExists(SqliteConnection connection, string tableName, string columnName, string columnDefinition)
     {
         if (ColumnExists(connection, tableName, columnName))
@@ -2041,6 +2696,7 @@ public sealed class ExportSheetOption
     public const string ProcessSummaryId = "process-summary";
     public const string ErrorsId = "errors";
     public const string UserId = "user";
+    public const string ProgramActivityId = "program-activity";
 
     public string Id { get; set; } = "";
     public string DisplayName { get; set; } = "";
@@ -2071,7 +2727,8 @@ public sealed class ExportSheetOption
             CreateOption(ExtensionSummaryId, "Summary by Extension", "By Extension"),
             CreateOption(ProcessSummaryId, "Summary by Process", "By Process"),
             CreateOption(ErrorsId, "Errors", "Errors"),
-            CreateOption(UserId, "User", "User")
+            CreateOption(UserId, "User", "User"),
+            CreateOption(ProgramActivityId, "Programs", "Programs")
         };
     }
 
@@ -2162,6 +2819,27 @@ public sealed class ExportSheetOption
                 Field("machine-name", "Computer", "Computer"),
                 Field("process-name", "Process", "Process"),
                 Field("process-id", "Process ID", "Process ID"),
+                Field("app-version", "App Version", "App Version"),
+                Field("note", "Note", "Note")
+            };
+        }
+
+        if (string.Equals(sheetId, ProgramActivityId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ExportFieldOption>
+            {
+                Field("id", "Id", "Id"),
+                Field("created-at", "Created At", "Created At"),
+                Field("event-date", "Date", "Date"),
+                Field("event-time", "Time", "Time"),
+                Field("event-type", "Event Type", "Event Type"),
+                Field("event-description", "Event", "Event"),
+                Field("program-name", "Program", "Program"),
+                Field("process-id", "Process ID", "Process ID"),
+                Field("file-path", "Program Path", "Program Path"),
+                Field("window-title", "Window Title", "Window Title"),
+                Field("user-name", "User", "User"),
+                Field("machine-name", "Computer", "Computer"),
                 Field("app-version", "App Version", "App Version"),
                 Field("note", "Note", "Note")
             };
@@ -2358,6 +3036,39 @@ public sealed class UserExportRow
     public string Note { get; set; } = "";
 }
 
+public sealed class ProgramEventRecord
+{
+    public DateTime EventTime { get; set; }
+    public string EventType { get; set; } = "";
+    public string EventDescription { get; set; } = "";
+    public string ProgramName { get; set; } = "";
+    public int ProcessId { get; set; }
+    public string FilePath { get; set; } = "";
+    public string WindowTitle { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string MachineName { get; set; } = "";
+    public string AppVersion { get; set; } = "";
+    public string Note { get; set; } = "";
+}
+
+public sealed class ProgramExportRow
+{
+    public long Id { get; set; }
+    public string CreatedAt { get; set; } = "";
+    public string EventDate { get; set; } = "";
+    public string EventTime { get; set; } = "";
+    public string EventType { get; set; } = "";
+    public string EventDescription { get; set; } = "";
+    public string ProgramName { get; set; } = "";
+    public long? ProcessId { get; set; }
+    public string FilePath { get; set; } = "";
+    public string WindowTitle { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string MachineName { get; set; } = "";
+    public string AppVersion { get; set; } = "";
+    public string Note { get; set; } = "";
+}
+
 public sealed class FileOpenInfo
 {
     public DateTime OpenedTime { get; set; }
@@ -2500,6 +3211,84 @@ public static class PathExclusions
     }
 }
 
+public static class StartupTaskManager
+{
+    private const string TaskName = "DeskPulse";
+
+    public static bool IsEnabled()
+    {
+        try
+        {
+            using var process = StartHiddenProcess("schtasks.exe", $"/Query /TN \"{TaskName}\"");
+            process.WaitForExit(5000);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void SetEnabled(bool enabled)
+    {
+        if (enabled)
+            CreateTask();
+        else
+            DeleteTask();
+    }
+
+    private static void CreateTask()
+    {
+        var executablePath = Application.ExecutablePath;
+
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+            throw new InvalidOperationException("DeskPulse could not determine the executable path for Windows startup.");
+
+        var taskCommand = $"\\\"{executablePath}\\\"";
+        var arguments = $"/Create /TN \"{TaskName}\" /TR \"{taskCommand}\" /SC ONLOGON /RL HIGHEST /F";
+
+        RunSchtasks(arguments, "create the Windows startup task");
+    }
+
+    private static void DeleteTask()
+    {
+        if (!IsEnabled())
+            return;
+
+        RunSchtasks($"/Delete /TN \"{TaskName}\" /F", "remove the Windows startup task");
+    }
+
+    private static void RunSchtasks(string arguments, string actionDescription)
+    {
+        using var process = StartHiddenProcess("schtasks.exe", arguments);
+        process.WaitForExit(15000);
+
+        if (process.ExitCode != 0)
+        {
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            var details = string.Join(Environment.NewLine, new[] { output, error }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+            throw new InvalidOperationException(
+                $"DeskPulse could not {actionDescription}." +
+                (string.IsNullOrWhiteSpace(details) ? "" : Environment.NewLine + Environment.NewLine + details.Trim()));
+        }
+    }
+
+    private static Process StartHiddenProcess(string fileName, string arguments)
+    {
+        return Process.Start(new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }) ?? throw new InvalidOperationException("Could not start schtasks.exe.");
+    }
+}
+
 public sealed class AppSettings
 {
     private const string RegistryPath = @"Software\DeskPulse";
@@ -2507,6 +3296,10 @@ public sealed class AppSettings
     public string DataFolderPath { get; set; } = GetDefaultDataFolderPath();
 
     public bool IgnoreTempFolders { get; set; } = true;
+
+    public bool StartWithWindows { get; set; }
+
+    public bool LogProgramActivity { get; set; } = true;
 
     public HashSet<string> ExtensionsToMonitor { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -2535,6 +3328,8 @@ public sealed class AppSettings
         {
             DataFolderPath = DataFolderPath,
             IgnoreTempFolders = IgnoreTempFolders,
+            StartWithWindows = StartWithWindows,
+            LogProgramActivity = LogProgramActivity,
             ExtensionsToMonitor = new HashSet<string>(ExtensionsToMonitor, StringComparer.OrdinalIgnoreCase),
             ExportSheets = ExportSheetOption.NormalizeList(ExportSheets)
         };
@@ -2573,6 +3368,8 @@ public sealed class AppSettings
         }
 
         settings.IgnoreTempFolders = ReadBool(key, "IgnoreTempFolders", true);
+        settings.StartWithWindows = ReadBool(key, "StartWithWindows", StartupTaskManager.IsEnabled());
+        settings.LogProgramActivity = ReadBool(key, "LogProgramActivity", true);
 
         var exportSheetsText = ReadString(key, "ExportSheets", ExportSheetOption.ToRegistryText(settings.ExportSheets));
         settings.ExportSheets = ExportSheetOption.ParseList(exportSheetsText);
@@ -2614,6 +3411,8 @@ public sealed class AppSettings
         key.SetValue("ExtensionsToMonitor", ExtensionsAsText, RegistryValueKind.String);
         key.SetValue("ExportSheets", ExportSheetOption.ToRegistryText(ExportSheets), RegistryValueKind.String);
         key.SetValue("IgnoreTempFolders", IgnoreTempFolders ? 1 : 0, RegistryValueKind.DWord);
+        key.SetValue("StartWithWindows", StartWithWindows ? 1 : 0, RegistryValueKind.DWord);
+        key.SetValue("LogProgramActivity", LogProgramActivity ? 1 : 0, RegistryValueKind.DWord);
     }
 
     public static string GetRegistryPathForDisplay()
@@ -2713,6 +3512,8 @@ public sealed class SettingsForm : Form
     private readonly ListBox _availableExtensionsListBox = new();
     private readonly ListBox _monitoredExtensionsListBox = new();
     private readonly CheckBox _ignoreTempFoldersCheckBox = new();
+    private readonly CheckBox _startWithWindowsCheckBox = new();
+    private readonly CheckBox _logProgramActivityCheckBox = new();
     private readonly CheckedListBox _exportSheetsCheckedListBox = new();
     private readonly TabControl _exportFieldTabControl = new();
     private readonly Dictionary<string, CheckedListBox> _exportFieldListsBySheetId = new(StringComparer.OrdinalIgnoreCase);
@@ -2721,73 +3522,63 @@ public sealed class SettingsForm : Form
     public SettingsForm()
     {
         Text = "DeskPulse Settings";
-        Width = 860;
-        Height = 650;
+        ClientSize = new System.Drawing.Size(920, 690);
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
+        Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
+        BackColor = System.Drawing.SystemColors.Control;
 
         var settings = AppSettings.Load();
 
         var tabControl = new TabControl
         {
-            Left = 12,
-            Top = 12,
-            Width = 820,
-            Height = 540
+            Left = 16,
+            Top = 16,
+            Width = 888,
+            Height = 600
         };
 
-        var filesTab = new TabPage
-        {
-            Text = "Files"
-        };
+        var generalTab = CreateTabPage("General");
+        var filesTab = CreateTabPage("Files");
+        var exportOptionsTab = CreateTabPage("Export Options");
 
-        var exportOptionsTab = new TabPage
-        {
-            Text = "Export Options"
-        };
-
+        tabControl.TabPages.Add(generalTab);
         tabControl.TabPages.Add(filesTab);
         tabControl.TabPages.Add(exportOptionsTab);
 
+        BuildGeneralTab(generalTab, settings);
         BuildFilesTab(filesTab, settings);
         BuildExportOptionsTab(exportOptionsTab, settings);
 
         if (AppRuntime.MaintenanceModeEnabled)
         {
-            var maintenanceTab = new TabPage
-            {
-                Text = "Maintenance"
-            };
-
+            var maintenanceTab = CreateTabPage("Maintenance");
             tabControl.TabPages.Add(maintenanceTab);
             BuildMaintenanceTab(maintenanceTab, settings);
         }
 
-        var okButton = new Button
+        var footerLine = new Label
         {
-            Text = "OK",
-            Left = 650,
-            Top = 565,
-            Width = 80,
-            DialogResult = DialogResult.OK
+            Left = 16,
+            Top = 626,
+            Width = 888,
+            Height = 1,
+            BorderStyle = BorderStyle.Fixed3D
         };
 
+        var okButton = CreateActionButton("Save", 724, 644, 84);
+        okButton.DialogResult = DialogResult.OK;
         okButton.Click += (_, _) => SaveSettings();
 
-        var cancelButton = new Button
-        {
-            Text = "Cancel",
-            Left = 744,
-            Top = 565,
-            Width = 80,
-            DialogResult = DialogResult.Cancel
-        };
+        var cancelButton = CreateActionButton("Cancel", 820, 644, 84);
+        cancelButton.DialogResult = DialogResult.Cancel;
 
         Controls.AddRange(new Control[]
         {
             tabControl,
+            footerLine,
             okButton,
             cancelButton
         });
@@ -2798,69 +3589,197 @@ public sealed class SettingsForm : Form
         LoadExtensionLists(settings);
     }
 
+    private TabPage CreateTabPage(string text)
+    {
+        return new TabPage
+        {
+            Text = text,
+            BackColor = System.Drawing.SystemColors.Window,
+            Padding = new Padding(16)
+        };
+    }
+
+    private GroupBox CreateGroupBox(string text, int left, int top, int width, int height)
+    {
+        return new GroupBox
+        {
+            Text = text,
+            Left = left,
+            Top = top,
+            Width = width,
+            Height = height,
+            Padding = new Padding(12),
+            BackColor = System.Drawing.SystemColors.Window
+        };
+    }
+
+    private static Label CreateHintLabel(string text, int left, int top, int width, int height)
+    {
+        return new Label
+        {
+            Text = text,
+            Left = left,
+            Top = top,
+            Width = width,
+            Height = height,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+    }
+
+    private Button CreateActionButton(string text, int left, int top, int width)
+    {
+        return new Button
+        {
+            Text = text,
+            Left = left,
+            Top = top,
+            Width = width,
+            Height = 30,
+            FlatStyle = FlatStyle.System
+        };
+    }
+
+    private void BuildGeneralTab(TabPage generalTab, AppSettings settings)
+    {
+        var startupGroup = CreateGroupBox("Windows startup", 24, 24, 820, 150);
+
+        _startWithWindowsCheckBox.Left = 18;
+        _startWithWindowsCheckBox.Top = 32;
+        _startWithWindowsCheckBox.Width = 520;
+        _startWithWindowsCheckBox.Text = "Start DeskPulse when I log in to Windows";
+        _startWithWindowsCheckBox.Checked = settings.StartWithWindows || StartupTaskManager.IsEnabled();
+
+        var startupHintLabel = CreateHintLabel(
+            "Creates a current-user Windows Task Scheduler entry and starts DeskPulse with highest privileges when you log in.",
+            40,
+            62,
+            740,
+            22);
+
+        var quietStartupLabel = CreateHintLabel(
+            "DeskPulse starts quietly in the tray. Startup errors are still shown if monitoring cannot start.",
+            40,
+            88,
+            740,
+            22);
+
+        startupGroup.Controls.AddRange(new Control[]
+        {
+            _startWithWindowsCheckBox,
+            startupHintLabel,
+            quietStartupLabel
+        });
+
+        var behaviourGroup = CreateGroupBox("Application behaviour", 24, 196, 820, 150);
+
+        _logProgramActivityCheckBox.Left = 18;
+        _logProgramActivityCheckBox.Top = 32;
+        _logProgramActivityCheckBox.Width = 520;
+        _logProgramActivityCheckBox.Text = "Log program start and close activity";
+        _logProgramActivityCheckBox.Checked = settings.LogProgramActivity;
+
+        var programActivityHintLabel = CreateHintLabel(
+            "Records programs that start and close in the current interactive Windows session. This is not a full system-service audit log.",
+            40,
+            62,
+            740,
+            36);
+
+        var behaviourLabel = CreateHintLabel(
+            "DeskPulse keeps running from the tray icon. Left-click opens Export/Settings; right-click opens About/Exit.",
+            18,
+            106,
+            760,
+            22);
+
+        behaviourGroup.Controls.AddRange(new Control[]
+        {
+            _logProgramActivityCheckBox,
+            programActivityHintLabel,
+            behaviourLabel
+        });
+
+        generalTab.Controls.AddRange(new Control[]
+        {
+            startupGroup,
+            behaviourGroup
+        });
+    }
+
+
     private void BuildFilesTab(TabPage filesTab, AppSettings settings)
     {
+        var storageGroup = CreateGroupBox("Storage", 24, 24, 820, 122);
+
         var dataFolderLabel = new Label
         {
-            Text = "Data folder:",
-            Left = 16,
-            Top = 20,
-            Width = 100
+            Text = "Data folder",
+            Left = 18,
+            Top = 34,
+            Width = 90
         };
 
-        _dataFolderTextBox.Left = 120;
-        _dataFolderTextBox.Top = 16;
+        _dataFolderTextBox.Left = 112;
+        _dataFolderTextBox.Top = 30;
         _dataFolderTextBox.Width = 560;
         _dataFolderTextBox.Text = settings.DataFolderPath;
 
-        var browseButton = new Button
-        {
-            Text = "Browse...",
-            Left = 690,
-            Top = 14,
-            Width = 95
-        };
-
+        var browseButton = CreateActionButton("Browse...", 686, 28, 100);
         browseButton.Click += (_, _) => BrowseForDataFolder();
 
-        var databaseLabel = new Label
-        {
-            Text = "Database: DeskPulse.db   |   Excel export: DeskPulse-export.xlsx",
-            Left = 120,
-            Top = 45,
-            Width = 620,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
+        var databaseLabel = CreateHintLabel(
+            "Live data: DeskPulse.db    Export report: DeskPulse-export.xlsx",
+            112,
+            62,
+            650,
+            22);
 
-        _ignoreTempFoldersCheckBox.Left = 120;
-        _ignoreTempFoldersCheckBox.Top = 72;
-        _ignoreTempFoldersCheckBox.Width = 520;
+        storageGroup.Controls.AddRange(new Control[]
+        {
+            dataFolderLabel,
+            _dataFolderTextBox,
+            browseButton,
+            databaseLabel
+        });
+
+        var filterGroup = CreateGroupBox("File activity filters", 24, 166, 820, 88);
+
+        _ignoreTempFoldersCheckBox.Left = 18;
+        _ignoreTempFoldersCheckBox.Top = 30;
+        _ignoreTempFoldersCheckBox.Width = 360;
         _ignoreTempFoldersCheckBox.Text = "Ignore temporary-folder activity";
         _ignoreTempFoldersCheckBox.Checked = settings.IgnoreTempFolders;
 
-        var tempHintLabel = new Label
+        var tempHintLabel = CreateHintLabel(
+            "Recommended. Turn off only when you deliberately want to include Windows temp-folder activity.",
+            40,
+            56,
+            720,
+            22);
+
+        filterGroup.Controls.AddRange(new Control[]
         {
-            Text = "Recommended: keep this enabled. Turn it off only if you deliberately want to log file activity inside Windows temp folders.",
-            Left = 145,
-            Top = 96,
-            Width = 620,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
+            _ignoreTempFoldersCheckBox,
+            tempHintLabel
+        });
+
+        var fileTypesGroup = CreateGroupBox("Monitored file types", 24, 274, 820, 280);
 
         var availableLabel = new Label
         {
-            Text = "Registered Windows file types:",
-            Left = 16,
-            Top = 130,
+            Text = "Available file types",
+            Left = 18,
+            Top = 28,
             Width = 300
         };
 
-        _availableExtensionsListBox.Left = 16;
-        _availableExtensionsListBox.Top = 152;
-        _availableExtensionsListBox.Width = 350;
-        _availableExtensionsListBox.Height = 250;
+        _availableExtensionsListBox.Left = 18;
+        _availableExtensionsListBox.Top = 52;
+        _availableExtensionsListBox.Width = 330;
+        _availableExtensionsListBox.Height = 190;
         _availableExtensionsListBox.DisplayMember = nameof(RegisteredFileTypeInfo.DisplayName);
         _availableExtensionsListBox.SelectionMode = SelectionMode.One;
+        _availableExtensionsListBox.IntegralHeight = false;
         _availableExtensionsListBox.MouseDown += ListBoxMouseDown;
         _availableExtensionsListBox.AllowDrop = true;
         _availableExtensionsListBox.DragEnter += ListBoxDragEnter;
@@ -2868,95 +3787,75 @@ public sealed class SettingsForm : Form
 
         var monitoredLabel = new Label
         {
-            Text = "Monitored file types:",
-            Left = 435,
-            Top = 130,
+            Text = "Currently monitored",
+            Left = 472,
+            Top = 28,
             Width = 300
         };
 
-        _monitoredExtensionsListBox.Left = 435;
-        _monitoredExtensionsListBox.Top = 152;
-        _monitoredExtensionsListBox.Width = 350;
-        _monitoredExtensionsListBox.Height = 250;
+        _monitoredExtensionsListBox.Left = 472;
+        _monitoredExtensionsListBox.Top = 52;
+        _monitoredExtensionsListBox.Width = 330;
+        _monitoredExtensionsListBox.Height = 190;
         _monitoredExtensionsListBox.SelectionMode = SelectionMode.One;
+        _monitoredExtensionsListBox.IntegralHeight = false;
         _monitoredExtensionsListBox.MouseDown += ListBoxMouseDown;
         _monitoredExtensionsListBox.AllowDrop = true;
         _monitoredExtensionsListBox.DragEnter += ListBoxDragEnter;
         _monitoredExtensionsListBox.DragDrop += (_, e) => AddDraggedExtension(e);
 
-        var addButton = new Button
-        {
-            Text = "Add >",
-            Left = 372,
-            Top = 210,
-            Width = 56
-        };
-
+        var addButton = CreateActionButton("Add  >", 366, 95, 88);
         addButton.Click += (_, _) => AddSelectedExtension();
 
-        var removeButton = new Button
-        {
-            Text = "< Remove",
-            Left = 372,
-            Top = 250,
-            Width = 56
-        };
-
+        var removeButton = CreateActionButton("<  Remove", 366, 135, 88);
         removeButton.Click += (_, _) => RemoveSelectedExtension();
 
-        filesTab.Controls.AddRange(new Control[]
+        var dragHintLabel = CreateHintLabel(
+            "You can also drag file types between the lists.",
+            18,
+            246,
+            760,
+            22);
+
+        fileTypesGroup.Controls.AddRange(new Control[]
         {
-            dataFolderLabel,
-            _dataFolderTextBox,
-            browseButton,
-            databaseLabel,
-            _ignoreTempFoldersCheckBox,
-            tempHintLabel,
             availableLabel,
             _availableExtensionsListBox,
             addButton,
             removeButton,
             monitoredLabel,
-            _monitoredExtensionsListBox
+            _monitoredExtensionsListBox,
+            dragHintLabel
+        });
+
+        filesTab.Controls.AddRange(new Control[]
+        {
+            storageGroup,
+            filterGroup,
+            fileTypesGroup
         });
     }
 
+
     private void BuildExportOptionsTab(TabPage exportOptionsTab, AppSettings settings)
     {
-        var headingLabel = new Label
-        {
-            Text = "Excel export layout",
-            Left = 16,
-            Top = 20,
-            Width = 740,
-            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
-        };
+        var introLabel = CreateHintLabel(
+            "Choose which Excel worksheets DeskPulse creates, then choose the columns and column order for each selected worksheet.",
+            24,
+            22,
+            820,
+            28);
 
-        var explanationLabel = new Label
-        {
-            Text = "Tick the worksheets to create. Each ticked worksheet gets its own field tab where you can choose and sort the exported columns.",
-            Left = 16,
-            Top = 48,
-            Width = 760,
-            Height = 35,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
+        var worksheetGroup = CreateGroupBox("Worksheets", 24, 62, 300, 492);
 
-        var worksheetLabel = new Label
-        {
-            Text = "Worksheets:",
-            Left = 16,
-            Top = 96,
-            Width = 240
-        };
-
-        _exportSheetsCheckedListBox.Left = 16;
-        _exportSheetsCheckedListBox.Top = 118;
-        _exportSheetsCheckedListBox.Width = 260;
-        _exportSheetsCheckedListBox.Height = 300;
+        _exportSheetsCheckedListBox.Left = 18;
+        _exportSheetsCheckedListBox.Top = 30;
+        _exportSheetsCheckedListBox.Width = 262;
+        _exportSheetsCheckedListBox.Height = 350;
         _exportSheetsCheckedListBox.DisplayMember = nameof(ExportSheetOption.DisplayName);
         _exportSheetsCheckedListBox.CheckOnClick = true;
         _exportSheetsCheckedListBox.SelectionMode = SelectionMode.One;
+        _exportSheetsCheckedListBox.IntegralHeight = false;
         _exportSheetsCheckedListBox.ItemCheck += (_, _) =>
         {
             if (_updatingExportUi)
@@ -2968,116 +3867,59 @@ public sealed class SettingsForm : Form
                 RebuildExportFieldTabs();
         };
 
-        var sheetUpButton = new Button
-        {
-            Text = "Up",
-            Left = 16,
-            Top = 430,
-            Width = 60,
-            Height = 28
-        };
-
+        var sheetUpButton = CreateActionButton("Move Up", 18, 394, 82);
         sheetUpButton.Click += (_, _) => MoveSelectedExportSheet(-1);
 
-        var sheetDownButton = new Button
-        {
-            Text = "Down",
-            Left = 84,
-            Top = 430,
-            Width = 60,
-            Height = 28
-        };
-
+        var sheetDownButton = CreateActionButton("Move Down", 108, 394, 92);
         sheetDownButton.Click += (_, _) => MoveSelectedExportSheet(1);
 
-        var resetButton = new Button
-        {
-            Text = "Reset Export Options",
-            Left = 154,
-            Top = 430,
-            Width = 122,
-            Height = 28
-        };
-
+        var resetButton = CreateActionButton("Reset", 208, 394, 72);
         resetButton.Click += (_, _) => ResetExportSheetsToDefault();
 
-        var fieldTabsLabel = new Label
+        var worksheetHintLabel = CreateHintLabel(
+            "Ticked items become workbook tabs. Their order here becomes the Excel worksheet order.",
+            18,
+            430,
+            260,
+            44);
+
+        worksheetGroup.Controls.AddRange(new Control[]
         {
-            Text = "Fields for selected worksheets:",
-            Left = 300,
-            Top = 96,
-            Width = 360
-        };
-
-        _exportFieldTabControl.Left = 300;
-        _exportFieldTabControl.Top = 118;
-        _exportFieldTabControl.Width = 485;
-        _exportFieldTabControl.Height = 300;
-
-        var fieldUpButton = new Button
-        {
-            Text = "Move Field Up",
-            Left = 300,
-            Top = 430,
-            Width = 120,
-            Height = 28
-        };
-
-        fieldUpButton.Click += (_, _) => MoveSelectedExportField(-1);
-
-        var fieldDownButton = new Button
-        {
-            Text = "Move Field Down",
-            Left = 430,
-            Top = 430,
-            Width = 130,
-            Height = 28
-        };
-
-        fieldDownButton.Click += (_, _) => MoveSelectedExportField(1);
-
-        var selectAllFieldsButton = new Button
-        {
-            Text = "Select All Fields",
-            Left = 570,
-            Top = 430,
-            Width = 105,
-            Height = 28
-        };
-
-        selectAllFieldsButton.Click += (_, _) => SetCurrentExportFieldChecks(true);
-
-        var clearFieldsButton = new Button
-        {
-            Text = "Clear Fields",
-            Left = 685,
-            Top = 430,
-            Width = 100,
-            Height = 28
-        };
-
-        clearFieldsButton.Click += (_, _) => SetCurrentExportFieldChecks(false);
-
-        var hintLabel = new Label
-        {
-            Text = "Tip: the order shown in each field list becomes the column order in that Excel worksheet.",
-            Left = 300,
-            Top = 468,
-            Width = 480,
-            Height = 35,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
-
-        exportOptionsTab.Controls.AddRange(new Control[]
-        {
-            headingLabel,
-            explanationLabel,
-            worksheetLabel,
             _exportSheetsCheckedListBox,
             sheetUpButton,
             sheetDownButton,
             resetButton,
-            fieldTabsLabel,
+            worksheetHintLabel
+        });
+
+        var fieldsGroup = CreateGroupBox("Worksheet columns", 344, 62, 500, 492);
+
+        _exportFieldTabControl.Left = 18;
+        _exportFieldTabControl.Top = 30;
+        _exportFieldTabControl.Width = 462;
+        _exportFieldTabControl.Height = 350;
+
+        var fieldUpButton = CreateActionButton("Move Up", 18, 394, 82);
+        fieldUpButton.Click += (_, _) => MoveSelectedExportField(-1);
+
+        var fieldDownButton = CreateActionButton("Move Down", 108, 394, 92);
+        fieldDownButton.Click += (_, _) => MoveSelectedExportField(1);
+
+        var selectAllFieldsButton = CreateActionButton("Select All", 216, 394, 86);
+        selectAllFieldsButton.Click += (_, _) => SetCurrentExportFieldChecks(true);
+
+        var clearFieldsButton = CreateActionButton("Clear", 310, 394, 74);
+        clearFieldsButton.Click += (_, _) => SetCurrentExportFieldChecks(false);
+
+        var hintLabel = CreateHintLabel(
+            "The order shown in each field list becomes the column order in that worksheet.",
+            18,
+            430,
+            450,
+            44);
+
+        fieldsGroup.Controls.AddRange(new Control[]
+        {
             _exportFieldTabControl,
             fieldUpButton,
             fieldDownButton,
@@ -3086,192 +3928,115 @@ public sealed class SettingsForm : Form
             hintLabel
         });
 
+        exportOptionsTab.Controls.AddRange(new Control[]
+        {
+            introLabel,
+            worksheetGroup,
+            fieldsGroup
+        });
+
         LoadExportOptions(settings);
     }
 
+
     private void BuildMaintenanceTab(TabPage maintenanceTab, AppSettings settings)
     {
-        var headingLabel = new Label
-        {
-            Text = "Maintenance and portable-app cleanup",
-            Left = 16,
-            Top = 20,
-            Width = 740,
-            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
-        };
+        var introLabel = CreateHintLabel(
+            "Maintenance tools are visible only when DeskPulse is started with -maintenance.",
+            24,
+            22,
+            820,
+            28);
 
-        var explanationLabel = new Label
-        {
-            Text = "These options are for the portable version of DeskPulse. They do not use an installer and they do not delete the program folder automatically.",
-            Left = 16,
-            Top = 48,
-            Width = 760,
-            Height = 35,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
+        var startupGroup = CreateGroupBox("Windows startup", 24, 62, 820, 82);
 
-        var autostartHeadingLabel = new Label
-        {
-            Text = "Windows startup",
-            Left = 16,
-            Top = 95,
-            Width = 300,
-            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
-        };
+        var autostartLabel = CreateHintLabel(
+            "The normal startup option is now on the General tab.",
+            18,
+            34,
+            760,
+            22);
 
-        var autostartCheckBox = new CheckBox
-        {
-            Text = "Start DeskPulse with Windows",
-            Left = 32,
-            Top = 122,
-            Width = 300,
-            Enabled = false
-        };
+        startupGroup.Controls.Add(autostartLabel);
 
-        var autostartHintLabel = new Label
-        {
-            Text = "Coming in a future version. This will use Windows Task Scheduler so DeskPulse can start with the required Administrator privileges.",
-            Left = 55,
-            Top = 147,
-            Width = 700,
-            Height = 35,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
+        var foldersGroup = CreateGroupBox("Folders", 24, 164, 820, 96);
 
-        var foldersHeadingLabel = new Label
-        {
-            Text = "Folders",
-            Left = 16,
-            Top = 198,
-            Width = 300,
-            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
-        };
-
-        var openDataFolderButton = new Button
-        {
-            Text = "Open DeskPulse Data Folder",
-            Left = 32,
-            Top = 225,
-            Width = 230,
-            Height = 30
-        };
-
+        var openDataFolderButton = CreateActionButton("Open Data Folder", 18, 36, 170);
         openDataFolderButton.Click += (_, _) => OpenFolder(settings.DataFolderPath, "DeskPulse data folder");
 
-        var openProgramFolderButton = new Button
-        {
-            Text = "Open DeskPulse Program Folder",
-            Left = 280,
-            Top = 225,
-            Width = 230,
-            Height = 30
-        };
-
+        var openProgramFolderButton = CreateActionButton("Open Program Folder", 202, 36, 180);
         openProgramFolderButton.Click += (_, _) => OpenFolder(AppContext.BaseDirectory, "DeskPulse program folder");
 
-        var diagnosticsHeadingLabel = new Label
+        foldersGroup.Controls.AddRange(new Control[]
         {
-            Text = "Diagnostics",
-            Left = 16,
-            Top = 285,
-            Width = 300,
-            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
-        };
+            openDataFolderButton,
+            openProgramFolderButton
+        });
 
-        var diagnosticsStatusLabel = new Label
-        {
-            Text = AppRuntime.DebugLoggingEnabled
-                ? "Diagnostic logging is ON. Normal -debug logs accepted monitored events only. Add -debug-skipped only for full skip tracing."
-                : "Diagnostic logging is OFF. Start DeskPulse with -debug to record accepted monitored ETW file events.",
-            Left = 32,
-            Top = 312,
-            Width = 720,
-            ForeColor = AppRuntime.DebugLoggingEnabled
-                ? System.Drawing.SystemColors.ControlText
-                : System.Drawing.SystemColors.GrayText
-        };
+        var diagnosticsGroup = CreateGroupBox("Diagnostics", 24, 280, 820, 118);
 
-        var openDiagnosticsLogButton = new Button
-        {
-            Text = "Open Diagnostic Log",
-            Left = 32,
-            Top = 342,
-            Width = 200,
-            Height = 30
-        };
+        var diagnosticsStatusLabel = CreateHintLabel(
+            AppRuntime.DebugLoggingEnabled
+                ? "Diagnostic logging is on. Normal -debug logs accepted monitored events only; add -debug-skipped only for full skip tracing."
+                : "Diagnostic logging is off. Start DeskPulse with -debug to record accepted monitored ETW file events.",
+            18,
+            30,
+            760,
+            34);
 
+        diagnosticsStatusLabel.ForeColor = AppRuntime.DebugLoggingEnabled
+            ? System.Drawing.SystemColors.ControlText
+            : System.Drawing.SystemColors.GrayText;
+
+        var openDiagnosticsLogButton = CreateActionButton("Open Diagnostic Log", 18, 70, 170);
         openDiagnosticsLogButton.Click += (_, _) => OpenFile(DiagnosticLogger.GetDiagnosticLogFilePath(), "DeskPulse diagnostic log");
 
-        var activeExtensionsButton = new Button
-        {
-            Text = "Show Active Extensions",
-            Left = 250,
-            Top = 342,
-            Width = 200,
-            Height = 30
-        };
-
+        var activeExtensionsButton = CreateActionButton("Show Active Extensions", 202, 70, 180);
         activeExtensionsButton.Click += (_, _) => ShowActiveExtensions();
 
-        var cleanupHeadingLabel = new Label
+        diagnosticsGroup.Controls.AddRange(new Control[]
         {
-            Text = "Cleanup",
-            Left = 16,
-            Top = 395,
-            Width = 300,
-            Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold)
-        };
-
-        var registryPathLabel = new Label
-        {
-            Text = "Registry settings location: " + AppSettings.GetRegistryPathForDisplay(),
-            Left = 32,
-            Top = 422,
-            Width = 720,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
-
-        var removeRegistrySettingsButton = new Button
-        {
-            Text = "Remove DeskPulse Registry Settings",
-            Left = 32,
-            Top = 452,
-            Width = 260,
-            Height = 32
-        };
-
-        removeRegistrySettingsButton.Click += (_, _) => RemoveRegistrySettings();
-
-        var cleanupHintLabel = new Label
-        {
-            Text = "This removes DeskPulse settings from the current Windows user only. It does not delete the app, database, Excel export, or other files.",
-            Left = 310,
-            Top = 452,
-            Width = 450,
-            Height = 45,
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
-
-        maintenanceTab.Controls.AddRange(new Control[]
-        {
-            headingLabel,
-            explanationLabel,
-            autostartHeadingLabel,
-            autostartCheckBox,
-            autostartHintLabel,
-            foldersHeadingLabel,
-            openDataFolderButton,
-            openProgramFolderButton,
-            diagnosticsHeadingLabel,
             diagnosticsStatusLabel,
             openDiagnosticsLogButton,
-            activeExtensionsButton,
-            cleanupHeadingLabel,
+            activeExtensionsButton
+        });
+
+        var cleanupGroup = CreateGroupBox("Cleanup", 24, 418, 820, 136);
+
+        var registryPathLabel = CreateHintLabel(
+            "Registry settings location: " + AppSettings.GetRegistryPathForDisplay(),
+            18,
+            30,
+            760,
+            22);
+
+        var removeRegistrySettingsButton = CreateActionButton("Remove Registry Settings", 18, 68, 190);
+        removeRegistrySettingsButton.Click += (_, _) => RemoveRegistrySettings();
+
+        var cleanupHintLabel = CreateHintLabel(
+            "Removes current-user settings only. It does not delete the app, database, Excel export, or other files.",
+            226,
+            70,
+            550,
+            44);
+
+        cleanupGroup.Controls.AddRange(new Control[]
+        {
             registryPathLabel,
             removeRegistrySettingsButton,
             cleanupHintLabel
         });
+
+        maintenanceTab.Controls.AddRange(new Control[]
+        {
+            introLabel,
+            startupGroup,
+            foldersGroup,
+            diagnosticsGroup,
+            cleanupGroup
+        });
     }
+
 
 
     private static void OpenFile(string filePath, string fileDescription)
@@ -3470,10 +4235,11 @@ public sealed class SettingsForm : Form
             {
                 Left = 8,
                 Top = 8,
-                Width = 455,
-                Height = 238,
+                Width = 430,
+                Height = 300,
                 CheckOnClick = true,
                 SelectionMode = SelectionMode.One,
+                IntegralHeight = false,
                 DisplayMember = nameof(ExportFieldOption.DisplayName)
             };
 
@@ -3891,10 +4657,31 @@ public sealed class SettingsForm : Form
             return;
         }
 
+        var startWithWindows = _startWithWindowsCheckBox.Checked;
+
+        try
+        {
+            StartupTaskManager.SetEnabled(startWithWindows);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "The Windows startup setting could not be saved.\n\n" + ex.Message,
+                "Settings",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+
+            DialogResult = DialogResult.None;
+            return;
+        }
+
         var settings = new AppSettings
         {
             DataFolderPath = dataFolder,
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
+            StartWithWindows = startWithWindows,
+            LogProgramActivity = _logProgramActivityCheckBox.Checked,
             ExtensionsToMonitor = extensions,
             ExportSheets = exportSheets
         };
@@ -3979,42 +4766,279 @@ public static class RegisteredFileTypeReader
     }
 }
 
+public sealed class ExportDateRangeForm : Form
+{
+    private readonly Action<DateTime, DateTime, IProgress<ExportProgressInfo>> _exportAction;
+    private readonly MonthCalendar _startCalendar = new();
+    private readonly MonthCalendar _endCalendar = new();
+    private readonly Button _exportButton = new();
+    private readonly Button _cancelButton = new();
+    private readonly ProgressBar _progressBar = new();
+    private readonly Label _progressLabel = new();
+
+    public DateTime StartDate => _startCalendar.SelectionStart.Date;
+    public DateTime EndDate => _endCalendar.SelectionStart.Date;
+
+    public ExportDateRangeForm(Action<DateTime, DateTime, IProgress<ExportProgressInfo>> exportAction)
+    {
+        _exportAction = exportAction ?? throw new ArgumentNullException(nameof(exportAction));
+
+        Text = "Export Activity Log";
+        ClientSize = new System.Drawing.Size(560, 450);
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimizeBox = false;
+        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
+        BackColor = System.Drawing.SystemColors.Window;
+
+        var title = new Label
+        {
+            Text = "Export activity log",
+            Left = 24,
+            Top = 22,
+            Width = 500,
+            Height = 28,
+            Font = new System.Drawing.Font("Segoe UI", 13F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point)
+        };
+
+        var hint = new Label
+        {
+            Text = "Choose the first and last day to include. Both calendars default to today.",
+            Left = 24,
+            Top = 56,
+            Width = 500,
+            Height = 34,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var startGroup = new GroupBox
+        {
+            Text = "Start day",
+            Left = 24,
+            Top = 104,
+            Width = 248,
+            Height = 198
+        };
+
+        _startCalendar.Left = 12;
+        _startCalendar.Top = 22;
+        _startCalendar.MaxSelectionCount = 1;
+        _startCalendar.SelectionStart = DateTime.Today;
+        _startCalendar.SelectionEnd = DateTime.Today;
+        _startCalendar.ShowTodayCircle = true;
+
+        startGroup.Controls.Add(_startCalendar);
+
+        var endGroup = new GroupBox
+        {
+            Text = "End day",
+            Left = 288,
+            Top = 104,
+            Width = 248,
+            Height = 198
+        };
+
+        _endCalendar.Left = 12;
+        _endCalendar.Top = 22;
+        _endCalendar.MaxSelectionCount = 1;
+        _endCalendar.SelectionStart = DateTime.Today;
+        _endCalendar.SelectionEnd = DateTime.Today;
+        _endCalendar.ShowTodayCircle = true;
+
+        endGroup.Controls.Add(_endCalendar);
+
+        _progressLabel.Text = "0%   Waiting to export";
+        _progressLabel.Left = 24;
+        _progressLabel.Top = 368;
+        _progressLabel.Width = 500;
+        _progressLabel.Height = 22;
+        _progressLabel.ForeColor = System.Drawing.SystemColors.GrayText;
+        _progressLabel.Visible = false;
+
+        _progressBar.Left = 24;
+        _progressBar.Top = 338;
+        _progressBar.Width = 512;
+        _progressBar.Height = 20;
+        _progressBar.Minimum = 0;
+        _progressBar.Maximum = 100;
+        _progressBar.Value = 0;
+        _progressBar.Style = ProgressBarStyle.Continuous;
+        _progressBar.Visible = false;
+
+        var separator = new Label
+        {
+            Left = 24,
+            Top = 398,
+            Width = 512,
+            Height = 1,
+            BorderStyle = BorderStyle.Fixed3D
+        };
+
+        _exportButton.Text = "Export";
+        _exportButton.Left = 360;
+        _exportButton.Top = 412;
+        _exportButton.Width = 80;
+        _exportButton.Height = 30;
+        _exportButton.FlatStyle = FlatStyle.System;
+        _exportButton.Click += async (_, _) => await ExportAsync();
+
+        _cancelButton.Text = "Cancel";
+        _cancelButton.Left = 456;
+        _cancelButton.Top = 412;
+        _cancelButton.Width = 80;
+        _cancelButton.Height = 30;
+        _cancelButton.DialogResult = DialogResult.Cancel;
+        _cancelButton.FlatStyle = FlatStyle.System;
+
+        Controls.AddRange(new Control[]
+        {
+            title,
+            hint,
+            startGroup,
+            endGroup,
+            _progressLabel,
+            _progressBar,
+            separator,
+            _exportButton,
+            _cancelButton
+        });
+
+        AcceptButton = _exportButton;
+        CancelButton = _cancelButton;
+    }
+
+    private async Task ExportAsync()
+    {
+        if (EndDate < StartDate)
+        {
+            MessageBox.Show(
+                "The end day cannot be before the start day.",
+                "Invalid export date range",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
+            return;
+        }
+
+        SetExportInProgress(true);
+
+        try
+        {
+            var startDate = StartDate;
+            var endDate = EndDate;
+            var progress = new Progress<ExportProgressInfo>(UpdateExportProgress);
+
+            await Task.Run(() => _exportAction(startDate, endDate, progress));
+
+            UpdateExportProgress(new ExportProgressInfo(100, "100% Export complete"));
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            SetExportInProgress(false);
+
+            MessageBox.Show(
+                ex.Message,
+                "Could not export activity log",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void SetExportInProgress(bool inProgress)
+    {
+        _startCalendar.Enabled = !inProgress;
+        _endCalendar.Enabled = !inProgress;
+        _exportButton.Enabled = !inProgress;
+        _cancelButton.Enabled = !inProgress;
+        ControlBox = !inProgress;
+
+        _exportButton.Text = inProgress ? "Exporting..." : "Export";
+        _progressLabel.Visible = inProgress;
+        _progressBar.Visible = inProgress;
+
+        if (inProgress)
+        {
+            _progressBar.Value = 0;
+            _progressLabel.Text = "0%   Waiting to export";
+        }
+    }
+
+    private void UpdateExportProgress(ExportProgressInfo progressInfo)
+    {
+        var percent = Math.Max(_progressBar.Minimum, Math.Min(_progressBar.Maximum, progressInfo.Percent));
+        _progressBar.Value = percent;
+
+        var message = string.IsNullOrWhiteSpace(progressInfo.Message)
+            ? $"{percent}%   Exporting activity log"
+            : progressInfo.Message;
+
+        _progressLabel.Text = message;
+    }
+}
+
 public sealed class AboutForm : Form
 {
     public AboutForm()
     {
         Text = "About DeskPulse";
-        Width = 430;
-        Height = 235;
+        ClientSize = new System.Drawing.Size(460, 270);
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
+        Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
+        BackColor = System.Drawing.SystemColors.Window;
 
         var title = new Label
         {
-            Text = $"{AppInfo.AppName} {AppInfo.Version}",
-            Left = 20,
-            Top = 20,
-            Width = 360,
-            Font = new System.Drawing.Font(Font.FontFamily, 12, System.Drawing.FontStyle.Bold)
+            Text = AppInfo.AppName,
+            Left = 24,
+            Top = 22,
+            Width = 380,
+            Height = 30,
+            Font = new System.Drawing.Font("Segoe UI", 15F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point)
+        };
+
+        var version = new Label
+        {
+            Text = "Version " + AppInfo.Version,
+            Left = 26,
+            Top = 54,
+            Width = 380,
+            Height = 22,
+            ForeColor = System.Drawing.SystemColors.GrayText
         };
 
         var description = new Label
         {
             Text = "DeskPulse quietly tracks selected file activity while you work. It helps you review what was opened, changed, or saved, and exports clear reports to Excel when needed.",
-            Left = 20,
-            Top = 55,
-            Width = 370,
-            Height = 60
+            Left = 26,
+            Top = 92,
+            Width = 395,
+            Height = 62
+        };
+
+        var linkCaption = new Label
+        {
+            Text = "Project page",
+            Left = 26,
+            Top = 166,
+            Width = 90,
+            Height = 22,
+            ForeColor = System.Drawing.SystemColors.GrayText
         };
 
         var link = new LinkLabel
         {
             Text = AppInfo.GitHubUrl,
-            Left = 20,
-            Top = 122,
-            Width = 370
+            Left = 116,
+            Top = 166,
+            Width = 305,
+            Height = 22
         };
 
         link.Links.Add(0, AppInfo.GitHubUrl.Length, AppInfo.GitHubUrl);
@@ -4031,20 +5055,34 @@ public sealed class AboutForm : Form
             }
         };
 
+        var separator = new Label
+        {
+            Left = 24,
+            Top = 208,
+            Width = 412,
+            Height = 1,
+            BorderStyle = BorderStyle.Fixed3D
+        };
+
         var okButton = new Button
         {
             Text = "OK",
-            Left = 310,
-            Top = 150,
+            Left = 356,
+            Top = 226,
             Width = 80,
-            DialogResult = DialogResult.OK
+            Height = 30,
+            DialogResult = DialogResult.OK,
+            FlatStyle = FlatStyle.System
         };
 
         Controls.AddRange(new Control[]
         {
             title,
+            version,
             description,
+            linkCaption,
             link,
+            separator,
             okButton
         });
 

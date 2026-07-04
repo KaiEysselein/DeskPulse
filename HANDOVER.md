@@ -1,4 +1,4 @@
-# DeskPulse Handover Document — Version 0.0.4
+# DeskPulse Handover Document — Version 0.1.0
 
 ## 1. Project Overview
 
@@ -9,7 +9,7 @@ It monitors selected file activity on a Windows machine using Windows ETW file I
 Current version:
 
 ```text
-0.0.4
+0.1.0
 ```
 
 Repository:
@@ -33,44 +33,154 @@ Early pre-release / working baseline
 Important note:
 
 ```text
-This 0.0.4 package was prepared as source/documentation files. It was not compile-tested inside the AI environment because dotnet/.NET SDK was not available there. Compile and test locally before committing or publishing.
+This 0.1.0 package was prepared as source/documentation files. It was not compile-tested inside the AI environment because dotnet/.NET SDK was not available there. Compile and test locally before committing or publishing.
 ```
 
 ---
 
-## 2. Version 0.0.4 Summary
+## 2. Version 0.1.0 Summary
 
-Version 0.0.4 extends the 0.0.3 baseline with:
+Version 0.1.0 continues from the 0.0.4 baseline with:
 
-- configurable Excel export worksheets
-- configurable Excel export fields/columns per worksheet
-- sorting of selected worksheets
-- sorting of fields/columns within each selected worksheet
-- hidden Maintenance tab available only from a command-line switch
-- portable cleanup command-line mode
-- user/session activity logging
-- new `User` export worksheet
-- less technical About window wording
+- application/project/manifest version references updated to `0.1.0`
+- successful-startup tray balloon removed so DeskPulse loads quietly to the tray
+- startup error messages preserved
+- new normal `General` settings tab
+- `Start DeskPulse when I log in to Windows` option
+- current-user Windows Task Scheduler autostart integration
+- registry-backed `StartWithWindows` setting
+- Maintenance tab startup placeholder replaced with a pointer to the General tab
+- settings window visually polished with grouped sections, better spacing, larger layout, consistent controls, and clearer help text
+- About window visually polished with cleaner title, version, description, and project link layout
+- program start/close activity logging for programs in the current interactive Windows session
+- new `Programs` Excel export worksheet
+- registry-backed `LogProgramActivity` setting
 
 The main live storage remains SQLite. Excel remains export/reporting only.
 
+### 2.1 UI polish in this 0.1.0 package
+
+The WinForms settings UI was revised to look less like a prototype:
+
+```text
+- larger fixed dialog with better margins
+- Segoe UI as the form font
+- grouped sections using GroupBox controls
+- cleaner General, Files, Export Options, and Maintenance tab layouts
+- consistent action button sizing
+- less cramped export-options layout
+- cleaner About dialog with separate title and version labels
+```
+
+This is a visual/layout cleanup only. It does not intentionally change the monitoring, database, export, startup-task, or maintenance behaviour.
+
+### Tray menu behaviour
+
+Tray icon actions are split by mouse button.
+
+Left-click opens the day-to-day action menu:
+
+```text
+Export Activity Log
+Settings...
+```
+
+Right-click opens the secondary/system menu:
+
+```text
+About
+Exit
+```
+
+
+### Program activity logging
+
+0.1.0 adds optional program start/close logging.
+
+Setting:
+
+```text
+General > Log program start and close activity
+```
+
+Registry value:
+
+```text
+HKCU\Software\DeskPulse\LogProgramActivity
+```
+
+Default:
+
+```text
+Enabled
+```
+
+Implementation summary:
+
+```text
+ProgramActivityMonitor periodically snapshots processes in the current interactive Windows session.
+Existing processes are captured as a baseline on monitor startup and are not logged as newly started.
+New process IDs are logged as ProgramStarted.
+Missing process IDs are logged as ProgramStopped.
+DeskPulse itself is excluded.
+```
+
+Database table:
+
+```text
+ProgramEvents
+```
+
+Important limitation:
+
+```text
+This is user-session process/activity logging, not a full Windows service or machine-wide audit log.
+It does not monitor all users globally, and some protected/system process details may be unavailable.
+```
+
+Excel export worksheet:
+
+```text
+Programs
+```
+
+Typical fields:
+
+```text
+Id
+Created At
+Date
+Time
+Event Type
+Event
+Program
+Process ID
+Program Path
+Window Title
+User
+Computer
+App Version
+Note
+```
+
 ---
 
-## 3. Files Included in the 0.0.4 Package
+## 3. Files Included in the 0.1.0 Package
 
-The current 0.0.4 package contains:
+The current 0.1.0 package contains:
 
 ```text
 Program.cs
 DeskPulse.csproj
-README.md
+app.manifest
 CHANGELOG.md
+HANDOVER.md
 ```
 
 The package file is:
 
 ```text
-DeskPulse-0.0.4-updated-files.zip
+DeskPulse-0.1.0-export-activity-log-percent-progress.zip
 ```
 
 Important:
@@ -81,28 +191,34 @@ Use the files from the latest ZIP package as the source of truth for this handov
 
 ---
 
+
+### Export Activity Log dialog update
+
+The tray menu item is labelled `Export Activity Log`. The export dialog uses two calendar controls only, defaults both to today, shows a real percentage progress bar while exporting, and closes only after the export/open operation completes.
+
 ## 4. Current Version References
 
-Version references were updated to 0.0.4 in:
+Version references were updated to 0.1.0 in:
 
 ```text
 Program.cs
 DeskPulse.csproj
-README.md
+app.manifest
 CHANGELOG.md
+HANDOVER.md
 ```
 
 Expected values:
 
 ```text
-AppInfo.Version = "0.0.4"
-DeskPulse.csproj Version = 0.0.4
-DeskPulse.csproj AssemblyVersion = 0.0.4.0
-DeskPulse.csproj FileVersion = 0.0.4.0
-DeskPulse.csproj InformationalVersion = 0.0.4
+AppInfo.Version = "0.1.0"
+DeskPulse.csproj Version = 0.1.0
+DeskPulse.csproj AssemblyVersion = 0.1.0.0
+DeskPulse.csproj FileVersion = 0.1.0.0
+DeskPulse.csproj InformationalVersion = 0.1.0
 ```
 
-Historical `0.0.3`, `0.0.2`, and `0.0.1` references should remain in the changelog history.
+Historical `0.0.4`, `0.0.3`, `0.0.2`, and `0.0.1` references should remain in the changelog history.
 
 ---
 
@@ -129,10 +245,58 @@ The Excel export remains:
 The tray menu item remains:
 
 ```text
-Open log file in Excel
+Export Activity Log
 ```
 
-This exports from SQLite to Excel, then opens the exported workbook.
+This opens an export-options dialog first, defaulted to today only. After the user selects a start and end date, DeskPulse exports matching SQLite rows to Excel, updates a real percentage progress bar while rows are written, and opens the exported workbook. The date range is inclusive.
+
+
+### 5.2.1 Excel export date range
+
+When the user clicks:
+
+```text
+Export Activity Log
+```
+
+DeskPulse shows an `Export Activity Log` dialog with:
+
+```text
+Start date
+End date
+```
+
+Both dates default to the current day. The export is then restricted to rows whose activity/user event date falls within the selected inclusive date range. This applies to the detailed File Activity sheet and to derived summary/error/user worksheets.
+
+### 5.2.2 Excel export percentage progress
+
+The export dialog now uses a determinate progress bar rather than a marquee/activity indicator. The current progress milestone is shown as text below the progress bar.
+
+Progress is calculated from the number of data rows that will be written across the selected export worksheets. DeskPulse first reads and filters the SQLite rows for the selected date range, counts the rows that each selected worksheet will write, and then reports progress as rows are written.
+
+The status line below the progress bar should follow this progress flow:
+
+```text
+1%   Reading activity records
+3%   Counting rows to export
+5-93% Writing worksheet rows
+94%  Saving workbook
+97%  Replacing previous export file
+98%  Opening exported workbook
+100% Export complete
+```
+
+Important implementation classes/methods:
+
+```text
+ExportProgressInfo
+ExcelExportProgressTracker
+DeskPulseDatabase.CountRowsToWrite(...)
+DeskPulseDatabase.ExportToExcel(..., IProgress<ExportProgressInfo>?)
+ExportDateRangeForm.UpdateExportProgress(...)
+```
+
+For empty exports, the total row count is treated as at least one so the progress bar can still advance cleanly to completion.
 
 ### 5.3 DeskPulse must not log its own file activity
 
@@ -301,15 +465,50 @@ Settings, diagnostics, and generated reports are removed. The actual SQLite acti
 
 ## 7. Settings Window Structure
 
-The 0.0.4 settings window has these tabs:
+The 0.1.0 settings window has these tabs:
 
 ```text
+General
 Files
 Export Options
 Maintenance  [hidden unless started with -maintenance]
 ```
 
-### 7.1 Files tab
+### 7.1 General tab
+
+Purpose:
+
+```text
+Contains ordinary application-wide settings that are not specifically file monitoring, export layout, or hidden maintenance tools.
+```
+
+Controls:
+
+- `Start DeskPulse when I log in to Windows`
+
+Implementation:
+
+```text
+Uses Windows Task Scheduler, not the Startup folder.
+Task name: DeskPulse
+Trigger: ONLOGON
+Run level: HIGHEST
+Command source: Application.ExecutablePath
+```
+
+Reason:
+
+```text
+DeskPulse requires Administrator privileges for ETW tracing. A simple Startup folder shortcut is not sufficient for reliable elevated startup.
+```
+
+Important deployment note:
+
+```text
+Enable this setting only after DeskPulse is running from the folder that should remain on the user's computer. The scheduled task points to the executable path used at the time the setting is saved.
+```
+
+### 7.2 Files tab
 
 Controls:
 
@@ -320,7 +519,7 @@ Controls:
 
 The right-hand monitored file type list remains the source of truth.
 
-### 7.2 Export Options tab
+### 7.3 Export Options tab
 
 Purpose:
 
@@ -331,6 +530,7 @@ Controls which worksheets and columns are created in the Excel export.
 Behavior:
 
 - user can tick/select which worksheets are created
+- date range is selected at export time, not in this settings tab
 - user can sort selected worksheet order with Up/Down buttons
 - each selected worksheet has a field sub-tab
 - each worksheet field sub-tab lists available fields/columns
@@ -343,7 +543,7 @@ The default remains:
 File Activity only, with standard/default fields enabled
 ```
 
-### 7.3 Maintenance tab
+### 7.4 Maintenance tab
 
 Hidden during normal use.
 
@@ -360,13 +560,13 @@ Controls include:
 - open diagnostic log
 - show active monitored extensions
 - remove registry settings
-- disabled placeholder for future Task Scheduler autostart
+- note that startup settings are now available on the normal General tab
 
 ---
 
 ## 8. Export Worksheets
 
-0.0.4 supports the following export worksheet options:
+0.1.0 supports the following export worksheet options:
 
 ```text
 File Activity
@@ -678,6 +878,7 @@ ExcelExportFilePath
 ExtensionsToMonitor
 ExportSheets
 IgnoreTempFolders
+StartWithWindows
 ```
 
 ### 11.1 ExportSheets
@@ -816,6 +1017,8 @@ Do not copy only the EXE unless single-file publishing has been separately teste
 - published folder builds
 - app runs as Administrator
 - tray icon appears
+- no startup balloon/popup is shown after successful monitoring startup
+- startup failure/error messages still appear if monitoring cannot start
 - normal startup does not show Maintenance tab
 - `-maintenance` startup shows Maintenance tab
 - `-debug` enables diagnostics without necessarily showing Maintenance tab
@@ -840,6 +1043,10 @@ Do not copy only the EXE unless single-file publishing has been separately teste
 - field sub-tabs appear for selected worksheets
 - field check/uncheck works
 - field sorting works
+- export date dialog opens when clicking `Export Activity Log`
+- export progress bar shows percentage progress rather than marquee/activity indication
+- default export start/end date is today
+- export validates that the end date is not before the start date
 - export creates only selected worksheets
 - export worksheet order follows configured order
 - export columns follow configured field order
@@ -904,8 +1111,9 @@ Files suitable for commit:
 ```text
 Program.cs
 DeskPulse.csproj
-README.md
+app.manifest
 CHANGELOG.md
+HANDOVER.md
 HANDOVER.md
 app.manifest
 file-logger.ico
@@ -947,40 +1155,40 @@ publish/
 Suggested commit message:
 
 ```text
-Release DeskPulse v0.0.4 export options and user activity logging
+Release DeskPulse v0.1.0 general startup settings
 ```
 
 Alternative shorter commit message:
 
 ```text
-Add DeskPulse v0.0.4 export options
+Add DeskPulse v0.1.0 startup option
 ```
 
 ---
 
 ## 19. Suggested Next Iteration
 
-The next sensible version could be:
+The next sensible version could continue as:
 
 ```text
-DeskPulse 0.0.5
+DeskPulse 0.1.0 refinement
 ```
 
 Recommended focus:
 
 ```text
-Implement Windows Task Scheduler autostart from the hidden Maintenance tab.
+Compile and test the new General tab and Windows startup task creation locally.
 ```
 
-Expected 0.0.5 scope:
+Expected test scope:
 
-- enable `Start DeskPulse with Windows`
-- create/update/remove a Task Scheduler task
-- start DeskPulse elevated at user logon
-- keep portable-folder deployment
-- do not use the Startup folder
-- show current autostart status in Maintenance
-- export/debug any Task Scheduler setup errors clearly
+- Settings opens with `General`, `Files`, and `Export Options` tabs in normal mode
+- `Start DeskPulse when I log in to Windows` creates a `DeskPulse` Task Scheduler task
+- task uses the published executable path
+- task runs with highest privileges
+- unticking the setting removes the task
+- DeskPulse starts quietly in the tray at logon
+- startup error messages still appear if monitoring cannot start
 
 ---
 
@@ -1005,7 +1213,7 @@ When continuing this project with an AI assistant:
 15. Prefer portable publish folder for release builds.
 16. Remember that the user prefers full copy/paste code files.
 17. Keep About text user-friendly, not overly technical.
-18. Future autostart should use Windows Task Scheduler, not the Startup folder.
+18. Autostart uses Windows Task Scheduler, not the Startup folder.
 
 ---
 
@@ -1022,3 +1230,35 @@ SPDX identifier:
 ```text
 GPL-3.0-or-later
 ```
+
+---
+
+## 0.1.0 Baseline Note
+
+This package starts DeskPulse version 0.1.0 from the 0.0.4 working baseline.
+
+Changes made so far for 0.1.0:
+
+```text
+Program.cs AppInfo.Version = 0.1.0
+DeskPulse.csproj Version = 0.1.0
+DeskPulse.csproj AssemblyVersion = 0.1.0.0
+DeskPulse.csproj FileVersion = 0.1.0.0
+DeskPulse.csproj InformationalVersion = 0.1.0
+app.manifest assemblyIdentity version = 0.1.0.0
+CHANGELOG.md new 0.1.0 entry added
+```
+
+No new functional behaviour has been added yet. Continue feature development from this baseline.
+
+
+---
+
+## 0.1.0 Quiet Notification Behaviour
+
+Successful normal actions should not show tray balloon notifications. In particular:
+
+- application startup loads straight to tray
+- saving settings reloads settings silently
+
+Error dialogs are still retained for startup failures, export failures, cleanup failures, and other actionable errors.

@@ -4,6 +4,64 @@ All notable changes to DeskPulse will be documented in this file.
 
 The format is loosely based on Keep a Changelog, and this project currently follows early pre-release versioning.
 
+
+## [0.1.0] - 2026-07-04
+
+### Summary
+
+Version 0.1.0 starts the next DeskPulse development baseline from the working 0.0.4 source package, makes startup/settings actions quieter, adds a normal General settings tab, polishes the UI, adds a cleaner calendar-only date-range export flow with real percentage progress, and adds program start/close activity logging for the current interactive Windows session.
+
+### Changed
+
+- Added a `Log program start and close activity` checkbox to the `General` settings tab.
+- Added `Programs` as a selectable Excel export worksheet with configurable fields.
+- Split tray icon menus by mouse button: left-click now shows day-to-day actions only, and right-click shows secondary actions.
+- Changed the left-click tray menu to contain only `Export Activity Log` and `Settings...`.
+- Changed the right-click tray menu to contain only `About` and `Exit`.
+- Removed the tray balloon notification shown after saving settings.
+- Removed remaining normal-success tray notification code so successful startup/settings actions stay silent.
+- Updated the application version constant to `0.1.0`.
+- Updated project metadata in `DeskPulse.csproj` to `0.1.0`.
+- Updated the application manifest assembly identity version to `0.1.0.0`.
+- Removed the startup balloon notification after successful monitoring startup, so DeskPulse loads straight to the tray.
+- Moved Windows startup/autostart out of the hidden Maintenance placeholder and into a normal `General` settings tab.
+- Polished the WinForms settings UI with a cleaner layout, larger dialog, grouped sections, improved spacing, and consistent buttons.
+- Polished the About dialog with a cleaner title/version layout and less cramped spacing.
+- Renamed the tray menu item from `Open log file in Excel` to `Export Activity Log`.
+- Changed the Excel export workflow so clicking `Export Activity Log` opens an export-options dialog first.
+- Replaced the export date text fields/dropdowns with two calendar controls only: one for the start day and one for the end day.
+- Restricted exported activity, summary, error, and user worksheets to the selected inclusive date range.
+- Changed the export dialog so it stays open while the export is running, shows a real percentage progress bar based on counted Excel data rows, and closes only after the export/open operation completes.
+- Changed the export progress status text so the current milestone is written below the progress bar while the export advances.
+
+### Added
+
+- Added current-session program start/close monitoring using periodic process snapshots.
+- Added `ProgramEvents` SQLite table for application/process start and close records.
+- Added registry-backed `LogProgramActivity` setting.
+- Added export fields for program activity including date, time, event type, program, process ID, program path, window title, user, computer, app version, and note.
+- Added a normal `General` settings tab.
+- Added `Start DeskPulse when I log in to Windows` setting.
+- Added registry-backed `StartWithWindows` setting.
+- Added Windows Task Scheduler integration using a current-user `DeskPulse` task with `ONLOGON` trigger and highest privileges.
+- Added startup-task creation/removal through `schtasks.exe`.
+- Added reusable settings-form layout helpers for tabs, group boxes, hint labels, and action buttons.
+- Added an `Export Activity Log` date-range dialog with two calendar controls.
+- Added a real percentage progress bar for Excel export generation, based on the number of data rows written to the selected worksheets.
+- Added live export status messages below the progress bar: reading records, counting rows, writing worksheet rows, saving, replacing, opening, and complete.
+- Defaulted the export date range to today only.
+
+### Notes
+
+- Startup failure/error messages are still shown if monitoring cannot start.
+- The Windows startup option creates a Task Scheduler entry for the current user rather than using the simple Startup folder, because DeskPulse requires Administrator privileges for ETW tracing.
+- The startup option should be tested from the published folder path that will actually remain on the user's computer.
+- Compile and test locally before committing or publishing.
+- Export date filtering is inclusive: selected start date through selected end date.
+- Normal successful export actions remain quiet; export errors are still shown in a dialog.
+- Export progress is based on data rows written to the selected worksheets, with additional progress steps for reading, counting, saving, replacing, and opening the workbook.
+- Program start/close logging tracks processes in the current interactive Windows session. It is intended as user-session activity logging, not as a full Windows service or machine-wide audit log.
+
 ## [0.0.4] - 2026-07-03
 
 ### Summary
