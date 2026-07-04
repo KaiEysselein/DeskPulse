@@ -230,69 +230,6 @@ Windows kernel ETW file I/O tracing requires elevation.
 
 If DeskPulse is not elevated, it should fail with an Administrator/elevation message.
 
-## Build Instructions
-
-From the repository folder:
-
-```powershell
-dotnet clean
-dotnet restore
-dotnet build
-```
-
-Expected result:
-
-```text
-Build succeeded.
-```
-
-## Run From Source
-
-Run from Administrator PowerShell or Administrator VS Code terminal:
-
-```powershell
-dotnet run
-```
-
-Run with hidden maintenance tools enabled:
-
-```powershell
-dotnet run -- -maintenance
-```
-
-Run with debug logging enabled:
-
-```powershell
-dotnet run -- -debug
-```
-
-## Publish Instructions
-
-Recommended current publish method is a portable folder publish.
-
-```powershell
-dotnet publish .\DeskPulse.csproj `
-  --configuration Release `
-  --runtime win-x64 `
-  --self-contained true `
-  --output ".\publish\v0.1.0" `
-  /p:PublishSingleFile=false
-```
-
-Published executable:
-
-```text
-publish\v0.1.0\DeskPulse.exe
-```
-
-Run from Administrator PowerShell:
-
-```powershell
-cd ".\publish\v0.1.0"
-.\DeskPulse.exe
-```
-
-Do not copy only the EXE unless single-file publishing has been separately tested. The safer current deployment is the full publish folder.
 
 ## Git Hygiene
 
