@@ -11,7 +11,7 @@
     <RootNamespace>DeskPulse</RootNamespace>
     <Product>DeskPulse</Product>
     <Title>DeskPulse</Title>
-    <Description>DeskPulse - Windows file activity monitor</Description>
+    <Description>DeskPulse - Windows activity monitor</Description>
     <Company>Kai Eysselein</Company>
     <ApplicationIcon>file-logger.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>

@@ -36,6 +36,8 @@ Version 0.1.0 starts the next DeskPulse development baseline from the working 0.
 
 ### Added
 
+- Added `README.md` updated for version `0.1.0`.
+- Added `ROADMAP.md` for future bugs, enhancements, and planned versions.
 - Added current-session program start/close monitoring using periodic process snapshots.
 - Added `ProgramEvents` SQLite table for application/process start and close records.
 - Added registry-backed `LogProgramActivity` setting.
