@@ -231,54 +231,6 @@ Windows kernel ETW file I/O tracing requires elevation.
 If DeskPulse is not elevated, it should fail with an Administrator/elevation message.
 
 
-## Git Hygiene
-
-Source and documentation files that may be committed:
-
-```text
-Program.cs
-DeskPulse.csproj
-README.md
-CHANGELOG.md
-HANDOVER.md
-ROADMAP.md
-app.manifest
-file-logger.ico
-LICENSE
-```
-
-Do not commit generated/runtime/build files:
-
-```text
-bin/
-obj/
-publish/
-*.db
-*.db-shm
-*.db-wal
-*.xlsx
-*.csv
-*.user
-.vs/
-```
-
-Suggested `.gitignore` entries:
-
-```gitignore
-bin/
-obj/
-publish/
-
-*.db
-*.db-shm
-*.db-wal
-*.xlsx
-*.csv
-*.user
-
-.vs/
-```
-
 ## AI-Assisted Development Note
 
 DeskPulse was developed with AI-assisted coding support.
