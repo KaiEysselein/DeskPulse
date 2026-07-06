@@ -5,6 +5,73 @@ All notable changes to DeskPulse will be documented in this file.
 The format is loosely based on Keep a Changelog, and this project currently follows early pre-release versioning.
 
 
+## [0.1.1] - 2026-07-06
+
+### Summary
+
+Version 0.1.1 adds the first practical hidden Maintenance workspace for database management, statistics, cleanup, exclusions, and diagnostics.
+
+### Changed
+
+- Reordered Maintenance > Cleanup so the lowest-risk generated-file cleanup appears first, rule-based unwanted-data cleanup appears second, and full record deletion appears last.
+- Separated Maintenance into its own right-click form instead of showing it as a tab inside normal Settings.
+- Normal Settings now contains only General, Files, and Export Options.
+
+- Removed the redundant top-level manual folder action checkboxes from Maintenance > Logging Rules; per-row Include/Exclude/Sub checkboxes are now the only rule controls.
+- Widened the folder-exclusion rules table and made the Folder path column fill the available width for easier reading.
+- Changed the Settings form and exclusion rules grid to use the Windows message-box font instead of a fixed custom form font.
+
+- Updated the application version constant to `0.1.1`.
+- Updated project metadata in `DeskPulse.csproj` to `0.1.1`.
+- Updated the application manifest assembly identity version to `0.1.1.0`.
+- Extended hidden Maintenance mode so it can be opened with `-maintenance` or `-m`.
+- Reworked the hidden Maintenance tab into sub-tabs.
+
+### Added
+
+- Added maintenance button hover tooltips explaining whether each action deletes selected records, newly added rules, generated files, registry settings, or all activity records.
+- Added multi-select support to Maintenance > Statistics using normal Shift/Ctrl row selection, with add-rule actions applied to all selected rows.
+
+- Added a right-click tray menu `Maintenance...` shortcut when DeskPulse is started with `-maintenance` or `-m`; it opens Settings directly on the Maintenance tab.
+- Added an `Also exclude subfolders` option to the manual folder-exclusion entry.
+- Added folder exclusion rule suffixes: `|recursive` and `|folder-only`; plain existing folder entries remain recursive for backward compatibility.
+- Added `Remove Exclusions from Past Records` under Maintenance > Logging Rules to permanently delete existing file/program records that match the current logging rules, with a destructive-action warning dialog.
+- Added a matching determinate progress dialog for `Remove Exclusions from Past Records`: 1% while matching records are determined, then the remaining 99% based on actual deleted records.
+- Added a manual folder-entry field under Maintenance > Logging Rules so a folder path can be typed or pasted and added to the excluded folders list.
+- Added Maintenance > Database overview with database path, SQLite database size, WAL/SHM size, and record counts.
+- Added Maintenance > Statistics with Top 100 views for full paths, folders, file processes, extensions, and program events.
+- Added Maintenance > Cleanup actions for clearing file activity, user/session activity, program activity, or all activity records while preserving the database structure.
+- Added generated-file cleanup for the Excel export, diagnostic log, and startup fallback log.
+- Added Maintenance > Logging Rules with editable excluded folders and excluded processes.
+- Added default excluded folders for common Windows/temp/cache locations.
+- Added default excluded processes for common noisy/background Windows processes.
+- Added exclusion checks to file logging and program activity logging.
+- Added Maintenance > Diagnostics startup task status display.
+
+### Notes
+
+- Locked `0.1.1` as the maintenance/data-management release baseline; future feature changes should move to `0.1.2` unless a critical 0.1.1 hotfix is required.
+- Database clear actions are destructive and require confirmation.
+- Database clear actions keep the SQLite file and table structure but remove selected records.
+- Exclusion changes are saved with the normal Settings Save button.
+- Compile and test locally before committing or publishing.
+
+### Added / Changed in this package
+
+- Redesigned the hidden Maintenance Logging Rules page as `Logging Rules`.
+- Added exact file exclusion rules and a Statistics-grid right-click action to exclude a selected Top 100 full-path item.
+- Added a compact rule-entry panel with Folder/Process type selection, Include/Exclude action selection, folder subfolder option, and Browse buttons.
+- Added a single ordered rules table for folder and process/program rules. The first matching rule wins.
+- Added rule management buttons for Move Up, Move Down, Remove, Duplicate, and Reset Defaults.
+- Added a `LoggingRules` registry value while keeping legacy `ExcludedFolders` and `ExcludedProcesses` values for compatibility.
+- Cleaned up spacing on the Maintenance logging-rules form to reduce unused whitespace.
+
+
+### Changed
+
+- Clarified the Maintenance cleanup tab by renaming destructive record-clear buttons to `Delete All ...` labels.
+- Added a separate `Remove unwanted data using Logging Rules` cleanup group for deleting only past file/program records that match current Exclude rules.
+- Expanded cleanup hints and tooltips to clearly distinguish full record deletion from rule-based unwanted-data cleanup and generated-file cleanup.
 ## [0.1.0] - 2026-07-04
 
 ### Summary
@@ -303,3 +370,9 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
   - CSV files
   - generated EXE files
   - user-specific IDE files
+
+### Added
+
+- Added ordered exclusion rules for folder/process filtering where the upper rule takes priority over lower rules.
+- Added Include/Exclude rule support for folder exclusions, allowing broad exclusions with specific include exceptions above them.
+- Added Move Up/Move Down controls for exclusion rule ordering.

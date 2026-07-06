@@ -41,7 +41,7 @@ internal static class Program
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.1.0";
+    public const string Version = "0.1.1";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
 }
 
@@ -56,7 +56,7 @@ public static class AppRuntime
     {
         DebugLoggingEnabled = HasSwitch(args, "debug");
         DebugSkippedLoggingEnabled = HasSwitch(args, "debug-skipped");
-        MaintenanceModeEnabled = HasSwitch(args, "maintenance");
+        MaintenanceModeEnabled = HasSwitch(args, "maintenance") || HasSwitch(args, "m");
         UninstallModeEnabled = HasSwitch(args, "uninstall");
     }
 
@@ -261,6 +261,10 @@ public sealed class TrayAppContext : ApplicationContext
 
         _rightClickMenu = new ContextMenuStrip();
         _rightClickMenu.Items.Add("About", null, (_, _) => OpenAboutWindow());
+
+        if (AppRuntime.MaintenanceModeEnabled)
+            _rightClickMenu.Items.Add("Maintenance...", null, (_, _) => OpenMaintenanceWindow());
+
         _rightClickMenu.Items.Add(new ToolStripSeparator());
         _rightClickMenu.Items.Add("Exit", null, (_, _) => ExitThread());
 
@@ -335,6 +339,16 @@ public sealed class TrayAppContext : ApplicationContext
     private void OpenSettingsWindow()
     {
         using var form = new SettingsForm();
+
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            _monitor.ReloadSettings();
+        }
+    }
+
+    private void OpenMaintenanceWindow()
+    {
+        using var form = new MaintenanceForm();
 
         if (form.ShowDialog() == DialogResult.OK)
         {
@@ -873,6 +887,12 @@ public sealed class FileIoMonitor : IDisposable
                 return false;
             }
 
+            if (LoggingRulesEngine.IsFileActivityExcluded(fullPath, processName, settings.LoggingRules))
+            {
+                LogFileDecision("SKIP", "File/process matched an excluded logging rule", operation, rawFileName, normalizedFileName, fullPath, ext, processName, processId, settings);
+                return false;
+            }
+
             var dbPath = Path.GetFullPath(settings.DatabaseFilePath);
             var exportPath = Path.GetFullPath(settings.ExcelExportFilePath);
 
@@ -1150,11 +1170,19 @@ public sealed class ProgramActivityMonitor : IDisposable
                     _knownProcesses[pair.Key] = pair.Value;
             }
 
+            var settings = _getSettings();
+
             foreach (var process in startedProcesses)
-                WriteProgramEvent("ProgramStarted", "Program started", process, process.StartTime ?? DateTime.Now, "Detected in the current interactive Windows session");
+            {
+                if (!LoggingRulesEngine.IsProgramActivityExcluded(process.FilePath, process.ProcessName, settings.LoggingRules))
+                    WriteProgramEvent("ProgramStarted", "Program started", process, process.StartTime ?? DateTime.Now, "Detected in the current interactive Windows session");
+            }
 
             foreach (var process in stoppedProcesses)
-                WriteProgramEvent("ProgramStopped", "Program closed", process, DateTime.Now, "Process no longer detected in the current interactive Windows session");
+            {
+                if (!LoggingRulesEngine.IsProgramActivityExcluded(process.FilePath, process.ProcessName, settings.LoggingRules))
+                    WriteProgramEvent("ProgramStopped", "Program closed", process, DateTime.Now, "Process no longer detected in the current interactive Windows session");
+            }
         }
         catch (Exception ex)
         {
@@ -1717,6 +1745,336 @@ public sealed class DeskPulseDatabase : IDisposable
             command.ExecuteNonQuery();
         }
     }
+
+    public MaintenanceDatabaseOverview GetMaintenanceOverview()
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var databaseBytes = GetFileLength(DatabaseFilePath);
+            var walBytes = GetFileLength(DatabaseFilePath + "-wal");
+            var shmBytes = GetFileLength(DatabaseFilePath + "-shm");
+
+            return new MaintenanceDatabaseOverview
+            {
+                DatabaseBytes = databaseBytes,
+                WalBytes = walBytes,
+                ShmBytes = shmBytes,
+                ActivityEventCount = CountTableRows(connection, "ActivityEvents"),
+                UserEventCount = CountTableRows(connection, "UserEvents"),
+                ProgramEventCount = CountTableRows(connection, "ProgramEvents")
+            };
+        }
+    }
+
+    public List<MaintenanceStatisticRow> GetTopMaintenanceStatistics(string viewName)
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var normalizedViewName = viewName.Trim();
+
+            if (normalizedViewName.Equals("Top 100 folders", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadTopStatistics(
+                    connection,
+                    """
+                    SELECT
+                        COALESCE(NULLIF(FolderPath, ''), '(blank)') AS Value,
+                        COALESCE(NULLIF(Extension, ''), '(mixed)') AS Extra,
+                        COUNT(*) AS EventCount,
+                        MIN(CreatedAt) AS FirstSeen,
+                        MAX(CreatedAt) AS LastSeen
+                    FROM ActivityEvents
+                    GROUP BY COALESCE(NULLIF(FolderPath, ''), '(blank)'), COALESCE(NULLIF(Extension, ''), '(mixed)')
+                    ORDER BY EventCount DESC, Value ASC
+                    LIMIT 100;
+                    """);
+            }
+
+            if (normalizedViewName.Equals("Top 100 file processes", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadTopStatistics(
+                    connection,
+                    """
+                    SELECT
+                        COALESCE(NULLIF(ProcessName, ''), '(blank)') AS Value,
+                        COALESCE(NULLIF(Extension, ''), '(mixed)') AS Extra,
+                        COUNT(*) AS EventCount,
+                        MIN(CreatedAt) AS FirstSeen,
+                        MAX(CreatedAt) AS LastSeen
+                    FROM ActivityEvents
+                    GROUP BY COALESCE(NULLIF(ProcessName, ''), '(blank)'), COALESCE(NULLIF(Extension, ''), '(mixed)')
+                    ORDER BY EventCount DESC, Value ASC
+                    LIMIT 100;
+                    """);
+            }
+
+            if (normalizedViewName.Equals("Top 100 extensions", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadTopStatistics(
+                    connection,
+                    """
+                    SELECT
+                        COALESCE(NULLIF(Extension, ''), '(blank)') AS Value,
+                        COALESCE(NULLIF(ProcessName, ''), '(mixed)') AS Extra,
+                        COUNT(*) AS EventCount,
+                        MIN(CreatedAt) AS FirstSeen,
+                        MAX(CreatedAt) AS LastSeen
+                    FROM ActivityEvents
+                    GROUP BY COALESCE(NULLIF(Extension, ''), '(blank)'), COALESCE(NULLIF(ProcessName, ''), '(mixed)')
+                    ORDER BY EventCount DESC, Value ASC
+                    LIMIT 100;
+                    """);
+            }
+
+            if (normalizedViewName.Equals("Top 100 program events", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadTopStatistics(
+                    connection,
+                    """
+                    SELECT
+                        COALESCE(NULLIF(ProgramName, ''), '(blank)') AS Value,
+                        COALESCE(NULLIF(EventType, ''), '(mixed)') AS Extra,
+                        COUNT(*) AS EventCount,
+                        MIN(CreatedAt) AS FirstSeen,
+                        MAX(CreatedAt) AS LastSeen
+                    FROM ProgramEvents
+                    GROUP BY COALESCE(NULLIF(ProgramName, ''), '(blank)'), COALESCE(NULLIF(EventType, ''), '(mixed)')
+                    ORDER BY EventCount DESC, Value ASC
+                    LIMIT 100;
+                    """);
+            }
+
+            return ReadTopStatistics(
+                connection,
+                """
+                SELECT
+                    COALESCE(NULLIF(FullPath, ''), NULLIF(Item, ''), '(blank)') AS Value,
+                    COALESCE(NULLIF(ProcessName, ''), '(blank)') AS Extra,
+                    COUNT(*) AS EventCount,
+                    MIN(CreatedAt) AS FirstSeen,
+                    MAX(CreatedAt) AS LastSeen
+                FROM ActivityEvents
+                GROUP BY COALESCE(NULLIF(FullPath, ''), NULLIF(Item, ''), '(blank)'), COALESCE(NULLIF(ProcessName, ''), '(blank)')
+                ORDER BY EventCount DESC, Value ASC
+                LIMIT 100;
+                """);
+        }
+    }
+
+    public long ClearTableRecords(string tableName)
+    {
+        if (!IsKnownActivityTable(tableName))
+            throw new InvalidOperationException("Unknown DeskPulse table: " + tableName);
+
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var before = CountTableRows(connection, tableName);
+            ExecuteNonQuery(connection, "DELETE FROM " + tableName + ";");
+            ExecuteNonQuery(connection, "VACUUM;");
+            return before;
+        }
+    }
+
+    public long ClearAllRecords()
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var total = CountTableRows(connection, "ActivityEvents") +
+                        CountTableRows(connection, "UserEvents") +
+                        CountTableRows(connection, "ProgramEvents");
+
+            ExecuteNonQuery(connection, "DELETE FROM ActivityEvents;");
+            ExecuteNonQuery(connection, "DELETE FROM UserEvents;");
+            ExecuteNonQuery(connection, "DELETE FROM ProgramEvents;");
+            ExecuteNonQuery(connection, "VACUUM;");
+            return total;
+        }
+    }
+
+    public MaintenanceExclusionCleanupResult RemoveRecordsMatchingExclusions(
+        IReadOnlyList<string> excludedFolders,
+        IReadOnlyCollection<string> excludedProcesses,
+        IReadOnlyList<string> excludedFiles,
+        IProgress<ExportProgressInfo>? progress = null)
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            progress?.Report(new ExportProgressInfo(1, "1%   Determining matching records"));
+
+            var activityIdsToDelete = FindActivityEventIdsMatchingExclusions(connection, excludedFolders, excludedProcesses, excludedFiles);
+            var programIdsToDelete = FindProgramEventIdsMatchingExclusions(connection, excludedFolders, excludedProcesses);
+            var totalRecordsToDelete = activityIdsToDelete.Count + programIdsToDelete.Count;
+            var recordsDeleted = 0;
+
+            progress?.Report(new ExportProgressInfo(1, "1%   Matching records determined: " + totalRecordsToDelete.ToString("N0", CultureInfo.InvariantCulture)));
+
+            if (totalRecordsToDelete == 0)
+            {
+                progress?.Report(new ExportProgressInfo(100, "100% No matching records found"));
+                return new MaintenanceExclusionCleanupResult
+                {
+                    ActivityRecordsDeleted = 0,
+                    ProgramRecordsDeleted = 0
+                };
+            }
+
+            void ReportDeleteProgress(int deletedInStep, string tableDescription)
+            {
+                recordsDeleted += Math.Max(0, deletedInStep);
+                var deletionProgress = (double)recordsDeleted / Math.Max(1, totalRecordsToDelete);
+                var percent = 1 + (int)Math.Round(deletionProgress * 99D, MidpointRounding.AwayFromZero);
+                percent = Math.Max(1, Math.Min(100, percent));
+
+                progress?.Report(new ExportProgressInfo(
+                    percent,
+                    percent.ToString(CultureInfo.InvariantCulture) + "%   Deleting " + tableDescription + " (" + recordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + " of " + totalRecordsToDelete.ToString("N0", CultureInfo.InvariantCulture) + " records)"));
+            }
+
+            DeleteRowsByIds(connection, "ActivityEvents", activityIdsToDelete, deleted => ReportDeleteProgress(deleted, "file activity records"));
+            DeleteRowsByIds(connection, "ProgramEvents", programIdsToDelete, deleted => ReportDeleteProgress(deleted, "program activity records"));
+
+            if (totalRecordsToDelete > 0)
+            {
+                progress?.Report(new ExportProgressInfo(100, "100% Deletion complete; compacting database"));
+                ExecuteNonQuery(connection, "VACUUM;");
+            }
+
+            progress?.Report(new ExportProgressInfo(100, "100% Excluded past records removed"));
+
+            return new MaintenanceExclusionCleanupResult
+            {
+                ActivityRecordsDeleted = activityIdsToDelete.Count,
+                ProgramRecordsDeleted = programIdsToDelete.Count
+            };
+        }
+    }
+
+    private static List<long> FindActivityEventIdsMatchingExclusions(
+        SqliteConnection connection,
+        IReadOnlyList<string> excludedFolders,
+        IReadOnlyCollection<string> excludedProcesses,
+        IReadOnlyList<string> excludedFiles)
+    {
+        var result = new List<long>();
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT
+                Id,
+                COALESCE(FullPath, ''),
+                COALESCE(FolderPath, ''),
+                COALESCE(ProcessName, '')
+            FROM ActivityEvents;
+            """;
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            var fullPath = ReadText(reader, 1);
+            var folderPath = ReadText(reader, 2);
+            var processName = ReadText(reader, 3);
+
+            var matchesFolder =
+                PathExclusions.IsInExcludedFolder(fullPath, excludedFolders) ||
+                PathExclusions.IsInExcludedFolder(folderPath, excludedFolders);
+
+            var matchesFile = FileExclusions.IsExactExcludedFile(fullPath, excludedFiles);
+            var matchesProcess = ProcessExclusions.IsExcludedProcess(processName, excludedProcesses);
+
+            if (matchesFolder || matchesFile || matchesProcess)
+                result.Add(id);
+        }
+
+        return result;
+    }
+
+    private static List<long> FindProgramEventIdsMatchingExclusions(
+        SqliteConnection connection,
+        IReadOnlyList<string> excludedFolders,
+        IReadOnlyCollection<string> excludedProcesses)
+    {
+        var result = new List<long>();
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT
+                Id,
+                COALESCE(ProgramName, ''),
+                COALESCE(FilePath, '')
+            FROM ProgramEvents;
+            """;
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            var programName = ReadText(reader, 1);
+            var filePath = ReadText(reader, 2);
+
+            var matchesFolder = PathExclusions.IsInExcludedFolder(filePath, excludedFolders);
+            var matchesProcess = ProcessExclusions.IsExcludedProcess(programName, excludedProcesses);
+
+            if (matchesFolder || matchesProcess)
+                result.Add(id);
+        }
+
+        return result;
+    }
+
+    private static void DeleteRowsByIds(SqliteConnection connection, string tableName, IReadOnlyList<long> ids, Action<int>? progressCallback = null)
+    {
+        if (ids.Count == 0)
+            return;
+
+        foreach (var chunk in ids.Chunk(500))
+        {
+            using var command = connection.CreateCommand();
+
+            var parameterNames = new List<string>();
+
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                var parameterName = "$id" + i.ToString(CultureInfo.InvariantCulture);
+                parameterNames.Add(parameterName);
+                command.Parameters.AddWithValue(parameterName, chunk[i]);
+            }
+
+            command.CommandText = "DELETE FROM " + tableName + " WHERE Id IN (" + string.Join(",", parameterNames) + ");";
+            command.ExecuteNonQuery();
+            progressCallback?.Invoke(chunk.Length);
+        }
+    }
+
 
     public void ExportToExcel(string excelFilePath, IReadOnlyList<ExportSheetOption> exportSheets, DateTime startDate, DateTime endDate, IProgress<ExportProgressInfo>? progress = null)
     {
@@ -2334,6 +2692,61 @@ public sealed class DeskPulseDatabase : IDisposable
         cell.Value = value.ToString() ?? "";
     }
 
+    private static List<MaintenanceStatisticRow> ReadTopStatistics(SqliteConnection connection, string sql)
+    {
+        var result = new List<MaintenanceStatisticRow>();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        using var reader = command.ExecuteReader();
+        var rank = 1;
+
+        while (reader.Read())
+        {
+            result.Add(new MaintenanceStatisticRow
+            {
+                Rank = rank++,
+                Value = ReadText(reader, 0),
+                Extra = ReadText(reader, 1),
+                Count = ReadLong(reader, 2),
+                FirstSeen = ReadText(reader, 3),
+                LastSeen = ReadText(reader, 4)
+            });
+        }
+
+        return result;
+    }
+
+    private static long CountTableRows(SqliteConnection connection, string tableName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM " + tableName + ";";
+        var value = command.ExecuteScalar();
+        return value == null || value == DBNull.Value
+            ? 0
+            : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private static bool IsKnownActivityTable(string tableName)
+    {
+        return tableName.Equals("ActivityEvents", StringComparison.OrdinalIgnoreCase) ||
+               tableName.Equals("UserEvents", StringComparison.OrdinalIgnoreCase) ||
+               tableName.Equals("ProgramEvents", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static long GetFileLength(string filePath)
+    {
+        try
+        {
+            return File.Exists(filePath) ? new FileInfo(filePath).Length : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private List<ExcelExportRow> ReadAllRows()
     {
         var result = new List<ExcelExportRow>();
@@ -2626,6 +3039,36 @@ public sealed class DeskPulseDatabase : IDisposable
     {
         // Connections are short-lived and disposed per operation.
     }
+}
+
+public sealed class MaintenanceDatabaseOverview
+{
+    public long DatabaseBytes { get; set; }
+    public long WalBytes { get; set; }
+    public long ShmBytes { get; set; }
+    public long ActivityEventCount { get; set; }
+    public long UserEventCount { get; set; }
+    public long ProgramEventCount { get; set; }
+
+    public long TotalDatabaseRelatedBytes => DatabaseBytes + WalBytes + ShmBytes;
+    public long TotalRecordCount => ActivityEventCount + UserEventCount + ProgramEventCount;
+}
+
+public sealed class MaintenanceExclusionCleanupResult
+{
+    public long ActivityRecordsDeleted { get; set; }
+    public long ProgramRecordsDeleted { get; set; }
+    public long TotalRecordsDeleted => ActivityRecordsDeleted + ProgramRecordsDeleted;
+}
+
+public sealed class MaintenanceStatisticRow
+{
+    public int Rank { get; set; }
+    public long Count { get; set; }
+    public string Value { get; set; } = "";
+    public string Extra { get; set; } = "";
+    public string FirstSeen { get; set; } = "";
+    public string LastSeen { get; set; } = "";
 }
 
 public sealed class ActivityEventRecord
@@ -3170,8 +3613,289 @@ public static class PathUtilities
     }
 }
 
+
+public sealed class ExclusionRule
+{
+    public bool IsInclude { get; set; }
+    public string RuleType { get; set; } = "folder";
+    public bool IncludeSubfolders { get; set; } = true;
+    public string Value { get; set; } = "";
+
+    public bool IsExclude => !IsInclude;
+}
+
+public static class ExclusionRuleParser
+{
+    public static string BuildRule(string ruleType, string value, bool isInclude, bool includeSubfolders)
+    {
+        ruleType = (ruleType ?? "").Trim().ToLowerInvariant();
+
+        if (ruleType.Equals("process", StringComparison.OrdinalIgnoreCase))
+            return BuildProcessRule(value, isInclude);
+
+        if (ruleType.Equals("file", StringComparison.OrdinalIgnoreCase))
+            return BuildFileRule(value, isInclude);
+
+        return BuildFolderRule(value, isInclude, includeSubfolders);
+    }
+
+    public static ExclusionRule ParseRule(string value)
+    {
+        value = (value ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return new ExclusionRule { IsInclude = false, RuleType = "folder", IncludeSubfolders = true, Value = "" };
+
+        var parts = value.Split('|', 4);
+
+        if (parts.Length == 4 &&
+            (parts[0].Equals("include", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("exclude", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (parts[1].Equals("process", StringComparison.OrdinalIgnoreCase))
+                return ParseProcessRule(value);
+
+            if (parts[1].Equals("folder", StringComparison.OrdinalIgnoreCase))
+                return ParseFolderRule(value);
+
+            if (parts[1].Equals("file", StringComparison.OrdinalIgnoreCase))
+                return ParseFileRule(value);
+        }
+
+        // Backward compatibility: plain entries are old folder exclusions unless parsed specifically as process rules.
+        return ParseFolderRule(value);
+    }
+
+    public static string BuildFolderRule(string folderPath, bool isInclude, bool includeSubfolders)
+    {
+        folderPath = (folderPath ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(folderPath))
+            return "";
+
+        return (isInclude ? "include" : "exclude") + "|folder|" + (includeSubfolders ? "recursive" : "folder-only") + "|" + folderPath;
+    }
+
+    public static string BuildFileRule(string filePath, bool isInclude)
+    {
+        filePath = (filePath ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(filePath))
+            return "";
+
+        return (isInclude ? "include" : "exclude") + "|file||" + filePath;
+    }
+
+    public static string BuildProcessRule(string processName, bool isInclude)
+    {
+        processName = (processName ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(processName))
+            return "";
+
+        return (isInclude ? "include" : "exclude") + "|process||" + processName;
+    }
+
+    public static ExclusionRule ParseFolderRule(string value)
+    {
+        value = (value ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return new ExclusionRule { IsInclude = false, RuleType = "folder", IncludeSubfolders = true, Value = "" };
+
+        var parts = value.Split('|', 4);
+
+        if (parts.Length == 4 &&
+            (parts[0].Equals("include", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("exclude", StringComparison.OrdinalIgnoreCase)) &&
+            parts[1].Equals("folder", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExclusionRule
+            {
+                IsInclude = parts[0].Equals("include", StringComparison.OrdinalIgnoreCase),
+                RuleType = "folder",
+                IncludeSubfolders = !parts[2].Equals("folder-only", StringComparison.OrdinalIgnoreCase),
+                Value = parts[3].Trim()
+            };
+        }
+
+        // Backward compatibility with the earlier 0.1.1 folder suffix format.
+        var older = PathExclusions.ParseExcludedFolderRule(value);
+        return new ExclusionRule
+        {
+            IsInclude = false,
+            RuleType = "folder",
+            IncludeSubfolders = older.IncludeSubfolders,
+            Value = older.FolderPath
+        };
+    }
+
+    public static ExclusionRule ParseFileRule(string value)
+    {
+        value = (value ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return new ExclusionRule { IsInclude = false, RuleType = "file", IncludeSubfolders = false, Value = "" };
+
+        var parts = value.Split('|', 4);
+
+        if (parts.Length == 4 &&
+            (parts[0].Equals("include", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("exclude", StringComparison.OrdinalIgnoreCase)) &&
+            parts[1].Equals("file", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExclusionRule
+            {
+                IsInclude = parts[0].Equals("include", StringComparison.OrdinalIgnoreCase),
+                RuleType = "file",
+                IncludeSubfolders = false,
+                Value = parts[3].Trim()
+            };
+        }
+
+        return new ExclusionRule
+        {
+            IsInclude = false,
+            RuleType = "file",
+            IncludeSubfolders = false,
+            Value = value
+        };
+    }
+
+    public static ExclusionRule ParseProcessRule(string value)
+    {
+        value = (value ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return new ExclusionRule { IsInclude = false, RuleType = "process", IncludeSubfolders = false, Value = "" };
+
+        var parts = value.Split('|', 4);
+
+        if (parts.Length == 4 &&
+            (parts[0].Equals("include", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("exclude", StringComparison.OrdinalIgnoreCase)) &&
+            parts[1].Equals("process", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExclusionRule
+            {
+                IsInclude = parts[0].Equals("include", StringComparison.OrdinalIgnoreCase),
+                RuleType = "process",
+                IncludeSubfolders = false,
+                Value = parts[3].Trim()
+            };
+        }
+
+        // Existing process exclusions are exclude rules.
+        return new ExclusionRule
+        {
+            IsInclude = false,
+            RuleType = "process",
+            IncludeSubfolders = false,
+            Value = value
+        };
+    }
+}
+
 public static class PathExclusions
 {
+    private const string FolderOnlySuffix = "|folder-only";
+    private const string RecursiveSuffix = "|recursive";
+
+    public static bool IsInExcludedFolder(string filePath, IEnumerable<string> excludedFolders)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(filePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            foreach (var folder in excludedFolders)
+            {
+                if (string.IsNullOrWhiteSpace(folder))
+                    continue;
+
+                var rule = ExclusionRuleParser.ParseFolderRule(folder);
+
+                if (string.IsNullOrWhiteSpace(rule.Value))
+                    continue;
+
+                if (FolderRuleMatches(fullPath, rule))
+                    return rule.IsExclude;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool FileRuleMatches(string fullPath, ExclusionRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+            return false;
+
+        try
+        {
+            var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(fullPath))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            var normalizedRule = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rule.Value))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return normalizedPath.Equals(normalizedRule, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool FolderRuleMatches(string fullPath, ExclusionRule rule)
+    {
+        try
+        {
+            var fullRulePath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rule.Value))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            if (fullPath.Equals(fullRulePath, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (rule.IncludeSubfolders && fullPath.StartsWith(fullRulePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static string BuildExcludedFolderRule(string folderPath, bool includeSubfolders)
+    {
+        return ExclusionRuleParser.BuildFolderRule(folderPath, false, includeSubfolders);
+    }
+
+    public static string BuildFolderRule(string folderPath, bool isInclude, bool includeSubfolders)
+    {
+        return ExclusionRuleParser.BuildFolderRule(folderPath, isInclude, includeSubfolders);
+    }
+
+    public static (string FolderPath, bool IncludeSubfolders) ParseExcludedFolderRule(string value)
+    {
+        value = (value ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return ("", true);
+
+        if (value.EndsWith(FolderOnlySuffix, StringComparison.OrdinalIgnoreCase))
+            return (value[..^FolderOnlySuffix.Length].Trim(), false);
+
+        if (value.EndsWith(RecursiveSuffix, StringComparison.OrdinalIgnoreCase))
+            return (value[..^RecursiveSuffix.Length].Trim(), true);
+
+        // Existing exclusions from earlier versions did not have a suffix.
+        // Keep the old behaviour: a plain folder path also excludes subfolders.
+        return (value, true);
+    }
+
     public static bool IsInTempFolder(string filePath)
     {
         try
@@ -3208,6 +3932,194 @@ public static class PathExclusions
         {
             return false;
         }
+    }
+}
+
+public static class ProcessExclusions
+{
+    public static bool IsExcludedProcess(string processName, IEnumerable<string> excludedProcesses)
+    {
+        if (string.IsNullOrWhiteSpace(processName))
+            return false;
+
+        var normalized = NormalizeProcessName(processName);
+
+        foreach (var excluded in excludedProcesses)
+        {
+            if (string.IsNullOrWhiteSpace(excluded))
+                continue;
+
+            var rule = ExclusionRuleParser.ParseProcessRule(excluded);
+
+            if (string.IsNullOrWhiteSpace(rule.Value))
+                continue;
+
+            if (normalized.Equals(NormalizeProcessName(rule.Value), StringComparison.OrdinalIgnoreCase))
+                return rule.IsExclude;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeProcessName(string processName)
+    {
+        var normalized = (processName ?? "").Trim();
+
+        if (normalized.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[..^4];
+
+        return normalized;
+    }
+
+}
+
+public static class LoggingRulesEngine
+{
+    public static bool IsFileActivityExcluded(string fullPath, string processName, IEnumerable<string> loggingRules)
+    {
+        foreach (var ruleText in loggingRules ?? Array.Empty<string>())
+        {
+            var rule = ExclusionRuleParser.ParseRule(ruleText);
+
+            if (string.IsNullOrWhiteSpace(rule.Value))
+                continue;
+
+            var matches = rule.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase)
+                ? ProcessRuleMatches(processName, rule)
+                : rule.RuleType.Equals("file", StringComparison.OrdinalIgnoreCase)
+                    ? FileRuleMatches(fullPath, rule)
+                    : FolderRuleMatches(fullPath, rule);
+
+            if (matches)
+                return rule.IsExclude;
+        }
+
+        return false;
+    }
+
+    public static bool IsProgramActivityExcluded(string filePath, string processName, IEnumerable<string> loggingRules)
+    {
+        foreach (var ruleText in loggingRules ?? Array.Empty<string>())
+        {
+            var rule = ExclusionRuleParser.ParseRule(ruleText);
+
+            if (string.IsNullOrWhiteSpace(rule.Value))
+                continue;
+
+            var matches = rule.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase)
+                ? ProcessRuleMatches(processName, rule)
+                : rule.RuleType.Equals("file", StringComparison.OrdinalIgnoreCase)
+                    ? FileRuleMatches(filePath, rule)
+                    : FolderRuleMatches(filePath, rule);
+
+            if (matches)
+                return rule.IsExclude;
+        }
+
+        return false;
+    }
+
+    private static bool ProcessRuleMatches(string processName, ExclusionRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(processName))
+            return false;
+
+        return NormalizeProcessName(processName).Equals(NormalizeProcessName(rule.Value), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeProcessName(string processName)
+    {
+        var normalized = (processName ?? "").Trim();
+
+        if (normalized.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[..^4];
+
+        return normalized;
+    }
+
+    private static bool FileRuleMatches(string fullPath, ExclusionRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+            return false;
+
+        try
+        {
+            var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(fullPath))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            var normalizedRule = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rule.Value))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return normalizedPath.Equals(normalizedRule, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool FolderRuleMatches(string fullPath, ExclusionRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+            return false;
+
+        try
+        {
+            var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(fullPath))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            var normalizedRule = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rule.Value))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            if (normalizedPath.Equals(normalizedRule, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (rule.IncludeSubfolders && normalizedPath.StartsWith(normalizedRule + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+}
+
+
+public static class FileExclusions
+{
+    public static bool IsExactExcludedFile(string filePath, IEnumerable<string> excludedFiles)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return false;
+
+        try
+        {
+            var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(filePath))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            foreach (var file in excludedFiles ?? Array.Empty<string>())
+            {
+                var rule = ExclusionRuleParser.ParseRule(file);
+
+                if (!rule.RuleType.Equals("file", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(rule.Value) || rule.IsInclude)
+                    continue;
+
+                var normalizedRule = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rule.Value))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (normalizedPath.Equals(normalizedRule, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
     }
 }
 
@@ -3301,6 +4213,12 @@ public sealed class AppSettings
 
     public bool LogProgramActivity { get; set; } = true;
 
+    public List<string> LoggingRules { get; set; } = GetDefaultLoggingRules();
+
+    public List<string> ExcludedFolders { get; set; } = GetDefaultExcludedFolders();
+
+    public HashSet<string> ExcludedProcesses { get; set; } = GetDefaultExcludedProcesses();
+
     public HashSet<string> ExtensionsToMonitor { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ".txt",
@@ -3330,6 +4248,9 @@ public sealed class AppSettings
             IgnoreTempFolders = IgnoreTempFolders,
             StartWithWindows = StartWithWindows,
             LogProgramActivity = LogProgramActivity,
+            LoggingRules = new List<string>(LoggingRules),
+            ExcludedFolders = new List<string>(ExcludedFolders),
+            ExcludedProcesses = new HashSet<string>(ExcludedProcesses, StringComparer.OrdinalIgnoreCase),
             ExtensionsToMonitor = new HashSet<string>(ExtensionsToMonitor, StringComparer.OrdinalIgnoreCase),
             ExportSheets = ExportSheetOption.NormalizeList(ExportSheets)
         };
@@ -3371,6 +4292,18 @@ public sealed class AppSettings
         settings.StartWithWindows = ReadBool(key, "StartWithWindows", StartupTaskManager.IsEnabled());
         settings.LogProgramActivity = ReadBool(key, "LogProgramActivity", true);
 
+        var excludedFoldersText = ReadString(key, "ExcludedFolders", ToMultilineText(settings.ExcludedFolders));
+        settings.ExcludedFolders = ParsePlainList(excludedFoldersText);
+
+        var excludedProcessesText = ReadString(key, "ExcludedProcesses", ToMultilineText(settings.ExcludedProcesses));
+        settings.ExcludedProcesses = ParsePlainSet(excludedProcessesText);
+
+        var loggingRulesText = ReadString(key, "LoggingRules", "");
+        settings.LoggingRules = ParsePlainListPreserveOrder(loggingRulesText);
+
+        if (settings.LoggingRules.Count == 0)
+            settings.LoggingRules = BuildLoggingRulesFromLegacy(settings.ExcludedFolders, settings.ExcludedProcesses);
+
         var exportSheetsText = ReadString(key, "ExportSheets", ExportSheetOption.ToRegistryText(settings.ExportSheets));
         settings.ExportSheets = ExportSheetOption.ParseList(exportSheetsText);
 
@@ -3391,6 +4324,15 @@ public sealed class AppSettings
                 ".cs"
             };
         }
+
+        if (settings.ExcludedFolders.Count == 0)
+            settings.ExcludedFolders = GetDefaultExcludedFolders();
+
+        if (settings.ExcludedProcesses.Count == 0)
+            settings.ExcludedProcesses = GetDefaultExcludedProcesses();
+
+        if (settings.LoggingRules.Count == 0)
+            settings.LoggingRules = GetDefaultLoggingRules();
 
         settings.Save();
 
@@ -3413,6 +4355,127 @@ public sealed class AppSettings
         key.SetValue("IgnoreTempFolders", IgnoreTempFolders ? 1 : 0, RegistryValueKind.DWord);
         key.SetValue("StartWithWindows", StartWithWindows ? 1 : 0, RegistryValueKind.DWord);
         key.SetValue("LogProgramActivity", LogProgramActivity ? 1 : 0, RegistryValueKind.DWord);
+        key.SetValue("LoggingRules", ToOrderedMultilineText(LoggingRules), RegistryValueKind.String);
+        key.SetValue("ExcludedFolders", ToOrderedMultilineText(ExcludedFolders), RegistryValueKind.String);
+        key.SetValue("ExcludedProcesses", ToMultilineText(ExcludedProcesses), RegistryValueKind.String);
+    }
+
+    public static List<string> GetDefaultLoggingRules()
+    {
+        return BuildLoggingRulesFromLegacy(GetDefaultExcludedFolders(), GetDefaultExcludedProcesses());
+    }
+
+    public static List<string> BuildLoggingRulesFromLegacy(IEnumerable<string> folderRules, IEnumerable<string> processRules)
+    {
+        var result = new List<string>();
+
+        foreach (var folder in folderRules ?? Array.Empty<string>())
+        {
+            var parsed = ExclusionRuleParser.ParseFolderRule(folder);
+            if (!string.IsNullOrWhiteSpace(parsed.Value))
+                result.Add(ExclusionRuleParser.BuildFolderRule(parsed.Value, parsed.IsInclude, parsed.IncludeSubfolders));
+        }
+
+        foreach (var process in processRules ?? Array.Empty<string>())
+        {
+            var parsed = ExclusionRuleParser.ParseProcessRule(process);
+            if (!string.IsNullOrWhiteSpace(parsed.Value))
+                result.Add(ExclusionRuleParser.BuildProcessRule(parsed.Value, parsed.IsInclude));
+        }
+
+        return result;
+    }
+
+    public static List<string> GetDefaultExcludedFolders()
+    {
+        var result = new List<string>();
+
+        var windowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        if (!string.IsNullOrWhiteSpace(windowsFolder))
+        {
+            result.Add(Path.Combine(windowsFolder, "Temp"));
+            result.Add(Path.Combine(windowsFolder, "SoftwareDistribution"));
+            result.Add(Path.Combine(windowsFolder, "Prefetch"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            result.Add(Path.Combine(localAppData, "Temp"));
+            result.Add(Path.Combine(localAppData, "Microsoft", "Windows", "INetCache"));
+        }
+
+        return result
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public static HashSet<string> GetDefaultExcludedProcesses()
+    {
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "SearchIndexer",
+            "SearchProtocolHost",
+            "SearchFilterHost",
+            "MsMpEng",
+            "CompatTelRunner",
+            "svchost",
+            "RuntimeBroker"
+        };
+    }
+
+    public static string ToOrderedMultilineText(IEnumerable<string> values)
+    {
+        return string.Join(Environment.NewLine, (values ?? Array.Empty<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim()));
+    }
+
+    public static string ToMultilineText(IEnumerable<string> values)
+    {
+        return string.Join(Environment.NewLine, values
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+    }
+
+    public static List<string> ParsePlainListPreserveOrder(string text)
+    {
+        return ParsePlainValues(text)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .ToList();
+    }
+
+    public static List<string> ParsePlainList(string text)
+    {
+        return ParsePlainValues(text)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public static HashSet<string> ParsePlainSet(string text)
+    {
+        return new HashSet<string>(ParsePlainValues(text), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> ParsePlainValues(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            yield break;
+
+        foreach (var part in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var value = part.Trim();
+
+            if (!string.IsNullOrWhiteSpace(value))
+                yield return value;
+        }
     }
 
     public static string GetRegistryPathForDisplay()
@@ -3506,7 +4569,7 @@ public sealed class AppSettings
     }
 }
 
-public sealed class SettingsForm : Form
+public class SettingsForm : Form
 {
     private readonly TextBox _dataFolderTextBox = new();
     private readonly ListBox _availableExtensionsListBox = new();
@@ -3517,17 +4580,36 @@ public sealed class SettingsForm : Form
     private readonly CheckedListBox _exportSheetsCheckedListBox = new();
     private readonly TabControl _exportFieldTabControl = new();
     private readonly Dictionary<string, CheckedListBox> _exportFieldListsBySheetId = new(StringComparer.OrdinalIgnoreCase);
+    private DataGridView? _loggingRulesGridView;
+    private TextBox? _manualLoggingRuleTextBox;
+    private RadioButton? _manualRuleFolderRadioButton;
+    private RadioButton? _manualRuleFileRadioButton;
+    private RadioButton? _manualRuleProcessRadioButton;
+    private RadioButton? _manualRuleExcludeRadioButton;
+    private RadioButton? _manualRuleIncludeRadioButton;
+    private CheckBox? _manualRuleSubfoldersCheckBox;
+    private DataGridView? _statisticsGrid;
+    private ComboBox? _statisticsViewComboBox;
+    private readonly bool _maintenanceOnly;
+    private readonly ToolTip _buttonToolTip = new()
+    {
+        AutoPopDelay = 15000,
+        InitialDelay = 450,
+        ReshowDelay = 100,
+        ShowAlways = true
+    };
     private bool _updatingExportUi;
 
-    public SettingsForm()
+    public SettingsForm(bool maintenanceOnly = false)
     {
-        Text = "DeskPulse Settings";
+        _maintenanceOnly = maintenanceOnly;
+        Text = maintenanceOnly ? "DeskPulse Maintenance" : "DeskPulse Settings";
         ClientSize = new System.Drawing.Size(920, 690);
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
-        Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
+        Font = System.Drawing.SystemFonts.MessageBoxFont;
         BackColor = System.Drawing.SystemColors.Control;
 
         var settings = AppSettings.Load();
@@ -3540,23 +4622,26 @@ public sealed class SettingsForm : Form
             Height = 600
         };
 
-        var generalTab = CreateTabPage("General");
-        var filesTab = CreateTabPage("Files");
-        var exportOptionsTab = CreateTabPage("Export Options");
-
-        tabControl.TabPages.Add(generalTab);
-        tabControl.TabPages.Add(filesTab);
-        tabControl.TabPages.Add(exportOptionsTab);
-
-        BuildGeneralTab(generalTab, settings);
-        BuildFilesTab(filesTab, settings);
-        BuildExportOptionsTab(exportOptionsTab, settings);
-
-        if (AppRuntime.MaintenanceModeEnabled)
+        if (maintenanceOnly)
         {
             var maintenanceTab = CreateTabPage("Maintenance");
             tabControl.TabPages.Add(maintenanceTab);
             BuildMaintenanceTab(maintenanceTab, settings);
+            tabControl.SelectedTab = maintenanceTab;
+        }
+        else
+        {
+            var generalTab = CreateTabPage("General");
+            var filesTab = CreateTabPage("Files");
+            var exportOptionsTab = CreateTabPage("Export Options");
+
+            tabControl.TabPages.Add(generalTab);
+            tabControl.TabPages.Add(filesTab);
+            tabControl.TabPages.Add(exportOptionsTab);
+
+            BuildGeneralTab(generalTab, settings);
+            BuildFilesTab(filesTab, settings);
+            BuildExportOptionsTab(exportOptionsTab, settings);
         }
 
         var footerLine = new Label
@@ -3586,7 +4671,8 @@ public sealed class SettingsForm : Form
         AcceptButton = okButton;
         CancelButton = cancelButton;
 
-        LoadExtensionLists(settings);
+        if (!maintenanceOnly)
+            LoadExtensionLists(settings);
     }
 
     private TabPage CreateTabPage(string text)
@@ -3637,6 +4723,14 @@ public sealed class SettingsForm : Form
             Height = 30,
             FlatStyle = FlatStyle.System
         };
+    }
+
+    private void SetButtonToolTip(Control control, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        _buttonToolTip.SetToolTip(control, text);
     }
 
     private void BuildGeneralTab(TabPage generalTab, AppSettings settings)
@@ -3942,38 +5036,482 @@ public sealed class SettingsForm : Form
     private void BuildMaintenanceTab(TabPage maintenanceTab, AppSettings settings)
     {
         var introLabel = CreateHintLabel(
-            "Maintenance tools are visible only when DeskPulse is started with -maintenance.",
+            "Maintenance tools are visible only when DeskPulse is started with -maintenance or -m.",
             24,
-            22,
-            820,
-            28);
-
-        var startupGroup = CreateGroupBox("Windows startup", 24, 62, 820, 82);
-
-        var autostartLabel = CreateHintLabel(
-            "The normal startup option is now on the General tab.",
             18,
-            34,
-            760,
-            22);
+            820,
+            24);
 
-        startupGroup.Controls.Add(autostartLabel);
-
-        var foldersGroup = CreateGroupBox("Folders", 24, 164, 820, 96);
-
-        var openDataFolderButton = CreateActionButton("Open Data Folder", 18, 36, 170);
-        openDataFolderButton.Click += (_, _) => OpenFolder(settings.DataFolderPath, "DeskPulse data folder");
-
-        var openProgramFolderButton = CreateActionButton("Open Program Folder", 202, 36, 180);
-        openProgramFolderButton.Click += (_, _) => OpenFolder(AppContext.BaseDirectory, "DeskPulse program folder");
-
-        foldersGroup.Controls.AddRange(new Control[]
+        var maintenanceSubTabs = new TabControl
         {
+            Left = 24,
+            Top = 48,
+            Width = 820,
+            Height = 506
+        };
+
+        var databaseTab = CreateTabPage("Database");
+        var statisticsTab = CreateTabPage("Statistics");
+        var cleanupTab = CreateTabPage("Cleanup");
+        var exclusionsTab = CreateTabPage("Logging Rules");
+        var diagnosticsTab = CreateTabPage("Diagnostics");
+
+        maintenanceSubTabs.TabPages.Add(databaseTab);
+        maintenanceSubTabs.TabPages.Add(statisticsTab);
+        maintenanceSubTabs.TabPages.Add(cleanupTab);
+        maintenanceSubTabs.TabPages.Add(exclusionsTab);
+        maintenanceSubTabs.TabPages.Add(diagnosticsTab);
+
+        BuildMaintenanceDatabaseTab(databaseTab, settings);
+        BuildMaintenanceStatisticsTab(statisticsTab, settings);
+        BuildMaintenanceCleanupTab(cleanupTab, settings);
+        BuildMaintenanceExclusionsTab(exclusionsTab, settings);
+        BuildMaintenanceDiagnosticsTab(diagnosticsTab, settings);
+
+        maintenanceTab.Controls.AddRange(new Control[]
+        {
+            introLabel,
+            maintenanceSubTabs
+        });
+    }
+
+    private void BuildMaintenanceDatabaseTab(TabPage databaseTab, AppSettings settings)
+    {
+        var overview = GetDatabaseOverviewForMaintenance(settings);
+
+        var databaseGroup = CreateGroupBox("Database status", 18, 20, 760, 258);
+
+        var databaseInfo = new TextBox
+        {
+            Left = 18,
+            Top = 30,
+            Width = 722,
+            Height = 170,
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical,
+            Text = overview
+        };
+
+        var refreshButton = CreateActionButton("Refresh", 18, 214, 100);
+        refreshButton.Click += (_, _) => databaseInfo.Text = GetDatabaseOverviewForMaintenance(AppSettings.Load());
+        SetButtonToolTip(refreshButton, "Refreshes the database size and record-count display. Does not delete or change data.");
+
+        var openDataFolderButton = CreateActionButton("Open Data Folder", 132, 214, 160);
+        openDataFolderButton.Click += (_, _) => OpenFolder(settings.DataFolderPath, "DeskPulse data folder");
+        SetButtonToolTip(openDataFolderButton, "Opens the DeskPulse data folder in File Explorer. Does not delete or change data.");
+
+        var openProgramFolderButton = CreateActionButton("Open Program Folder", 306, 214, 170);
+        openProgramFolderButton.Click += (_, _) => OpenFolder(AppContext.BaseDirectory, "DeskPulse program folder");
+        SetButtonToolTip(openProgramFolderButton, "Opens the folder where DeskPulse is running from. Does not delete or change data.");
+
+        databaseGroup.Controls.AddRange(new Control[]
+        {
+            databaseInfo,
+            refreshButton,
             openDataFolderButton,
             openProgramFolderButton
         });
 
-        var diagnosticsGroup = CreateGroupBox("Diagnostics", 24, 280, 820, 118);
+        var noteGroup = CreateGroupBox("Notes", 18, 298, 760, 130);
+        var noteLabel = CreateHintLabel(
+            "SQLite stores TEXT fields using the actual stored text length. Empty/NULL fields are not fixed 100-byte fields. Database growth is mainly caused by repeated events, long paths, notes, window titles, and indexes.",
+            18,
+            30,
+            710,
+            70);
+
+        noteGroup.Controls.Add(noteLabel);
+
+        databaseTab.Controls.AddRange(new Control[]
+        {
+            databaseGroup,
+            noteGroup
+        });
+    }
+
+    private void BuildMaintenanceStatisticsTab(TabPage statisticsTab, AppSettings settings)
+    {
+        var topLabel = CreateHintLabel(
+            "Use these Top 100 views to find noisy paths, folders, extensions, and processes that may need exclusions.",
+            18,
+            18,
+            740,
+            24);
+
+        _statisticsViewComboBox = new ComboBox
+        {
+            Left = 18,
+            Top = 50,
+            Width = 260,
+            DropDownStyle = ComboBoxStyle.DropDownList
+        };
+
+        _statisticsViewComboBox.Items.AddRange(new object[]
+        {
+            "Top 100 full paths",
+            "Top 100 folders",
+            "Top 100 file processes",
+            "Top 100 extensions",
+            "Top 100 program events"
+        });
+        _statisticsViewComboBox.SelectedIndex = 0;
+
+        var refreshButton = CreateActionButton("Refresh", 292, 48, 100);
+        refreshButton.Click += (_, _) => RefreshMaintenanceStatistics(settings);
+        SetButtonToolTip(refreshButton, "Reloads the selected Top 100 statistics view from the database. Does not delete or change data.");
+
+        var addFileButton = CreateActionButton("Add File Exclusion", 408, 48, 142);
+        addFileButton.Click += (_, _) => AddSelectedStatisticValueToExclusion("file");
+        SetButtonToolTip(addFileButton, "Adds the selected Top 100 full-path item as an exact file Exclude rule. Affects future logging only until past-record cleanup is run.");
+
+        var addFolderButton = CreateActionButton("Add Folder Exclusion", 558, 48, 154);
+        addFolderButton.Click += (_, _) => AddSelectedStatisticValueToExclusion("folder");
+        SetButtonToolTip(addFolderButton, "Adds the selected Top 100 value as a folder Exclude rule. Affects future logging only until past-record cleanup is run.");
+
+        var addProcessButton = CreateActionButton("Add Process", 720, 48, 100);
+        addProcessButton.Click += (_, _) => AddSelectedStatisticValueToExclusion("process");
+        SetButtonToolTip(addProcessButton, "Adds the selected process/program value as an Exclude rule. Affects future logging only until past-record cleanup is run.");
+
+        _statisticsGrid = new DataGridView
+        {
+            Left = 18,
+            Top = 92,
+            Width = 802,
+            Height = 336,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = true,
+            RowHeadersVisible = false,
+            BackgroundColor = System.Drawing.SystemColors.Window,
+            BorderStyle = BorderStyle.FixedSingle
+        };
+
+        var statisticsContextMenu = new ContextMenuStrip();
+        statisticsContextMenu.Items.Add("Add exact file exclusion", null, (_, _) => AddSelectedStatisticValueToExclusion("file"));
+        statisticsContextMenu.Items.Add("Add folder exclusion", null, (_, _) => AddSelectedStatisticValueToExclusion("folder"));
+        statisticsContextMenu.Items.Add("Add process exclusion", null, (_, _) => AddSelectedStatisticValueToExclusion("process"));
+        _statisticsGrid.ContextMenuStrip = statisticsContextMenu;
+        _statisticsGrid.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right)
+                return;
+
+            var hit = _statisticsGrid.HitTest(e.X, e.Y);
+
+            if (hit.RowIndex < 0)
+                return;
+
+            if (!_statisticsGrid.Rows[hit.RowIndex].Selected)
+            {
+                _statisticsGrid.ClearSelection();
+                _statisticsGrid.Rows[hit.RowIndex].Selected = true;
+            }
+
+            _statisticsGrid.CurrentCell = _statisticsGrid.Rows[hit.RowIndex].Cells[Math.Max(0, hit.ColumnIndex)];
+        };
+
+        statisticsTab.Controls.AddRange(new Control[]
+        {
+            topLabel,
+            _statisticsViewComboBox,
+            refreshButton,
+            addFileButton,
+            addFolderButton,
+            addProcessButton,
+            _statisticsGrid
+        });
+
+        _statisticsViewComboBox.SelectedIndexChanged += (_, _) => RefreshMaintenanceStatistics(settings);
+        RefreshMaintenanceStatistics(settings);
+    }
+
+    private void BuildMaintenanceCleanupTab(TabPage cleanupTab, AppSettings settings)
+    {
+        cleanupTab.AutoScroll = true;
+
+        var databaseCleanupGroup = CreateGroupBox("Delete all records by activity type", 18, 322, 820, 190);
+
+        var clearFileButton = CreateActionButton("Delete All File Activity", 18, 34, 170);
+        clearFileButton.Click += (_, _) => ClearDatabaseTable(settings, "ActivityEvents", "all file open/write/close activity records");
+        SetButtonToolTip(clearFileButton, "Deletes ALL file open/write/close records from ActivityEvents. Keeps user/session records, program records, settings, logging rules, and the database file.");
+
+        var clearUserButton = CreateActionButton("Delete All User/Session Activity", 204, 34, 210);
+        clearUserButton.Click += (_, _) => ClearDatabaseTable(settings, "UserEvents", "all user/session records");
+        SetButtonToolTip(clearUserButton, "Deletes ALL user/session records such as DeskPulse start/stop, PC lock/unlock, logon/logoff, and session connect/disconnect events. Keeps file/program records, settings, and logging rules.");
+
+        var clearProgramButton = CreateActionButton("Delete All Program Activity", 430, 34, 190);
+        clearProgramButton.Click += (_, _) => ClearDatabaseTable(settings, "ProgramEvents", "all program start/close activity records");
+        SetButtonToolTip(clearProgramButton, "Deletes ALL program start/close records from ProgramEvents. Keeps file activity, user/session records, settings, and logging rules.");
+
+        var clearAllButton = CreateActionButton("Delete ALL Activity Records", 636, 34, 170);
+        clearAllButton.Click += (_, _) => ClearAllDatabaseTables(settings);
+        SetButtonToolTip(clearAllButton, "Deletes EVERYTHING recorded in DeskPulse activity tables: file activity, user/session activity, and program activity. Keeps settings, logging rules, export options, and database structure.");
+
+        var databaseCleanupHint = CreateHintLabel(
+            "These buttons permanently delete complete categories of stored activity records. They do not delete the SQLite database file, table structure, indexes, settings, logging rules, monitored extensions, or export options.\n\n" +
+            "Use 'Delete ALL Activity Records' only when you want the activity tables to become empty.",
+            18,
+            78,
+            780,
+            84);
+
+        databaseCleanupGroup.Controls.AddRange(new Control[]
+        {
+            clearFileButton,
+            clearUserButton,
+            clearProgramButton,
+            clearAllButton,
+            databaseCleanupHint
+        });
+
+        var unwantedDataGroup = CreateGroupBox("Remove unwanted data using Logging Rules", 18, 180, 820, 126);
+
+        var removeUnwantedDataButton = CreateActionButton("Remove Unwanted Data...", 18, 34, 190);
+        removeUnwantedDataButton.Click += (_, _) => RemoveExcludedPastRecords(settings);
+        SetButtonToolTip(removeUnwantedDataButton, "Deletes only past file/program records that match current Exclude rules in Logging Rules. Does not delete Include exceptions, the rules themselves, user/session records, settings, or the database file.");
+
+        var unwantedDataHint = CreateHintLabel(
+            "Use this after creating Exclude rules for noisy files, folders, or processes. It removes only matching past file/program records and keeps the rules themselves. A warning and progress bar are shown before/while deleting.",
+            224,
+            36,
+            570,
+            56);
+
+        unwantedDataGroup.Controls.AddRange(new Control[]
+        {
+            removeUnwantedDataButton,
+            unwantedDataHint
+        });
+
+        var generatedFilesGroup = CreateGroupBox("Delete generated files only", 18, 18, 820, 146);
+
+        var deleteExportButton = CreateActionButton("Delete Excel Export", 18, 34, 150);
+        deleteExportButton.Click += (_, _) => DeleteGeneratedFile(settings.ExcelExportFilePath, "Excel export file");
+        SetButtonToolTip(deleteExportButton, "Deletes only the generated Excel export file. Does not delete the SQLite database, records, settings, or logging rules.");
+
+        var deleteDiagnosticsButton = CreateActionButton("Delete Diagnostic Log", 184, 34, 160);
+        deleteDiagnosticsButton.Click += (_, _) => DeleteGeneratedFile(DiagnosticLogger.GetDiagnosticLogFilePath(), "diagnostic log");
+        SetButtonToolTip(deleteDiagnosticsButton, "Deletes only the DeskPulse diagnostic log. Does not delete database records, settings, or logging rules.");
+
+        var deleteStartupLogButton = CreateActionButton("Delete Startup Log", 360, 34, 150);
+        deleteStartupLogButton.Click += (_, _) => DeleteGeneratedFile(Path.Combine(Path.GetTempPath(), "DeskPulse-startup.log"), "startup fallback log");
+        SetButtonToolTip(deleteStartupLogButton, "Deletes only the temporary DeskPulse startup fallback log. Does not delete database records, settings, or logging rules.");
+
+        var generatedFilesHint = CreateHintLabel(
+            "Generated-file cleanup is safe housekeeping for reports/log files only. It does not delete the database or activity records.",
+            18,
+            80,
+            780,
+            36);
+
+        generatedFilesGroup.Controls.AddRange(new Control[]
+        {
+            deleteExportButton,
+            deleteDiagnosticsButton,
+            deleteStartupLogButton,
+            generatedFilesHint
+        });
+
+        cleanupTab.Controls.AddRange(new Control[]
+        {
+            generatedFilesGroup,
+            unwantedDataGroup,
+            databaseCleanupGroup
+        });
+    }
+
+    private void BuildMaintenanceExclusionsTab(TabPage exclusionsTab, AppSettings settings)
+    {
+        exclusionsTab.AutoScroll = true;
+
+        var addGroup = CreateGroupBox("Add logging rule", 14, 14, 828, 132);
+
+        _manualRuleFolderRadioButton = new RadioButton
+        {
+            Text = "Folder",
+            Left = 18,
+            Top = 28,
+            Width = 80,
+            Checked = true
+        };
+
+        _manualRuleFileRadioButton = new RadioButton
+        {
+            Text = "File",
+            Left = 98,
+            Top = 28,
+            Width = 58
+        };
+
+        _manualRuleProcessRadioButton = new RadioButton
+        {
+            Text = "Process / program",
+            Left = 162,
+            Top = 28,
+            Width = 130
+        };
+
+        _manualRuleExcludeRadioButton = new RadioButton
+        {
+            Text = "Exclude",
+            Left = 310,
+            Top = 28,
+            Width = 80,
+            Checked = true
+        };
+
+        _manualRuleIncludeRadioButton = new RadioButton
+        {
+            Text = "Include / allow",
+            Left = 400,
+            Top = 28,
+            Width = 120
+        };
+
+        _manualRuleSubfoldersCheckBox = new CheckBox
+        {
+            Text = "Include subfolders",
+            Left = 550,
+            Top = 28,
+            Width = 150,
+            Checked = true
+        };
+
+        _manualLoggingRuleTextBox = new TextBox
+        {
+            Left = 18,
+            Top = 66,
+            Width = 598,
+            Height = 24,
+            PlaceholderText = "Folder path, exact file path, or process name / .exe path"
+        };
+
+        var browseButton = CreateActionButton("Browse...", 628, 63, 90);
+        browseButton.Click += (_, _) => BrowseForLoggingRulePath();
+        SetButtonToolTip(browseButton, "Browses for the folder, exact file, or program executable used for a new logging rule. Does not add or delete anything by itself.");
+
+        var addRuleButton = CreateActionButton("Add Rule", 728, 63, 82);
+        addRuleButton.Click += (_, _) => AddManualLoggingRuleEntry();
+        SetButtonToolTip(addRuleButton, "Adds the newly entered Include or Exclude rule to the rules list. It affects future logging after Save; it does not delete past records.");
+
+        var addHint = CreateHintLabel(
+            "Folder rules use Browse for a folder. File rules use Browse for an exact file. Process rules use Browse for an .exe or a process name such as acad.exe.",
+            18,
+            100,
+            780,
+            22);
+
+        _manualRuleFolderRadioButton.CheckedChanged += (_, _) =>
+        {
+            if (_manualRuleSubfoldersCheckBox != null)
+                _manualRuleSubfoldersCheckBox.Enabled = _manualRuleFolderRadioButton?.Checked == true;
+        };
+
+        _manualRuleFileRadioButton.CheckedChanged += (_, _) =>
+        {
+            if (_manualRuleSubfoldersCheckBox != null)
+                _manualRuleSubfoldersCheckBox.Enabled = _manualRuleFolderRadioButton?.Checked == true;
+        };
+
+        _manualRuleProcessRadioButton.CheckedChanged += (_, _) =>
+        {
+            if (_manualRuleSubfoldersCheckBox != null)
+                _manualRuleSubfoldersCheckBox.Enabled = _manualRuleFolderRadioButton?.Checked == true;
+        };
+
+        addGroup.Controls.AddRange(new Control[]
+        {
+            _manualRuleFolderRadioButton,
+            _manualRuleFileRadioButton,
+            _manualRuleProcessRadioButton,
+            _manualRuleExcludeRadioButton,
+            _manualRuleIncludeRadioButton,
+            _manualRuleSubfoldersCheckBox,
+            _manualLoggingRuleTextBox,
+            browseButton,
+            addRuleButton,
+            addHint
+        });
+
+        var rulesGroup = CreateGroupBox("Logging rules", 14, 158, 828, 304);
+
+        _loggingRulesGridView = CreateLoggingRulesGrid(18, 30, 790, 190);
+        LoadLoggingRulesGrid(settings.LoggingRules.Count == 0
+            ? AppSettings.BuildLoggingRulesFromLegacy(settings.ExcludedFolders, settings.ExcludedProcesses)
+            : settings.LoggingRules);
+
+        var moveUpButton = CreateActionButton("Move Up", 18, 230, 82);
+        moveUpButton.Click += (_, _) => MoveSelectedExclusionRuleRow(_loggingRulesGridView, -1);
+        SetButtonToolTip(moveUpButton, "Moves the selected logging rule up. Higher rules override lower rules. Does not delete data.");
+
+        var moveDownButton = CreateActionButton("Move Down", 108, 230, 92);
+        moveDownButton.Click += (_, _) => MoveSelectedExclusionRuleRow(_loggingRulesGridView, 1);
+        SetButtonToolTip(moveDownButton, "Moves the selected logging rule down. Higher rules override lower rules. Does not delete data.");
+
+        var removeButton = CreateActionButton("Remove", 208, 230, 82);
+        removeButton.Click += (_, _) => RemoveSelectedLoggingRuleRow();
+        SetButtonToolTip(removeButton, "Removes only the selected logging rule from the list. It does not delete past database records.");
+
+        var duplicateButton = CreateActionButton("Duplicate", 298, 230, 88);
+        duplicateButton.Click += (_, _) => DuplicateSelectedLoggingRuleRow();
+        SetButtonToolTip(duplicateButton, "Copies the selected logging rule so it can be edited or reordered. Does not delete data.");
+
+        var resetButton = CreateActionButton("Reset Defaults", 398, 230, 112);
+        resetButton.Click += (_, _) => LoadLoggingRulesGrid(AppSettings.GetDefaultLoggingRules());
+        SetButtonToolTip(resetButton, "Replaces the current rules shown in this form with the default logging rules. It does not delete past records; Save is still required.");
+
+        var rulesHint = CreateHintLabel(
+            "Rules are checked from top to bottom. The first matching rule wins. Put Include exceptions above broad Exclude rules.",
+            18,
+            268,
+            760,
+            22);
+
+        rulesGroup.Controls.AddRange(new Control[]
+        {
+            _loggingRulesGridView,
+            moveUpButton,
+            moveDownButton,
+            removeButton,
+            duplicateButton,
+            resetButton,
+            rulesHint
+        });
+
+        var pastRecordsGroup = CreateGroupBox("Past records", 14, 474, 828, 86);
+
+        var removePastRecordsButton = CreateActionButton("Remove Matching Past Records...", 18, 32, 230);
+        removePastRecordsButton.Click += (_, _) => RemoveExcludedPastRecords(settings);
+        SetButtonToolTip(removePastRecordsButton, "PERMANENTLY deletes past file/program records that match current Exclude rules. Does not delete the rules themselves or user/session records.");
+
+        var pastRecordsHint = CreateHintLabel(
+            "Deletes existing file/program records that match current Exclude rules. It does not delete the rules themselves.",
+            264,
+            36,
+            520,
+            24);
+
+        pastRecordsGroup.Controls.AddRange(new Control[]
+        {
+            removePastRecordsButton,
+            pastRecordsHint
+        });
+
+        exclusionsTab.Controls.AddRange(new Control[]
+        {
+            addGroup,
+            rulesGroup,
+            pastRecordsGroup
+        });
+    }
+
+    private void BuildMaintenanceDiagnosticsTab(TabPage diagnosticsTab, AppSettings settings)
+    {
+        var diagnosticsGroup = CreateGroupBox("Diagnostics", 18, 20, 760, 186);
 
         var diagnosticsStatusLabel = CreateHintLabel(
             AppRuntime.DebugLoggingEnabled
@@ -3981,63 +5519,914 @@ public sealed class SettingsForm : Form
                 : "Diagnostic logging is off. Start DeskPulse with -debug to record accepted monitored ETW file events.",
             18,
             30,
-            760,
-            34);
+            700,
+            40);
 
         diagnosticsStatusLabel.ForeColor = AppRuntime.DebugLoggingEnabled
             ? System.Drawing.SystemColors.ControlText
             : System.Drawing.SystemColors.GrayText;
 
-        var openDiagnosticsLogButton = CreateActionButton("Open Diagnostic Log", 18, 70, 170);
+        var openDiagnosticsLogButton = CreateActionButton("Open Diagnostic Log", 18, 82, 170);
         openDiagnosticsLogButton.Click += (_, _) => OpenFile(DiagnosticLogger.GetDiagnosticLogFilePath(), "DeskPulse diagnostic log");
+        SetButtonToolTip(openDiagnosticsLogButton, "Opens the diagnostic log file if it exists. Does not delete or change data.");
 
-        var activeExtensionsButton = CreateActionButton("Show Active Extensions", 202, 70, 180);
+        var activeExtensionsButton = CreateActionButton("Show Active Extensions", 202, 82, 180);
         activeExtensionsButton.Click += (_, _) => ShowActiveExtensions();
+        SetButtonToolTip(activeExtensionsButton, "Shows the file extensions currently monitored by DeskPulse. Does not delete or change data.");
+
+        var startupStatusButton = CreateActionButton("Show Startup Status", 398, 82, 170);
+        startupStatusButton.Click += (_, _) => ShowStartupStatus();
+        SetButtonToolTip(startupStatusButton, "Shows whether the Windows Task Scheduler startup entry exists and appears valid. Does not delete or change data.");
 
         diagnosticsGroup.Controls.AddRange(new Control[]
         {
             diagnosticsStatusLabel,
             openDiagnosticsLogButton,
-            activeExtensionsButton
+            activeExtensionsButton,
+            startupStatusButton
         });
 
-        var cleanupGroup = CreateGroupBox("Cleanup", 24, 418, 820, 136);
+        var registryGroup = CreateGroupBox("Registry", 18, 226, 760, 156);
 
         var registryPathLabel = CreateHintLabel(
             "Registry settings location: " + AppSettings.GetRegistryPathForDisplay(),
             18,
             30,
-            760,
+            700,
             22);
 
         var removeRegistrySettingsButton = CreateActionButton("Remove Registry Settings", 18, 68, 190);
         removeRegistrySettingsButton.Click += (_, _) => RemoveRegistrySettings();
+        SetButtonToolTip(removeRegistrySettingsButton, "Deletes current-user DeskPulse registry settings, including preferences and logging rules. Does not delete the database, export, diagnostic log, or program files.");
 
         var cleanupHintLabel = CreateHintLabel(
             "Removes current-user settings only. It does not delete the app, database, Excel export, or other files.",
             226,
             70,
-            550,
+            500,
             44);
 
-        cleanupGroup.Controls.AddRange(new Control[]
+        registryGroup.Controls.AddRange(new Control[]
         {
             registryPathLabel,
             removeRegistrySettingsButton,
             cleanupHintLabel
         });
 
-        maintenanceTab.Controls.AddRange(new Control[]
+        diagnosticsTab.Controls.AddRange(new Control[]
         {
-            introLabel,
-            startupGroup,
-            foldersGroup,
             diagnosticsGroup,
-            cleanupGroup
+            registryGroup
         });
     }
 
 
+
+    private static string GetDatabaseOverviewForMaintenance(AppSettings settings)
+    {
+        try
+        {
+            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
+            database.Initialize();
+            var overview = database.GetMaintenanceOverview();
+
+            return
+                "Database path:" + Environment.NewLine +
+                settings.DatabaseFilePath + Environment.NewLine + Environment.NewLine +
+                "Database size: " + FormatBytes(overview.DatabaseBytes) + Environment.NewLine +
+                "WAL size: " + FormatBytes(overview.WalBytes) + Environment.NewLine +
+                "SHM size: " + FormatBytes(overview.ShmBytes) + Environment.NewLine +
+                "Total database-related files: " + FormatBytes(overview.TotalDatabaseRelatedBytes) + Environment.NewLine + Environment.NewLine +
+                "File activity records: " + overview.ActivityEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
+                "User/session records: " + overview.UserEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
+                "Program activity records: " + overview.ProgramEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
+                "Total records: " + overview.TotalRecordCount.ToString("N0", CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+        {
+            return "Database overview could not be loaded." + Environment.NewLine + Environment.NewLine + ex.Message;
+        }
+    }
+
+    private void RefreshMaintenanceStatistics(AppSettings settings)
+    {
+        if (_statisticsGrid == null || _statisticsViewComboBox == null)
+            return;
+
+        try
+        {
+            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
+            database.Initialize();
+
+            var view = _statisticsViewComboBox.SelectedItem?.ToString() ?? "Top 100 full paths";
+            var rows = database.GetTopMaintenanceStatistics(view);
+
+            _statisticsGrid.Columns.Clear();
+            _statisticsGrid.Rows.Clear();
+
+            _statisticsGrid.Columns.Add("Rank", "Rank");
+            _statisticsGrid.Columns.Add("Count", "Count");
+            _statisticsGrid.Columns.Add("Value", "Value");
+            _statisticsGrid.Columns.Add("Extra", "Extra");
+            _statisticsGrid.Columns.Add("FirstSeen", "First Seen");
+            _statisticsGrid.Columns.Add("LastSeen", "Last Seen");
+
+            foreach (var row in rows)
+            {
+                _statisticsGrid.Rows.Add(
+                    row.Rank,
+                    row.Count.ToString("N0", CultureInfo.InvariantCulture),
+                    row.Value,
+                    row.Extra,
+                    row.FirstSeen,
+                    row.LastSeen);
+            }
+
+            if (_statisticsGrid.Columns.Count >= 6)
+            {
+                _statisticsGrid.Columns[0].Width = 50;
+                _statisticsGrid.Columns[1].Width = 80;
+                _statisticsGrid.Columns[2].FillWeight = 240;
+                _statisticsGrid.Columns[3].FillWeight = 120;
+                _statisticsGrid.Columns[4].Width = 110;
+                _statisticsGrid.Columns[5].Width = 110;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Maintenance statistics could not be loaded.\n\n" + ex.Message,
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void AddSelectedStatisticValueToExclusion(string exclusionType)
+    {
+        if (_statisticsGrid == null)
+            return;
+
+        var selectedRows = _statisticsGrid.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Where(row => !row.IsNewRow && row.Cells.Count >= 4)
+            .OrderBy(row => row.Index)
+            .ToList();
+
+        if (selectedRows.Count == 0 && _statisticsGrid.CurrentRow != null && _statisticsGrid.CurrentRow.Cells.Count >= 4)
+            selectedRows.Add(_statisticsGrid.CurrentRow);
+
+        if (selectedRows.Count == 0)
+            return;
+
+        if (_loggingRulesGridView == null)
+        {
+            MessageBox.Show(
+                "Open the Logging Rules tab first, then add the selected statistics items.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        var view = _statisticsViewComboBox?.SelectedItem?.ToString() ?? "";
+        var addedCount = 0;
+        var skippedCount = 0;
+        var invalidViewShown = false;
+
+        foreach (var row in selectedRows)
+        {
+            var valueColumn = row.Cells[2].Value?.ToString() ?? "";
+            var extraColumn = row.Cells[3].Value?.ToString() ?? "";
+            var value = valueColumn;
+
+            if (exclusionType.Equals("file", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!view.Equals("Top 100 full paths", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!invalidViewShown)
+                    {
+                        MessageBox.Show(
+                            "Exact file exclusions can only be added from the Top 100 full paths view.",
+                            "DeskPulse Maintenance",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                        invalidViewShown = true;
+                    }
+
+                    skippedCount++;
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(value) || value.StartsWith("(", StringComparison.Ordinal))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                AddLoggingRuleToGrid("file", value, false, false);
+                addedCount++;
+                continue;
+            }
+
+            if (exclusionType.Equals("folder", StringComparison.OrdinalIgnoreCase))
+            {
+                if (view.Equals("Top 100 full paths", StringComparison.OrdinalIgnoreCase))
+                    value = PathUtilities.GetFolderPath(valueColumn).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (string.IsNullOrWhiteSpace(value) || value.StartsWith("(", StringComparison.Ordinal))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                AddLoggingRuleToGrid("folder", value, false, true);
+                addedCount++;
+                continue;
+            }
+
+            if (exclusionType.Equals("process", StringComparison.OrdinalIgnoreCase))
+            {
+                if (view.Equals("Top 100 full paths", StringComparison.OrdinalIgnoreCase) ||
+                    view.Equals("Top 100 extensions", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = extraColumn;
+                }
+
+                if (string.IsNullOrWhiteSpace(value) || value.StartsWith("(", StringComparison.Ordinal))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                AddLoggingRuleToGrid("process", value, false, false);
+                addedCount++;
+            }
+        }
+
+        if (addedCount == 0)
+        {
+            MessageBox.Show(
+                "No valid rules were added from the selected statistics rows.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        var itemText = addedCount == 1 ? "rule" : "rules";
+        var skippedText = skippedCount > 0
+            ? Environment.NewLine + Environment.NewLine + "Skipped rows: " + skippedCount.ToString("N0", CultureInfo.InvariantCulture)
+            : "";
+
+        MessageBox.Show(
+            "Added " + addedCount.ToString("N0", CultureInfo.InvariantCulture) + " Exclude " + itemText +
+            " in this Maintenance window. Move them up/down if needed, then click Save to store the change." + skippedText,
+            "DeskPulse Maintenance",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    private DataGridView CreateLoggingRulesGrid(int left, int top, int width, int height)
+    {
+        var grid = new DataGridView
+        {
+            Left = left,
+            Top = top,
+            Width = width,
+            Height = height,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = true,
+            AllowUserToResizeRows = false,
+            RowHeadersVisible = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+            BackgroundColor = System.Drawing.SystemColors.Window,
+            EditMode = DataGridViewEditMode.EditOnEnter,
+            Font = System.Drawing.SystemFonts.MessageBoxFont,
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+            ColumnHeadersDefaultCellStyle = { Font = System.Drawing.SystemFonts.MessageBoxFont },
+            DefaultCellStyle = { Font = System.Drawing.SystemFonts.MessageBoxFont },
+            RowTemplate = { Height = 22 }
+        };
+
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "Enabled",
+            HeaderText = "On",
+            Width = 34
+        });
+
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "Exclude",
+            HeaderText = "Exclude",
+            Width = 58
+        });
+
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "Include",
+            HeaderText = "Include",
+            Width = 58
+        });
+
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "RuleType",
+            HeaderText = "Type",
+            Width = 68,
+            ReadOnly = true
+        });
+
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "Subfolders",
+            HeaderText = "Sub",
+            Width = 42
+        });
+
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Value",
+            HeaderText = "Rule / path / process",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = 480
+        });
+
+        grid.CellContentClick += (_, e) =>
+        {
+            if (e.RowIndex >= 0)
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        };
+
+        grid.CellValueChanged += (_, e) =>
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+
+            var row = grid.Rows[e.RowIndex];
+            var columnName = grid.Columns[e.ColumnIndex].Name;
+
+            if (columnName.Equals("Exclude", StringComparison.OrdinalIgnoreCase) && IsCellChecked(row.Cells["Exclude"]))
+                row.Cells["Include"].Value = false;
+
+            if (columnName.Equals("Include", StringComparison.OrdinalIgnoreCase) && IsCellChecked(row.Cells["Include"]))
+                row.Cells["Exclude"].Value = false;
+
+            if (!IsCellChecked(row.Cells["Exclude"]) && !IsCellChecked(row.Cells["Include"]))
+                row.Cells["Exclude"].Value = true;
+
+            var changedRuleType = row.Cells["RuleType"].Value?.ToString() ?? "";
+            if (changedRuleType.Equals("Process", StringComparison.OrdinalIgnoreCase) || changedRuleType.Equals("File", StringComparison.OrdinalIgnoreCase))
+                row.Cells["Subfolders"].Value = false;
+        };
+
+        return grid;
+    }
+
+    private static bool IsCellChecked(DataGridViewCell cell)
+    {
+        try
+        {
+            return cell.Value is bool value && value;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void LoadLoggingRulesGrid(IEnumerable<string> rules)
+    {
+        if (_loggingRulesGridView == null)
+            return;
+
+        _loggingRulesGridView.Rows.Clear();
+
+        foreach (var ruleText in rules ?? Array.Empty<string>())
+        {
+            var rule = ExclusionRuleParser.ParseRule(ruleText);
+
+            if (string.IsNullOrWhiteSpace(rule.Value))
+                continue;
+
+            var typeText = rule.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase)
+                ? "Process"
+                : rule.RuleType.Equals("file", StringComparison.OrdinalIgnoreCase)
+                    ? "File"
+                    : "Folder";
+            _loggingRulesGridView.Rows.Add(true, rule.IsExclude, rule.IsInclude, typeText, rule.RuleType.Equals("folder", StringComparison.OrdinalIgnoreCase) && rule.IncludeSubfolders, rule.Value);
+        }
+    }
+
+    private List<string> GetLoggingRulesFromGrid()
+    {
+        var result = new List<string>();
+
+        if (_loggingRulesGridView == null)
+            return result;
+
+        foreach (DataGridViewRow row in _loggingRulesGridView.Rows)
+        {
+            if (row.IsNewRow)
+                continue;
+
+            if (!IsCellChecked(row.Cells["Enabled"]))
+                continue;
+
+            var value = row.Cells["Value"].Value?.ToString()?.Trim() ?? "";
+
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+
+            var ruleTypeText = row.Cells["RuleType"].Value?.ToString() ?? "Folder";
+            var ruleType = ruleTypeText.Equals("Process", StringComparison.OrdinalIgnoreCase)
+                ? "process"
+                : ruleTypeText.Equals("File", StringComparison.OrdinalIgnoreCase)
+                    ? "file"
+                    : "folder";
+            var isInclude = IsCellChecked(row.Cells["Include"]);
+            var includeSubfolders = ruleType.Equals("folder", StringComparison.OrdinalIgnoreCase) && IsCellChecked(row.Cells["Subfolders"]);
+
+            var rule = ExclusionRuleParser.BuildRule(ruleType, value, isInclude, includeSubfolders);
+
+            if (!string.IsNullOrWhiteSpace(rule))
+                result.Add(rule);
+        }
+
+        return result;
+    }
+
+    private void AddLoggingRuleToGrid(string ruleType, string value, bool isInclude, bool includeSubfolders)
+    {
+        if (_loggingRulesGridView == null)
+            return;
+
+        value = (value ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        var typeText = ruleType.Equals("process", StringComparison.OrdinalIgnoreCase)
+            ? "Process"
+            : ruleType.Equals("file", StringComparison.OrdinalIgnoreCase)
+                ? "File"
+                : "Folder";
+        var subfolders = typeText.Equals("Folder", StringComparison.OrdinalIgnoreCase) && includeSubfolders;
+
+        foreach (DataGridViewRow row in _loggingRulesGridView.Rows)
+        {
+            if (row.IsNewRow)
+                continue;
+
+            var existingType = row.Cells["RuleType"].Value?.ToString() ?? "";
+            var existingValue = row.Cells["Value"].Value?.ToString() ?? "";
+            var existingInclude = IsCellChecked(row.Cells["Include"]);
+            var existingSubfolders = IsCellChecked(row.Cells["Subfolders"]);
+
+            if (existingType.Equals(typeText, StringComparison.OrdinalIgnoreCase) &&
+                existingValue.Equals(value, StringComparison.OrdinalIgnoreCase) &&
+                existingInclude == isInclude &&
+                existingSubfolders == subfolders)
+            {
+                return;
+            }
+        }
+
+        _loggingRulesGridView.Rows.Add(true, !isInclude, isInclude, typeText, subfolders, value);
+    }
+
+    private void AddManualLoggingRuleEntry()
+    {
+        if (_manualLoggingRuleTextBox == null)
+            return;
+
+        var isFolder = _manualRuleFolderRadioButton?.Checked == true;
+        var isFile = _manualRuleFileRadioButton?.Checked == true;
+        var isInclude = _manualRuleIncludeRadioButton?.Checked == true;
+        var includeSubfolders = isFolder && (_manualRuleSubfoldersCheckBox?.Checked != false);
+        var value = isFolder
+            ? NormalizeManualExcludedFolderPath(_manualLoggingRuleTextBox.Text)
+            : isFile
+                ? NormalizeManualFileRule(_manualLoggingRuleTextBox.Text)
+                : NormalizeManualProcessRule(_manualLoggingRuleTextBox.Text);
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            MessageBox.Show(
+                isFolder ? "Enter or browse for a folder path first." : isFile ? "Enter or browse for an exact file path first." : "Enter or browse for a process/program first.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        AddLoggingRuleToGrid(isFolder ? "folder" : isFile ? "file" : "process", value, isInclude, includeSubfolders);
+        _manualLoggingRuleTextBox.Clear();
+    }
+
+    private void BrowseForLoggingRulePath()
+    {
+        if (_manualLoggingRuleTextBox == null)
+            return;
+
+        var isFolder = _manualRuleFolderRadioButton?.Checked == true;
+        var isFile = _manualRuleFileRadioButton?.Checked == true;
+
+        if (isFolder)
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "Select folder for DeskPulse logging rule",
+                UseDescriptionForTitle = true,
+                SelectedPath = Directory.Exists(_manualLoggingRuleTextBox.Text) ? _manualLoggingRuleTextBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+                _manualLoggingRuleTextBox.Text = dialog.SelectedPath;
+
+            return;
+        }
+
+        using var fileDialog = new OpenFileDialog
+        {
+            Title = isFile ? "Select exact file for DeskPulse logging rule" : "Select program for DeskPulse logging rule",
+            Filter = isFile ? "All files (*.*)|*.*" : "Program files (*.exe)|*.exe|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        if (fileDialog.ShowDialog(this) == DialogResult.OK)
+            _manualLoggingRuleTextBox.Text = isFile ? fileDialog.FileName : Path.GetFileName(fileDialog.FileName);
+    }
+
+    private void RemoveSelectedLoggingRuleRow()
+    {
+        if (_loggingRulesGridView == null || _loggingRulesGridView.CurrentRow == null || _loggingRulesGridView.CurrentRow.IsNewRow)
+            return;
+
+        _loggingRulesGridView.Rows.RemoveAt(_loggingRulesGridView.CurrentRow.Index);
+    }
+
+    private void DuplicateSelectedLoggingRuleRow()
+    {
+        if (_loggingRulesGridView == null || _loggingRulesGridView.CurrentRow == null || _loggingRulesGridView.CurrentRow.IsNewRow)
+            return;
+
+        var values = new object?[_loggingRulesGridView.Columns.Count];
+
+        for (var i = 0; i < _loggingRulesGridView.Columns.Count; i++)
+            values[i] = _loggingRulesGridView.CurrentRow.Cells[i].Value;
+
+        _loggingRulesGridView.Rows.Insert(_loggingRulesGridView.CurrentRow.Index + 1, values);
+    }
+
+    private static void MoveSelectedExclusionRuleRow(DataGridView? gridView, int direction)
+    {
+        if (gridView == null || gridView.CurrentRow == null || gridView.CurrentRow.IsNewRow)
+            return;
+
+        var currentIndex = gridView.CurrentRow.Index;
+        var newIndex = currentIndex + direction;
+
+        if (newIndex < 0 || newIndex >= gridView.Rows.Count)
+            return;
+
+        if (gridView.Rows[newIndex].IsNewRow)
+            return;
+
+        var values = new object?[gridView.Columns.Count];
+
+        for (var i = 0; i < gridView.Columns.Count; i++)
+            values[i] = gridView.CurrentRow.Cells[i].Value;
+
+        gridView.Rows.RemoveAt(currentIndex);
+        gridView.Rows.Insert(newIndex, values);
+
+        gridView.ClearSelection();
+        gridView.Rows[newIndex].Selected = true;
+
+        if (gridView.Columns.Count > 0)
+            gridView.CurrentCell = gridView.Rows[newIndex].Cells[0];
+    }
+
+    private static string NormalizeManualFileRule(string value)
+    {
+        value = (value ?? "").Trim().Trim('"');
+
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        try
+        {
+            value = Environment.ExpandEnvironmentVariables(value);
+            value = Path.GetFullPath(value);
+        }
+        catch
+        {
+            // Keep manually entered file paths even if Windows cannot currently resolve them.
+        }
+
+        return value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static string NormalizeManualProcessRule(string value)
+    {
+        value = (value ?? "").Trim().Trim('"');
+
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        try
+        {
+            value = Environment.ExpandEnvironmentVariables(value);
+
+            if (value.Contains(Path.DirectorySeparatorChar) || value.Contains(Path.AltDirectorySeparatorChar))
+                value = Path.GetFileName(value);
+        }
+        catch
+        {
+            // Keep manually entered process names even if Windows cannot resolve them.
+        }
+
+        return value.Trim();
+    }
+
+    private static List<string> ExtractFolderRules(IEnumerable<string> loggingRules)
+    {
+        return (loggingRules ?? Array.Empty<string>())
+            .Select(ExclusionRuleParser.ParseRule)
+            .Where(rule => rule.RuleType.Equals("folder", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(rule.Value))
+            .Select(rule => ExclusionRuleParser.BuildFolderRule(rule.Value, rule.IsInclude, rule.IncludeSubfolders))
+            .ToList();
+    }
+
+    private static List<string> ExtractProcessRules(IEnumerable<string> loggingRules)
+    {
+        return (loggingRules ?? Array.Empty<string>())
+            .Select(ExclusionRuleParser.ParseRule)
+            .Where(rule => rule.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(rule.Value))
+            .Select(rule => ExclusionRuleParser.BuildProcessRule(rule.Value, rule.IsInclude))
+            .ToList();
+    }
+
+    private static List<string> ExtractFileRules(IEnumerable<string> loggingRules)
+    {
+        return (loggingRules ?? Array.Empty<string>())
+            .Select(ExclusionRuleParser.ParseRule)
+            .Where(rule => rule.RuleType.Equals("file", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(rule.Value))
+            .Select(rule => ExclusionRuleParser.BuildFileRule(rule.Value, rule.IsInclude))
+            .ToList();
+    }
+
+    private static string NormalizeManualExcludedFolderPath(string value)
+    {
+        value = (value ?? "").Trim().Trim('"');
+
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        try
+        {
+            value = Environment.ExpandEnvironmentVariables(value);
+            value = Path.GetFullPath(value);
+        }
+        catch
+        {
+            // Keep manually entered paths even if Windows cannot currently resolve them.
+        }
+
+        return value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static void MoveSelectedTextLine(TextBox? textBox, int direction)
+    {
+        if (textBox == null)
+            return;
+
+        var lines = textBox.Lines.ToList();
+
+        if (lines.Count < 2)
+            return;
+
+        var currentLine = textBox.GetLineFromCharIndex(textBox.SelectionStart);
+        var targetLine = currentLine + direction;
+
+        if (currentLine < 0 || currentLine >= lines.Count || targetLine < 0 || targetLine >= lines.Count)
+            return;
+
+        (lines[currentLine], lines[targetLine]) = (lines[targetLine], lines[currentLine]);
+        textBox.Lines = lines.ToArray();
+
+        var selectionStart = 0;
+        for (var i = 0; i < targetLine; i++)
+            selectionStart += textBox.Lines[i].Length + Environment.NewLine.Length;
+
+        textBox.SelectionStart = Math.Max(0, selectionStart);
+        textBox.SelectionLength = textBox.Lines[targetLine].Length;
+        textBox.Focus();
+    }
+
+
+    private void RemoveExcludedPastRecords(AppSettings settings)
+    {
+        var loggingRules = _loggingRulesGridView == null
+            ? settings.LoggingRules
+            : GetLoggingRulesFromGrid();
+
+        var excludedFolders = ExtractFolderRules(loggingRules);
+        var excludedProcesses = ExtractProcessRules(loggingRules);
+        var excludedFiles = ExtractFileRules(loggingRules);
+
+        if (excludedFolders.Count == 0 && excludedProcesses.Count == 0 && excludedFiles.Count == 0)
+        {
+            MessageBox.Show(
+                "There are no exclude rules to apply to past records.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            "This will permanently delete existing DeskPulse records that match the current exclusion lists.\n\n" +
+            "Deleted data cannot be recovered from DeskPulse unless you have a backup of the SQLite database.\n\n" +
+            "This action can delete:\n" +
+            "- file activity records whose exact file path matches an excluded file\n" +
+            "- file activity records whose folder/path matches an excluded folder\n" +
+            "- file activity records whose process matches an excluded process\n" +
+            "- program activity records whose program/path matches an excluded process or folder\n\n" +
+            "It does not delete the exclusion settings themselves, and it does not delete user/session records.\n\n" +
+            "Continue?",
+            "Delete Matching Past Records",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (confirm != DialogResult.Yes)
+            return;
+
+        using var progressForm = new MaintenanceProgressForm(
+            "Remove Matching Past Records",
+            "Removing excluded past records",
+            progress =>
+            {
+                using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
+                database.Initialize();
+                return database.RemoveRecordsMatchingExclusions(excludedFolders, excludedProcesses, excludedFiles, progress);
+            });
+
+        if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
+            return;
+
+        var result = progressForm.Result;
+
+        MessageBox.Show(
+            "Excluded past records removed.\n\n" +
+            "File activity records deleted: " + result.ActivityRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +
+            "Program activity records deleted: " + result.ProgramRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +
+            "Total records deleted: " + result.TotalRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture),
+            "DeskPulse Maintenance",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    private static void ClearDatabaseTable(AppSettings settings, string tableName, string description)
+    {
+        var confirm = MessageBox.Show(
+            "This will permanently remove " + description + " from the DeskPulse database.\n\n" +
+            "The database file and table structure will be kept.\n\n" +
+            "Continue?",
+            "Clear DeskPulse Records",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (confirm != DialogResult.Yes)
+            return;
+
+        try
+        {
+            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
+            database.Initialize();
+            var deleted = database.ClearTableRecords(tableName);
+
+            MessageBox.Show(
+                deleted.ToString("N0", CultureInfo.InvariantCulture) + " " + description + " removed.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Records could not be cleared.\n\n" + ex.Message,
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static void ClearAllDatabaseTables(AppSettings settings)
+    {
+        var confirm = MessageBox.Show(
+            "This will permanently remove all DeskPulse activity records from the database.\n\n" +
+            "It clears file activity, user/session activity, and program activity records.\n" +
+            "The database file and table structure will be kept.\n\n" +
+            "Continue?",
+            "Clear All DeskPulse Records",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (confirm != DialogResult.Yes)
+            return;
+
+        try
+        {
+            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
+            database.Initialize();
+            var deleted = database.ClearAllRecords();
+
+            MessageBox.Show(
+                deleted.ToString("N0", CultureInfo.InvariantCulture) + " total records removed.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Records could not be cleared.\n\n" + ex.Message,
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static void DeleteGeneratedFile(string filePath, string description)
+    {
+        var confirm = MessageBox.Show(
+            "This will delete the " + description + ".\n\n" +
+            "Path:\n" + filePath + "\n\n" +
+            "Continue?",
+            "Delete Generated File",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (confirm != DialogResult.Yes)
+            return;
+
+        try
+        {
+            if (File.Exists(filePath))
+                File.Delete(filePath);
+
+            MessageBox.Show(
+                "The " + description + " was deleted or did not exist.",
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "The " + description + " could not be deleted.\n\n" + ex.Message,
+                "DeskPulse Maintenance",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static void ShowStartupStatus()
+    {
+        var enabled = StartupTaskManager.IsEnabled();
+
+        MessageBox.Show(
+            "Task Scheduler startup task: " + (enabled ? "Enabled" : "Not detected") + Environment.NewLine +
+            "Task name: DeskPulse" + Environment.NewLine +
+            "Expected trigger: ONLOGON" + Environment.NewLine +
+            "Expected run level: highest available privileges",
+            "DeskPulse Startup Status",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+            return bytes.ToString("N0", CultureInfo.InvariantCulture) + " bytes";
+
+        var kb = bytes / 1024D;
+        if (kb < 1024)
+            return kb.ToString("N1", CultureInfo.InvariantCulture) + " KB";
+
+        var mb = kb / 1024D;
+        if (mb < 1024)
+            return mb.ToString("N2", CultureInfo.InvariantCulture) + " MB";
+
+        var gb = mb / 1024D;
+        return gb.ToString("N2", CultureInfo.InvariantCulture) + " GB";
+    }
 
     private static void OpenFile(string filePath, string fileDescription)
     {
@@ -4582,6 +6971,18 @@ public sealed class SettingsForm : Form
 
     private void SaveSettings()
     {
+        if (_maintenanceOnly)
+        {
+            var maintenanceSettings = AppSettings.Load();
+            var maintenanceLoggingRules = _loggingRulesGridView == null ? maintenanceSettings.LoggingRules : GetLoggingRulesFromGrid();
+
+            maintenanceSettings.LoggingRules = maintenanceLoggingRules;
+            maintenanceSettings.ExcludedFolders = ExtractFolderRules(maintenanceLoggingRules);
+            maintenanceSettings.ExcludedProcesses = new HashSet<string>(ExtractProcessRules(maintenanceLoggingRules), StringComparer.OrdinalIgnoreCase);
+            maintenanceSettings.Save();
+            return;
+        }
+
         var dataFolder = _dataFolderTextBox.Text.Trim();
 
         if (string.IsNullOrWhiteSpace(dataFolder))
@@ -4676,17 +7077,30 @@ public sealed class SettingsForm : Form
             return;
         }
 
+        var existingSettings = AppSettings.Load();
+        var loggingRules = _loggingRulesGridView == null ? existingSettings.LoggingRules : GetLoggingRulesFromGrid();
+
         var settings = new AppSettings
         {
             DataFolderPath = dataFolder,
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = startWithWindows,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
+            LoggingRules = loggingRules,
+            ExcludedFolders = ExtractFolderRules(loggingRules),
+            ExcludedProcesses = new HashSet<string>(ExtractProcessRules(loggingRules), StringComparer.OrdinalIgnoreCase),
             ExtensionsToMonitor = extensions,
             ExportSheets = exportSheets
         };
 
         settings.Save();
+    }
+}
+
+public sealed class MaintenanceForm : SettingsForm
+{
+    public MaintenanceForm() : base(maintenanceOnly: true)
+    {
     }
 }
 
@@ -4763,6 +7177,119 @@ public static class RegisteredFileTypeReader
             .Select(x => x.First())
             .OrderBy(x => x.Extension, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+}
+
+public sealed class MaintenanceProgressForm : Form
+{
+    private readonly string _caption;
+    private readonly string _operationTitle;
+    private readonly Func<IProgress<ExportProgressInfo>, MaintenanceExclusionCleanupResult> _action;
+    private readonly ProgressBar _progressBar = new();
+    private readonly Label _progressLabel = new();
+    private readonly Button _closeButton = new();
+
+    public MaintenanceExclusionCleanupResult? Result { get; private set; }
+
+    public MaintenanceProgressForm(
+        string caption,
+        string operationTitle,
+        Func<IProgress<ExportProgressInfo>, MaintenanceExclusionCleanupResult> action)
+    {
+        _caption = string.IsNullOrWhiteSpace(caption) ? "DeskPulse Maintenance" : caption;
+        _operationTitle = string.IsNullOrWhiteSpace(operationTitle) ? "Working" : operationTitle;
+        _action = action ?? throw new ArgumentNullException(nameof(action));
+
+        Text = _caption;
+        ClientSize = new System.Drawing.Size(520, 184);
+        StartPosition = FormStartPosition.CenterParent;
+        MinimizeBox = false;
+        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
+        BackColor = System.Drawing.SystemColors.Window;
+        ControlBox = false;
+
+        var titleLabel = new Label
+        {
+            Text = _operationTitle,
+            Left = 22,
+            Top = 20,
+            Width = 470,
+            Height = 28,
+            Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point)
+        };
+
+        _progressBar.Left = 22;
+        _progressBar.Top = 66;
+        _progressBar.Width = 476;
+        _progressBar.Height = 20;
+        _progressBar.Minimum = 0;
+        _progressBar.Maximum = 100;
+        _progressBar.Value = 0;
+        _progressBar.Style = ProgressBarStyle.Continuous;
+
+        _progressLabel.Text = "0%   Waiting to start";
+        _progressLabel.Left = 22;
+        _progressLabel.Top = 96;
+        _progressLabel.Width = 476;
+        _progressLabel.Height = 34;
+        _progressLabel.ForeColor = System.Drawing.SystemColors.GrayText;
+
+        _closeButton.Text = "Close";
+        _closeButton.Left = 418;
+        _closeButton.Top = 140;
+        _closeButton.Width = 80;
+        _closeButton.Height = 30;
+        _closeButton.Enabled = false;
+        _closeButton.FlatStyle = FlatStyle.System;
+        _closeButton.Click += (_, _) => Close();
+
+        Controls.AddRange(new Control[]
+        {
+            titleLabel,
+            _progressBar,
+            _progressLabel,
+            _closeButton
+        });
+
+        Shown += async (_, _) => await RunActionAsync();
+    }
+
+    private async Task RunActionAsync()
+    {
+        try
+        {
+            var progress = new Progress<ExportProgressInfo>(UpdateProgress);
+            UpdateProgress(new ExportProgressInfo(1, "1%   Starting"));
+
+            Result = await Task.Run(() => _action(progress));
+
+            UpdateProgress(new ExportProgressInfo(100, "100% Complete"));
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            _closeButton.Enabled = true;
+            ControlBox = true;
+
+            MessageBox.Show(
+                "The maintenance action could not be completed.\n\n" + ex.Message,
+                _caption,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void UpdateProgress(ExportProgressInfo progressInfo)
+    {
+        var percent = Math.Max(_progressBar.Minimum, Math.Min(_progressBar.Maximum, progressInfo.Percent));
+        _progressBar.Value = percent;
+
+        _progressLabel.Text = string.IsNullOrWhiteSpace(progressInfo.Message)
+            ? percent.ToString(CultureInfo.InvariantCulture) + "%   Working"
+            : progressInfo.Message;
     }
 }
 

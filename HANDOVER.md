@@ -1,4 +1,4 @@
-# DeskPulse Handover Document — Version 0.1.0
+# DeskPulse Handover Document — Version 0.1.1
 
 ## 1. Project Overview
 
@@ -9,7 +9,7 @@ It monitors selected activity on a Windows PC and stores the results in a local 
 Current version:
 
 ```text
-0.1.0
+0.1.1
 ```
 
 Repository:
@@ -30,13 +30,19 @@ Development status:
 Early pre-release / working baseline
 ```
 
+Release note:
+
+```text
+0.1.1 is locked as the maintenance/data-management baseline. Future feature changes should be tracked as 0.1.2 work unless a critical 0.1.1 hotfix is required.
+```
+
 Important note:
 
 ```text
 This package was prepared as source/documentation files. It was not compile-tested inside the AI environment because the .NET SDK is not available there. Compile and test locally before committing or publishing.
 ```
 
-## 2. Files Included in the 0.1.0 Package
+## 2. Files Included in the 0.1.1 Package
 
 ```text
 Program.cs
@@ -63,19 +69,19 @@ The project file references `file-logger.ico`. If that file is not already in th
 Expected current values:
 
 ```text
-AppInfo.Version = "0.1.0"
-DeskPulse.csproj Version = 0.1.0
-DeskPulse.csproj AssemblyVersion = 0.1.0.0
-DeskPulse.csproj FileVersion = 0.1.0.0
-DeskPulse.csproj InformationalVersion = 0.1.0
-app.manifest assemblyIdentity version = 0.1.0.0
+AppInfo.Version = "0.1.1"
+DeskPulse.csproj Version = 0.1.1
+DeskPulse.csproj AssemblyVersion = 0.1.1.0
+DeskPulse.csproj FileVersion = 0.1.1.0
+DeskPulse.csproj InformationalVersion = 0.1.1
+app.manifest assemblyIdentity version = 0.1.1.0
 ```
 
 Historical version references may remain in `CHANGELOG.md` because the changelog preserves release history.
 
-## 4. Main 0.1.0 Scope
+## 4. Main 0.1.1 Scope
 
-Version `0.1.0` includes:
+Version `0.1.1` includes:
 
 - quiet startup with no normal success balloon
 - no `Settings saved` balloon
@@ -103,12 +109,22 @@ Export Activity Log
 Settings...
 ```
 
-Right-click tray icon:
+Right-click tray icon in normal mode:
 
 ```text
 About
 Exit
 ```
+
+Right-click tray icon in maintenance mode:
+
+```text
+About
+Maintenance...
+Exit
+```
+
+`Maintenance...` opens Settings directly on the Maintenance tab.
 
 No normal success balloon notifications should appear.
 
@@ -430,26 +446,37 @@ dotnet publish .\DeskPulse.csproj `
   --configuration Release `
   --runtime win-x64 `
   --self-contained true `
-  --output ".\publish\v0.1.0" `
+  --output ".\publish\v0.1.1" `
   /p:PublishSingleFile=false
 ```
 
 Published executable:
 
 ```text
-publish\v0.1.0\DeskPulse.exe
+publish\v0.1.1\DeskPulse.exe
 ```
 
 Run from Administrator PowerShell:
 
 ```powershell
-cd ".\publish\v0.1.0"
+cd ".\publish\v0.1.1"
 .\DeskPulse.exe
 ```
 
 Do not copy only the EXE unless single-file publishing has been separately tested. The safer current deployment is the full publish folder.
 
-## 18. Testing Checklist for 0.1.0
+## Exclusion cleanup of past records
+
+Maintenance > Logging Rules now includes:
+
+```text
+Manual folder entry field
+Remove Unwanted Data
+```
+
+This action permanently deletes existing `ActivityEvents` and `ProgramEvents` rows that match the current current Exclude folder/file/process rules. It does not delete logging rules and does not delete `UserEvents`. It must show a warning dialog before deleting data.
+
+## 18. Testing Checklist for 0.1.1
 
 Build/startup:
 
@@ -495,11 +522,11 @@ Export:
 
 Documentation:
 
-- README says current version `0.1.0`
-- README publish folder uses `v0.1.0`
-- HANDOVER says current version `0.1.0`
-- ROADMAP exists and starts with `0.1.1` future work
-- CHANGELOG has a current `0.1.0` section and preserves historical entries
+- README says current version `0.1.1`
+- README publish folder uses `v0.1.1`
+- HANDOVER says current version `0.1.1`
+- ROADMAP exists and identifies `0.1.1` as locked baseline and `0.1.2` as the next development version
+- CHANGELOG has a current `0.1.1` section and preserves historical entries
 
 ## 19. Known Limitations / Items to Watch
 
@@ -524,17 +551,17 @@ ROADMAP.md
 Likely next version:
 
 ```text
-0.1.1 — Data Management and Logging Filters
+0.1.2 — Stabilisation, UI polish, and export improvements
 ```
 
 Main planned topics:
 
-- file/database size limits
-- manual clear database option
-- clear generated reports/logs option
-- exclude noisy Windows/system paths
-- exclude noisy processes
-- better filtering for program-start background file activity
+- compile-test and runtime-test the locked 0.1.1 package locally
+- tidy remaining form spacing and reduce unnecessary whitespace
+- improve resizing/anchoring of tables and path columns
+- add export cancellation and export preview/summary
+- improve export performance on large date ranges
+- refine Maintenance wording if testing shows ambiguity
 
 ## 21. GitHub / Commit Notes
 
@@ -570,7 +597,7 @@ publish/
 Suggested commit message:
 
 ```text
-Release DeskPulse v0.1.0
+Release DeskPulse v0.1.1
 ```
 
 ## 22. Instructions for Future AI Assistance
@@ -585,9 +612,119 @@ When continuing this project:
 6. Keep the path split into `Full Path`, `Folder Path`, `File Name`, and `Extension`.
 7. Keep DeskPulse self-exclusion.
 8. Keep database/export file exclusion.
-9. Keep Maintenance hidden unless launched with `-maintenance`.
-10. Keep `-debug`, `-maintenance`, and `-uninstall` as separate concepts.
+9. Keep Maintenance hidden unless launched with `-maintenance` or `-m`.
+10. Keep `-debug`/`-d`, `-maintenance`/`-m`, and `-uninstall`/`-u` as separate concepts.
 11. Preserve the database when using `-uninstall`.
 12. Treat the app as a portable pre-release until a formal installer exists.
 13. Do not assume copying only the EXE is valid.
 14. Keep normal successful actions quiet; only errors should show popups.
+
+
+## 0.1.1 Maintenance Implementation Notes
+
+Version `0.1.1` adds a hidden Maintenance workspace that is visible only when DeskPulse is started with `-maintenance` or `-m`.
+
+Maintenance sub-tabs:
+
+```text
+Database
+Statistics
+Cleanup
+Logging Rules
+Diagnostics
+```
+
+Key implementation points:
+
+- `AppRuntime.MaintenanceModeEnabled` now accepts `maintenance` and `m` switch names.
+- `AppSettings` now stores ordered `LoggingRules` in the current-user registry while preserving legacy `ExcludedFolders` and `ExcludedProcesses` compatibility values.
+- Maintenance > Logging Rules includes a compact rule-entry panel with Browse support for folder/file/program rules.
+- File logging checks ordered Logging Rules before writing file activity records.
+- Program activity logging checks ordered Logging Rules before writing program start/stop records.
+- `DeskPulseDatabase` now provides maintenance overview, Top 100 statistics, and clear-record methods.
+- Database clear actions delete records but keep the SQLite database structure.
+- Cleanup actions for generated files do not delete the SQLite database.
+
+Compile/test checklist additions:
+
+- Start normally and confirm Maintenance is hidden.
+- Start with `-maintenance` and confirm Maintenance is visible.
+- Start with `-m` and confirm Maintenance is visible.
+- Confirm Maintenance > Database loads without crashing on an empty or existing database.
+- Confirm Maintenance > Statistics shows empty grids gracefully if there are no records.
+- Confirm clear buttons require confirmation.
+- Confirm the Logging Rules add-rule panel can add Folder, File, and Process/Program rules.
+- Confirm Logging Rules save to `HKCU\Software\DeskPulse`.
+- Confirm Exclude rules reduce future logged noise and Include rules override lower Exclude rules.
+
+
+## Folder Exclusion Subfolder Option
+
+Maintenance > Cleanup has a progress dialog for `Remove Unwanted Data`. It starts at 1% while matching records are determined, then advances the remaining 99% according to actual deleted records.
+
+Maintenance > Logging Rules supports a subfolder option for folder rules. When checked, the saved folder rule receives the `|recursive` suffix. When unchecked, the saved folder rule receives the `|folder-only` suffix. Existing plain folder rules remain recursive so older settings keep their previous behaviour.
+
+Examples:
+
+```text
+C:\Users\eysseleink\AppData|recursive
+C:\Some\Exact\Folder|folder-only
+```
+
+The exclusion matcher must compare folder boundaries, not simple string prefixes, so `C:\Users\Kai\AppData` must not match `C:\Users\Kai\AppDataBackup`.
+
+
+## 0.1.1 Exclusion Rule Ordering Update
+
+The Maintenance > Logging Rules page supports ordered rules. Rules are evaluated from top to bottom and the first matching rule wins. This permits patterns such as including a specific application folder above a broad Program Files exclusion.
+
+Folder rule format:
+
+```text
+include|folder|recursive|C:\Specific\Allowed\Folder
+exclude|folder|recursive|C:\Program Files
+exclude|folder|folder-only|C:\Specific\Folder
+```
+
+Process rule format:
+
+```text
+include|process||acad.exe
+exclude|process||somebackgroundprocess.exe
+```
+
+Legacy plain exclusions remain supported and are interpreted as exclude rules.
+
+
+## Logging Rules redesign
+
+The Maintenance sub-tab formerly called Exclusions is now `Logging Rules`. It uses one ordered rule list for folder, exact file, and process/program rules. Rules are evaluated from top to bottom; the first matching rule wins.
+
+Rule storage now includes the `LoggingRules` registry value. `ExcludedFolders` and `ExcludedProcesses` remain populated for compatibility, but the application runtime checks the ordered `LoggingRules` list.
+
+The UI has an add-rule panel with Folder/Process selection, Exclude/Include selection, subfolder option for folder rules, and Browse buttons. The rules table supports Move Up, Move Down, Remove, Duplicate, and Reset Defaults.
+
+
+## 0.1.1 UI correction — Maintenance form separation
+
+Maintenance is now a dedicated right-click form when DeskPulse is started with `-maintenance` or `-m`. The normal Settings form must contain only General, Files, and Export Options. Do not re-add Maintenance as a normal Settings tab.
+
+
+0.1.1 note: Logging Rules now support exact file exclusions. In Maintenance > Statistics, right-click a row in Top 100 full paths to add an exact file exclusion for that specific file.
+
+
+## Maintenance button tooltips
+
+Maintenance action buttons use WinForms tooltips to describe the scope of each action before the user clicks it. Destructive actions should clearly say whether they affect selected records, matching excluded records, generated files, registry settings, or all activity records.
+
+## Maintenance cleanup UI update
+
+The Cleanup tab now separates destructive record clearing from rule-based unwanted-data cleanup. The `Delete All ...` buttons clear whole activity categories. The `Remove Unwanted Data...` button applies current Exclude logging rules to past file/program records only, with warning/progress. Generated-file cleanup remains separate.
+
+
+## 0.1.1 Final Lock Notes
+
+- Cleanup tab order is safety-first: generated files first, rule-based unwanted-data cleanup second, and full record deletion last.
+- Statistics supports multi-select with Shift/Ctrl and applies add-rule actions to all selected rows.
+- Logging Rules support Folder, File, and Process/Program rules.
+- 0.1.1 is locked as the maintenance/data-management baseline. Future changes should move to 0.1.2 unless a critical 0.1.1 hotfix is required.
