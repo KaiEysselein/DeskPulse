@@ -1,30 +1,55 @@
-# Build output\
+# Build output
 bin/
 obj/
+
+# Publish output
+publish/
+artifacts/
 
 # Visual Studio / VS Code
 .vs/
 .vscode/*
 !.vscode/settings.json
 
-# User-specific files
+# User-specific IDE/project files
 *.user
+*.csproj.user
 *.suo
 *.userosscache
 *.sln.docstates
 
-# Logs and generated CSV files
+# NuGet / local package caches
+packages/
+*.nupkg
+
+# Logs and generated exports
 Logs/
+*.log
 *.csv
 *-view.csv
 *backup*.csv
+DeskPulse-export.xlsx
+DeskPulse-diagnostics.log
+DeskPulse-startup.log
+
+# Local databases / runtime data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
 
 # Windows files
 Thumbs.db
 Desktop.ini
 
-# Publish output
-publish/
+# Installer / packaged output
 *.zip
 *.msi
-*.exes
+*.exe

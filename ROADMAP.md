@@ -9,14 +9,14 @@ The roadmap is not a changelog. Completed changes belong in `CHANGELOG.md`. Deta
 ## Current locked release baseline
 
 ```text
-0.1.1
+0.1.3.0
 ```
 
-Version `0.1.1` is now treated as the locked maintenance/data-management release baseline.
+Version `0.1.3.0` is now treated as the locked all-forms designer-editable source baseline.
 
-After this package, new feature work, UI changes, refactoring, and bug-fix iterations should be tracked as `0.1.2` work unless a critical 0.1.1 hotfix is explicitly needed.
+After this package, new feature work, UI changes, refactoring, and bug-fix iterations should be tracked as `0.1.4.0` work unless a critical 0.1.3.0 hotfix is explicitly needed.
 
-The 0.1.1 baseline includes:
+The 0.1.3.0 baseline includes:
 
 - selected file activity logging
 - user/session activity logging
@@ -36,10 +36,13 @@ The 0.1.1 baseline includes:
 - targeted removal of unwanted past data based on current Exclude rules
 - generated-file cleanup for export/log housekeeping
 - quieter normal operation without notification balloons
+- Visual Studio Designer-compatible forms for the visible UI surfaces
+- designer-compatible forms for About, Export Date Range, Maintenance Progress, and normal Settings
+- designer-backed Settings General, Files, and Export Options tab contents
 
 ---
 
-## Completed in 0.1.1 — Data Management and Logging Filters
+## Completed in 0.1.3.0 — Data Management and Logging Filters
 
 Implemented work:
 
@@ -66,6 +69,9 @@ Implemented work:
 - Added rule checks to file logging and program activity logging.
 - Added Maintenance > Diagnostics including startup task status.
 - Added button hover tooltips explaining exactly what each action deletes or preserves.
+- Split UI forms into the `Forms` folder.
+- Converted small utility forms to Visual Studio Designer-compatible partial classes.
+- Converted the normal Settings window shell, General tab, Files tab, Export Options tab, footer, Save button, and Cancel button to `SettingsForm.Designer.cs`.
 
 Notes:
 
@@ -76,11 +82,14 @@ Notes:
 
 ---
 
-## Suggested next version: 0.1.2 — Stabilisation, UI Polish, and Export Improvements
+## Suggested next version: 0.1.4.0 — Stabilisation, UI Polish, and Export Improvements
 
-Candidate work for 0.1.2:
+Note: `AboutForm`, `ExportDateRangeForm`, `MaintenanceProgressForm`, and the visible `SettingsForm`/Maintenance tabs are designer-compatible. `MaintenanceForm` remains a thin launcher/wrapper; edit the Maintenance UI through `SettingsForm.cs` > View Designer.
 
-- Compile-test and runtime-test the locked 0.1.1 package locally after replacing files.
+Candidate work for 0.1.4.0:
+
+- Compile-test and runtime-test the locked 0.1.3.0 package locally after replacing files.
+- Rebuild the Maintenance UI in a Visual Studio Designer-compatible layout.
 - Tidy remaining form spacing and reduce unnecessary whitespace across all forms.
 - Improve resizing/anchoring of tables and path columns.
 - Add export cancellation.
@@ -91,11 +100,11 @@ Candidate work for 0.1.2:
 - Add optional export to a user-selected folder.
 - Add last-used export date range setting.
 - Improve user-facing wording on Maintenance warnings and confirmations if testing shows ambiguity.
-- Review whether any 0.1.1 logging rules should become default rules.
+- Review whether any 0.1.3.0 logging rules should become default rules.
 
 ---
 
-## Suggested later version: 0.1.3 — Startup and Deployment Polish
+## Suggested later version: 0.1.5.0 — Startup and Deployment Polish
 
 Candidate work:
 
@@ -108,7 +117,7 @@ Candidate work:
 
 ---
 
-## Suggested later version: 0.2.0 — Program Activity Enhancements
+## Suggested later version: 0.2.0.0 — Program Activity Enhancements
 
 Candidate work:
 
@@ -154,8 +163,8 @@ database
 logging-filter
 program-activity
 ui
-v0.1.1
-v0.1.2
+v0.1.3.0
+v0.1.4.0
 ```
 
 Suggested issue examples:

@@ -5,11 +5,37 @@ All notable changes to DeskPulse will be documented in this file.
 The format is loosely based on Keep a Changelog, and this project currently follows early pre-release versioning.
 
 
-## [0.1.1] - 2026-07-06
+## [0.1.3.0] - 2026-07-07
 
 ### Summary
 
-Version 0.1.1 adds the first practical hidden Maintenance workspace for database management, statistics, cleanup, exclusions, and diagnostics.
+Version 0.1.3.0 is locked as the all-forms designer-editable source baseline and refreshes the project documentation so the package consistently presents 0.1.3.0 as the current baseline.
+
+### Changed
+
+- Updated the application version constant to `0.1.3.0`.
+- Updated project metadata in `DeskPulse.csproj` to `0.1.3.0`.
+- Updated the application manifest assembly identity version to `0.1.3.0`.
+- Updated README, HANDOVER, ROADMAP, and package verification references to `0.1.3.0`.
+- Moved the suggested next-development version to `0.1.4.0`.
+- Split the main WinForms UI classes out of the large `Program.cs` file into a dedicated `Forms` folder.
+- Converted `AboutForm`, `ExportDateRangeForm`, and `MaintenanceProgressForm` to designer-compatible partial classes with `.Designer.cs` and `.resx` files.
+- Converted the normal `SettingsForm` shell and tab contents to a designer-compatible partial class with `SettingsForm.Designer.cs` and `SettingsForm.resx`.
+- The `SettingsForm` window, main tab container, General tab, Files tab, Export Options tab, footer line, Save button, and Cancel button can now be opened and adjusted in the Visual Studio WinForms Designer.
+- Kept only runtime data population code in `SettingsForm.cs`; the visible Settings and Maintenance layouts now live in `SettingsForm.Designer.cs`.
+- Maintenance UI contents are now designer-backed inside `SettingsForm.Designer.cs`; `MaintenanceForm` remains only a thin launcher/wrapper for maintenance mode.
+- Fixed Visual Studio Designer parsing by removing null-forgiving operators from `InitializeComponent()` assignments.
+
+### Notes
+
+- Older changelog entries are preserved as project history.
+- The package was source-prepared only; compile and runtime testing must be done locally because the AI environment does not include the .NET SDK.
+
+## 0.1.3.0 Maintenance/Data-Management Baseline - 2026-07-06
+
+### Summary
+
+This baseline adds the first practical hidden Maintenance workspace for database management, statistics, cleanup, exclusions, and diagnostics.
 
 ### Changed
 
@@ -21,11 +47,17 @@ Version 0.1.1 adds the first practical hidden Maintenance workspace for database
 - Widened the folder-exclusion rules table and made the Folder path column fill the available width for easier reading.
 - Changed the Settings form and exclusion rules grid to use the Windows message-box font instead of a fixed custom form font.
 
-- Updated the application version constant to `0.1.1`.
-- Updated project metadata in `DeskPulse.csproj` to `0.1.1`.
-- Updated the application manifest assembly identity version to `0.1.1.0`.
+- Updated the application version constant to `0.1.3.0`.
+- Updated project metadata in `DeskPulse.csproj` to `0.1.3.0`.
+- Updated the application manifest assembly identity version to `0.1.3.0`.
 - Extended hidden Maintenance mode so it can be opened with `-maintenance` or `-m`.
 - Reworked the hidden Maintenance tab into sub-tabs.
+
+### Fixed / Changed in Settings designer follow-up
+
+- Moved the visible `SettingsForm` General, Files, and Export Options tab contents into `SettingsForm.Designer.cs` so they are visible and editable in the Visual Studio WinForms Designer.
+- Kept runtime loading for saved values, file-extension lists, and export field sub-tabs.
+- Converted the visible Maintenance tab and sub-tabs to designer-backed controls in `SettingsForm.Designer.cs`; maintenance data loading remains in code.
 
 ### Added
 
@@ -50,7 +82,7 @@ Version 0.1.1 adds the first practical hidden Maintenance workspace for database
 
 ### Notes
 
-- Locked `0.1.1` as the maintenance/data-management release baseline; future feature changes should move to `0.1.2` unless a critical 0.1.1 hotfix is required.
+- Locked `0.1.3.0` as the maintenance/data-management release baseline; future feature changes should move to `0.1.4.0` unless a critical 0.1.3.0 hotfix is required.
 - Database clear actions are destructive and require confirmation.
 - Database clear actions keep the SQLite file and table structure but remove selected records.
 - Exclusion changes are saved with the normal Settings Save button.

@@ -6,12 +6,12 @@ It quietly tracks selected activity on a Windows PC and stores the records in a 
 
 ## Version
 
-Current version: `0.1.1`
+Current version: `0.1.3.0`
 
 
 ## Release Status
 
-Version `0.1.1` is the locked maintenance/data-management release baseline. Future feature changes and UI improvements should be tracked as `0.1.2` work unless a critical `0.1.1` hotfix is required.
+Version `0.1.3.0` is the current all-forms designer-editable source baseline. Future feature changes and UI improvements should be tracked as `0.1.4.0` work unless a critical `0.1.3.0` hotfix is required.
 
 ## What DeskPulse Logs
 
@@ -22,7 +22,7 @@ DeskPulse can log:
 - PC lock/unlock and Windows session activity
 - program start/close activity in the current interactive Windows session
 
-Email read/sent logging is not included in version `0.1.1`.
+Email read/sent logging is not included in version `0.1.3.0`.
 
 ## Main Features
 
@@ -47,6 +47,50 @@ Email read/sent logging is not included in version `0.1.1`.
 - dedicated Maintenance form available from the right-click menu only when started with `-maintenance` or `-m`
 - right-click `Maintenance...` shortcut when started in maintenance mode
 - portable cleanup/uninstall mode using `-uninstall`
+
+
+## Source Layout / Forms
+
+The main runtime logic remains in `Program.cs`, but the user-interface forms have been moved into a dedicated `Forms` folder.
+
+Designer-compatible forms now include:
+
+- `Forms/AboutForm.cs` + `Forms/AboutForm.Designer.cs`
+- `Forms/ExportDateRangeForm.cs` + `Forms/ExportDateRangeForm.Designer.cs`
+- `Forms/MaintenanceProgressForm.cs` + `Forms/MaintenanceProgressForm.Designer.cs`
+
+`SettingsForm` and `MaintenanceForm` have also been moved to `Forms/`. `SettingsForm` now has designer-backed General, Files, Export Options, and Maintenance tab contents so the visible settings/maintenance UI can be edited in the Visual Studio WinForms Designer.
+
+## Designer-Compatible Forms
+
+The project now separates UI forms into the `Forms` folder. These forms have Visual Studio Designer-compatible partial-class shells:
+
+- `AboutForm`
+- `ExportDateRangeForm`
+- `MaintenanceProgressForm`
+- `SettingsForm` normal Settings window, including the General, Files, and Export Options tab contents
+
+The normal `SettingsForm` tabs are now visible in the Visual Studio WinForms Designer. Dynamic export field sub-tabs are still populated at runtime because they depend on the saved export configuration.
+
+`MaintenanceForm` remains a thin launcher/wrapper for the Maintenance tab inside `SettingsForm`; edit the maintenance UI through `Forms/SettingsForm.cs` in the Visual Studio Designer.
+
+
+## Designer-Editable Forms
+
+The visible WinForms surfaces are now set up for Visual Studio Designer editing:
+
+```text
+Forms/AboutForm.cs
+Forms/ExportDateRangeForm.cs
+Forms/MaintenanceProgressForm.cs
+Forms/SettingsForm.cs
+```
+
+`MaintenanceForm.cs` is intentionally only a thin launcher/wrapper around `SettingsForm` in maintenance mode. Edit the maintenance interface through:
+
+```text
+Forms > SettingsForm.cs > View Designer > Maintenance tab
+```
 
 ## Data Location
 
@@ -180,9 +224,9 @@ The Maintenance tab is for portable-app administration and cleanup. It includes 
 - remove current-user registry settings
 
 
-## Version 0.1.1 Maintenance Additions
+## Version 0.1.3.0 Maintenance Additions
 
-Version `0.1.1` adds a larger hidden Maintenance area with internal sub-tabs:
+Version `0.1.3.0` includes a larger hidden Maintenance area with internal sub-tabs:
 
 - `Database` — database path, database-related file size, and record counts
 - `Statistics` — Top 100 views for full paths, folders, file processes, extensions, and program events
@@ -290,7 +334,7 @@ exclude|folder|recursive|C:\Program Files
 Folder rules can be Include or Exclude and can apply to subfolders. Existing plain folder/process exclusions remain valid and are treated as exclude rules.
 
 
-0.1.1 UI note: Maintenance > Logging Rules uses ordered Include/Exclude rules. Rules can be added for folders, exact files, and processes/programs; the upper matching rule wins.
+0.1.3.0 UI note: Maintenance > Logging Rules uses ordered Include/Exclude rules. Rules can be added for folders, exact files, and processes/programs; the upper matching rule wins.
 
 ## Maintenance Logging Rules
 

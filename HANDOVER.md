@@ -1,4 +1,4 @@
-# DeskPulse Handover Document — Version 0.1.1
+# DeskPulse Handover Document — Version 0.1.3.0
 
 ## 1. Project Overview
 
@@ -9,7 +9,7 @@ It monitors selected activity on a Windows PC and stores the results in a local 
 Current version:
 
 ```text
-0.1.1
+0.1.3.0
 ```
 
 Repository:
@@ -33,7 +33,7 @@ Early pre-release / working baseline
 Release note:
 
 ```text
-0.1.1 is locked as the maintenance/data-management baseline. Future feature changes should be tracked as 0.1.2 work unless a critical 0.1.1 hotfix is required.
+0.1.3.0 is locked as the all-forms designer-editable source baseline. Future feature changes should be tracked as 0.1.4.0 work unless a critical 0.1.3.0 hotfix is required.
 ```
 
 Important note:
@@ -42,10 +42,13 @@ Important note:
 This package was prepared as source/documentation files. It was not compile-tested inside the AI environment because the .NET SDK is not available there. Compile and test locally before committing or publishing.
 ```
 
-## 2. Files Included in the 0.1.1 Package
+## 2. Files Included in the 0.1.3.0 Package
 
 ```text
 Program.cs
+Forms/*.cs
+Forms/*.Designer.cs
+Forms/*.resx
 DeskPulse.csproj
 app.manifest
 README.md
@@ -64,24 +67,77 @@ LICENSE
 
 The project file references `file-logger.ico`. If that file is not already in the repository, add it before building.
 
+
+## Designer/Form Refactor Status
+
+The 0.1.3.0 package contains the all-forms designer-editable UI refactor for the visible WinForms surfaces.
+
+The following forms are now designer-compatible partial classes:
+
+```text
+Forms/AboutForm.cs
+Forms/AboutForm.Designer.cs
+Forms/AboutForm.resx
+Forms/ExportDateRangeForm.cs
+Forms/ExportDateRangeForm.Designer.cs
+Forms/ExportDateRangeForm.resx
+Forms/MaintenanceProgressForm.cs
+Forms/MaintenanceProgressForm.Designer.cs
+Forms/MaintenanceProgressForm.resx
+```
+
+The visible Settings and Maintenance layouts are now designer-backed through `Forms/SettingsForm.cs` / `Forms/SettingsForm.Designer.cs`.
+
+```text
+Forms/SettingsForm.cs
+Forms/SettingsForm.Designer.cs
+Forms/MaintenanceForm.cs
+```
+
+`MaintenanceForm.cs` remains a thin launcher/wrapper for maintenance mode. The actual editable Maintenance layout is on the Maintenance tab inside `SettingsForm.Designer.cs`.
+
+
+## Designer Forms Status
+
+Designer-compatible partial forms currently included:
+
+```text
+Forms/AboutForm.cs
+Forms/AboutForm.Designer.cs
+Forms/AboutForm.resx
+Forms/ExportDateRangeForm.cs
+Forms/ExportDateRangeForm.Designer.cs
+Forms/ExportDateRangeForm.resx
+Forms/MaintenanceProgressForm.cs
+Forms/MaintenanceProgressForm.Designer.cs
+Forms/MaintenanceProgressForm.resx
+Forms/SettingsForm.cs
+Forms/SettingsForm.Designer.cs
+Forms/SettingsForm.resx
+```
+
+`SettingsForm` is now designer-editable for normal Settings use. The outer window, main tab control, General tab, Files tab, Export Options tab, footer separator, Save button, and Cancel button are in `SettingsForm.Designer.cs`. The dynamic export field sub-tabs are still rebuilt at runtime because they depend on the selected worksheet configuration.
+
+`MaintenanceForm` remains a thin launcher/wrapper around `SettingsForm(true)`; the editable maintenance UI is now located in `SettingsForm.Designer.cs` on the Maintenance tab.
+
 ## 3. Version References
 
 Expected current values:
 
 ```text
-AppInfo.Version = "0.1.1"
-DeskPulse.csproj Version = 0.1.1
-DeskPulse.csproj AssemblyVersion = 0.1.1.0
-DeskPulse.csproj FileVersion = 0.1.1.0
-DeskPulse.csproj InformationalVersion = 0.1.1
-app.manifest assemblyIdentity version = 0.1.1.0
+AppInfo.Version = "0.1.3.0"
+DeskPulse.csproj Version = 0.1.3.0
+DeskPulse.csproj AssemblyVersion = 0.1.3.0
+DeskPulse.csproj FileVersion = 0.1.3.0
+DeskPulse.csproj InformationalVersion = 0.1.3.0
+app.manifest assemblyIdentity version = 0.1.3.0
 ```
 
 Historical version references may remain in `CHANGELOG.md` because the changelog preserves release history.
 
-## 4. Main 0.1.1 Scope
+## 4. Main 0.1.3.0 Scope
 
-Version `0.1.1` includes:
+Version `0.1.3.0` includes:
 
 - quiet startup with no normal success balloon
 - no `Settings saved` balloon
@@ -446,20 +502,20 @@ dotnet publish .\DeskPulse.csproj `
   --configuration Release `
   --runtime win-x64 `
   --self-contained true `
-  --output ".\publish\v0.1.1" `
+  --output ".\publish\v0.1.3.0" `
   /p:PublishSingleFile=false
 ```
 
 Published executable:
 
 ```text
-publish\v0.1.1\DeskPulse.exe
+publish\v0.1.3.0\DeskPulse.exe
 ```
 
 Run from Administrator PowerShell:
 
 ```powershell
-cd ".\publish\v0.1.1"
+cd ".\publish\v0.1.3.0"
 .\DeskPulse.exe
 ```
 
@@ -476,7 +532,7 @@ Remove Unwanted Data
 
 This action permanently deletes existing `ActivityEvents` and `ProgramEvents` rows that match the current current Exclude folder/file/process rules. It does not delete logging rules and does not delete `UserEvents`. It must show a warning dialog before deleting data.
 
-## 18. Testing Checklist for 0.1.1
+## 18. Testing Checklist for 0.1.3.0
 
 Build/startup:
 
@@ -522,11 +578,11 @@ Export:
 
 Documentation:
 
-- README says current version `0.1.1`
-- README publish folder uses `v0.1.1`
-- HANDOVER says current version `0.1.1`
-- ROADMAP exists and identifies `0.1.1` as locked baseline and `0.1.2` as the next development version
-- CHANGELOG has a current `0.1.1` section and preserves historical entries
+- README says current version `0.1.3.0`
+- README publish folder uses `v0.1.3.0`
+- HANDOVER says current version `0.1.3.0`
+- ROADMAP exists and identifies `0.1.3.0` as locked baseline and `0.1.4.0` as the next development version
+- CHANGELOG has a current `0.1.3.0` section and preserves historical entries
 
 ## 19. Known Limitations / Items to Watch
 
@@ -551,12 +607,12 @@ ROADMAP.md
 Likely next version:
 
 ```text
-0.1.2 — Stabilisation, UI polish, and export improvements
+0.1.4.0 — Stabilisation, UI polish, and export improvements
 ```
 
 Main planned topics:
 
-- compile-test and runtime-test the locked 0.1.1 package locally
+- compile-test and runtime-test the locked 0.1.3.0 package locally
 - tidy remaining form spacing and reduce unnecessary whitespace
 - improve resizing/anchoring of tables and path columns
 - add export cancellation and export preview/summary
@@ -597,7 +653,7 @@ publish/
 Suggested commit message:
 
 ```text
-Release DeskPulse v0.1.1
+Release DeskPulse v0.1.3.0
 ```
 
 ## 22. Instructions for Future AI Assistance
@@ -620,9 +676,9 @@ When continuing this project:
 14. Keep normal successful actions quiet; only errors should show popups.
 
 
-## 0.1.1 Maintenance Implementation Notes
+## 0.1.3.0 Maintenance Implementation Notes
 
-Version `0.1.1` adds a hidden Maintenance workspace that is visible only when DeskPulse is started with `-maintenance` or `-m`.
+Version `0.1.3.0` adds a hidden Maintenance workspace that is visible only when DeskPulse is started with `-maintenance` or `-m`.
 
 Maintenance sub-tabs:
 
@@ -674,7 +730,7 @@ C:\Some\Exact\Folder|folder-only
 The exclusion matcher must compare folder boundaries, not simple string prefixes, so `C:\Users\Kai\AppData` must not match `C:\Users\Kai\AppDataBackup`.
 
 
-## 0.1.1 Exclusion Rule Ordering Update
+## 0.1.3.0 Exclusion Rule Ordering Update
 
 The Maintenance > Logging Rules page supports ordered rules. Rules are evaluated from top to bottom and the first matching rule wins. This permits patterns such as including a specific application folder above a broad Program Files exclusion.
 
@@ -705,12 +761,12 @@ Rule storage now includes the `LoggingRules` registry value. `ExcludedFolders` a
 The UI has an add-rule panel with Folder/Process selection, Exclude/Include selection, subfolder option for folder rules, and Browse buttons. The rules table supports Move Up, Move Down, Remove, Duplicate, and Reset Defaults.
 
 
-## 0.1.1 UI correction — Maintenance form separation
+## 0.1.3.0 UI correction — Maintenance form separation
 
 Maintenance is now a dedicated right-click form when DeskPulse is started with `-maintenance` or `-m`. The normal Settings form must contain only General, Files, and Export Options. Do not re-add Maintenance as a normal Settings tab.
 
 
-0.1.1 note: Logging Rules now support exact file exclusions. In Maintenance > Statistics, right-click a row in Top 100 full paths to add an exact file exclusion for that specific file.
+0.1.3.0 note: Logging Rules now support exact file exclusions. In Maintenance > Statistics, right-click a row in Top 100 full paths to add an exact file exclusion for that specific file.
 
 
 ## Maintenance button tooltips
@@ -722,9 +778,9 @@ Maintenance action buttons use WinForms tooltips to describe the scope of each a
 The Cleanup tab now separates destructive record clearing from rule-based unwanted-data cleanup. The `Delete All ...` buttons clear whole activity categories. The `Remove Unwanted Data...` button applies current Exclude logging rules to past file/program records only, with warning/progress. Generated-file cleanup remains separate.
 
 
-## 0.1.1 Final Lock Notes
+## 0.1.3.0 Final Lock Notes
 
 - Cleanup tab order is safety-first: generated files first, rule-based unwanted-data cleanup second, and full record deletion last.
 - Statistics supports multi-select with Shift/Ctrl and applies add-rule actions to all selected rows.
 - Logging Rules support Folder, File, and Process/Program rules.
-- 0.1.1 is locked as the maintenance/data-management baseline. Future changes should move to 0.1.2 unless a critical 0.1.1 hotfix is required.
+- 0.1.3.0 is locked as the all-forms designer-editable source baseline. Future changes should move to 0.1.4.0 unless a critical 0.1.3.0 hotfix is required.
