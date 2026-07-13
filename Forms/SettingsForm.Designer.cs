@@ -382,7 +382,7 @@ partial class SettingsForm
         _behaviourHintLabel.Name = "_behaviourHintLabel";
         _behaviourHintLabel.Size = new System.Drawing.Size(760, 22);
         _behaviourHintLabel.TabIndex = 2;
-        _behaviourHintLabel.Text = "DeskPulse keeps running from the tray icon. Left-click opens View Log, Settings, About, and Exit.";
+        _behaviourHintLabel.Text = "DeskPulse keeps running from the tray icon. Left-click opens Export/Settings; right-click opens About/Exit.";
 
         // _rulesTabPage
         _rulesTabPage.BackColor = System.Drawing.SystemColors.Window;
@@ -746,7 +746,7 @@ partial class SettingsForm
         _maintenanceIntroLabel.Name = "_maintenanceIntroLabel";
         _maintenanceIntroLabel.Size = new System.Drawing.Size(820, 24);
         _maintenanceIntroLabel.TabIndex = 0;
-        _maintenanceIntroLabel.Text = "Database housekeeping applies the current rules to stored history and compacts the database.";
+        _maintenanceIntroLabel.Text = "Maintenance tools are visible only when DeskPulse is started with -maintenance or -m.";
 
         // _maintenanceSubTabControl
         _maintenanceSubTabControl.Controls.Add(_maintenanceDatabaseTabPage);

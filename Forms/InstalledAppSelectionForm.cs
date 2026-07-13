@@ -14,6 +14,7 @@ public partial class InstalledAppSelectionForm : Form
     public InstalledAppSelectionForm()
     {
         InitializeComponent();
+        AppIcon.Apply(this);
         Load += InstalledAppSelectionForm_Load;
     }
 

@@ -138,7 +138,6 @@ partial class InstalledAppSelectionForm
         MinimizeBox = false;
         MinimumSize = new System.Drawing.Size(600, 440);
         Name = "InstalledAppSelectionForm";
-        ShowIcon = false;
         ShowInTaskbar = false;
         StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
         Text = "Add Installed Applications";

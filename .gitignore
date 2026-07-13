@@ -29,6 +29,7 @@ Logs/
 *-view.csv
 *backup*.csv
 DeskPulse-export.xlsx
+DeskPulse-diagnostics.log
 DeskPulse-startup.log
 
 # Local databases / runtime data

@@ -8,12 +8,17 @@ partial class RuleCleanupProgressForm
     private Label titleLabel = null!;
     private ProgressBar progressBar = null!;
     private Label progressLabel = null!;
-    private Button closeButton = null!;
+    private Button actionButton = null!;
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && (components != null))
-            components.Dispose();
+        if (disposing)
+        {
+            _cancellationTokenSource.Dispose();
+
+            if (components != null)
+                components.Dispose();
+        }
 
         base.Dispose(disposing);
     }
@@ -24,7 +29,7 @@ partial class RuleCleanupProgressForm
         titleLabel = new Label();
         progressBar = new ProgressBar();
         progressLabel = new Label();
-        closeButton = new Button();
+        actionButton = new Button();
         SuspendLayout();
         // 
         // titleLabel
@@ -52,15 +57,15 @@ partial class RuleCleanupProgressForm
         progressLabel.TabIndex = 2;
         progressLabel.Text = "0%   Waiting to start";
         // 
-        // closeButton
+        // actionButton
         // 
-        closeButton.Enabled = false;
-        closeButton.FlatStyle = FlatStyle.System;
-        closeButton.Location = new System.Drawing.Point(418, 140);
-        closeButton.Name = "closeButton";
-        closeButton.Size = new System.Drawing.Size(80, 30);
-        closeButton.TabIndex = 3;
-        closeButton.Text = "Close";
+        actionButton.Enabled = true;
+        actionButton.FlatStyle = FlatStyle.System;
+        actionButton.Location = new System.Drawing.Point(418, 140);
+        actionButton.Name = "actionButton";
+        actionButton.Size = new System.Drawing.Size(80, 30);
+        actionButton.TabIndex = 3;
+        actionButton.Text = "Cancel";
         // 
         // RuleCleanupProgressForm
         // 
@@ -71,7 +76,7 @@ partial class RuleCleanupProgressForm
         Controls.Add(titleLabel);
         Controls.Add(progressBar);
         Controls.Add(progressLabel);
-        Controls.Add(closeButton);
+        Controls.Add(actionButton);
         Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;

@@ -17,21 +17,26 @@ public partial class ViewLogForm : Form
 {
     private const int PageSize = 500;
 
-    private int _folderPage;
     private int _appPage;
     private int _filePage;
     private int _userPage;
-    private int _folderTotal;
     private int _appTotal;
     private int _fileTotal;
     private int _userTotal;
     private readonly string _connectionString;
     private readonly string _databaseFilePath;
     private readonly Action? _settingsChanged;
+    private string _appSortColumn = "CreatedAt";
+    private bool _appSortAscending;
+    private string _fileSortColumn = "CreatedAt";
+    private bool _fileSortAscending;
+    private string _userSortColumn = "CreatedAt";
+    private bool _userSortAscending;
 
     public ViewLogForm(Action? settingsChanged = null)
     {
         InitializeComponent();
+        AppIcon.Apply(this);
 
         _settingsChanged = settingsChanged;
         var settings = AppSettings.Load();
@@ -43,23 +48,32 @@ public partial class ViewLogForm : Form
             Cache = SqliteCacheMode.Shared
         }.ToString();
 
-        dateStart.Value = DateTime.Today;
+        dateStart.Value = DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
         dateEnd.Value = DateTime.Today;
         ConfigureGrids();
         tabs.SelectedIndexChanged += (_, _) =>
         {
-            UpdateCreateRuleButton();
+            UpdateSelectionButtons();
             UpdatePagingControls();
+            UpdatePageStatus();
         };
         Load += (_, _) => RefreshLog();
     }
 
+    private void TodayOnlyButton_Click(object? sender, EventArgs e)
+    {
+        dateStart.Value = DateTime.Today;
+        _filePage = 0;
+        _appPage = 0;
+        _userPage = 0;
+        RefreshLog();
+    }
+
     private void ConfigureGrids()
     {
-        ConfigureGrid(gridFolder, new[] { "ID", "Date", "Time", "Folder", "File", "Event", "App" });
-        ConfigureGrid(gridApp, new[] { "ID", "Date", "Time", "Event Type", "App", "Process ID", "Path" });
-        ConfigureGrid(gridFile, new[] { "ID", "Date", "Time", "Event Type", "File", "Folder", "App" });
-        ConfigureGrid(gridUser, new[] { "ID", "Date", "Time", "Event Type", "Event", "User", "Computer" });
+        ConfigureGrid(gridApp, new[] { "ID", "Date", "Time", "App", "Process ID", "Path" });
+        ConfigureGrid(gridFile, new[] { "ID", "Date", "Time", "File", "Folder", "App" });
+        ConfigureGrid(gridUser, new[] { "ID", "Date", "Time", "Event", "User", "Computer" });
     }
 
     private void ConfigureGrid(DataGridView grid, IReadOnlyList<string> columns)
@@ -69,7 +83,7 @@ public partial class ViewLogForm : Form
         grid.AllowUserToDeleteRows = false;
         grid.AllowUserToOrderColumns = true;
         grid.ReadOnly = true;
-        grid.MultiSelect = false;
+        grid.MultiSelect = true;
         grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         grid.RowHeadersVisible = false;
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
@@ -80,7 +94,7 @@ public partial class ViewLogForm : Form
             {
                 Name = columnName.Replace(" ", ""),
                 HeaderText = columnName,
-                SortMode = DataGridViewColumnSortMode.Automatic,
+                SortMode = DataGridViewColumnSortMode.Programmatic,
                 FillWeight = columnName is "Folder" or "Path" ? 180 : columnName is "File" or "App" or "Event" ? 130 : columnName == "ID" ? 55 : 80
             });
         }
@@ -97,21 +111,126 @@ public partial class ViewLogForm : Form
         });
 
         grid.CellContentClick += Grid_CellContentClick;
+        grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
         grid.CellDoubleClick += Grid_CellDoubleClick;
-        grid.SelectionChanged += (_, _) => UpdateCreateRuleButton();
+        grid.SelectionChanged += (_, _) => UpdateSelectionButtons();
     }
 
 
-    private void UpdateCreateRuleButton()
+
+    private void Grid_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (sender is not DataGridView grid || e.ColumnIndex < 0)
+            return;
+
+        var column = grid.Columns[e.ColumnIndex];
+        if (column.SortMode == DataGridViewColumnSortMode.NotSortable)
+            return;
+
+        var databaseColumn = GetDatabaseSortColumn(grid, column.HeaderText);
+        if (databaseColumn == null)
+            return;
+
+        if (grid == gridApp)
+        {
+            _appSortAscending = string.Equals(_appSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                ? !_appSortAscending
+                : true;
+            _appSortColumn = databaseColumn;
+            _appPage = 0;
+        }
+        else if (grid == gridUser)
+        {
+            _userSortAscending = string.Equals(_userSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                ? !_userSortAscending
+                : true;
+            _userSortColumn = databaseColumn;
+            _userPage = 0;
+        }
+        else
+        {
+            _fileSortAscending = string.Equals(_fileSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                ? !_fileSortAscending
+                : true;
+            _fileSortColumn = databaseColumn;
+            _filePage = 0;
+        }
+
+        UpdateSortGlyphs(grid, column, GetSortAscending(grid));
+        RefreshActiveTab();
+    }
+
+    private string? GetDatabaseSortColumn(DataGridView grid, string headerText)
+    {
+        if (grid == gridApp)
+        {
+            return headerText switch
+            {
+                "ID" => "Id",
+                "Date" => "EventDate",
+                "Time" => "EventTime",
+                "App" => "ProgramName",
+                "Process ID" => "ProcessId",
+                "Path" => "FilePath",
+                _ => null
+            };
+        }
+
+        if (grid == gridUser)
+        {
+            return headerText switch
+            {
+                "ID" => "Id",
+                "Date" => "EventDate",
+                "Time" => "EventTime",
+                "Event" => "EventDescription",
+                "User" => "UserName",
+                "Computer" => "MachineName",
+                _ => null
+            };
+        }
+
+        return headerText switch
+        {
+            "ID" => "Id",
+            "Date" => "COALESCE(NULLIF(DateClosed, ''), NULLIF(LastWriteDate, ''), NULLIF(FirstWriteDate, ''), NULLIF(DateOpened, ''), substr(CreatedAt, 1, 10))",
+            "Time" => "COALESCE(NULLIF(TimeClosed, ''), NULLIF(LastWriteTime, ''), NULLIF(FirstWriteTime, ''), NULLIF(TimeOpened, ''), substr(CreatedAt, 12))",
+            "File" => "FileName",
+            "Folder" => "FolderPath",
+            "App" => "ProcessName",
+            _ => null
+        };
+    }
+
+    private bool GetSortAscending(DataGridView grid) => grid == gridApp
+        ? _appSortAscending
+        : grid == gridUser ? _userSortAscending : _fileSortAscending;
+
+    private static void UpdateSortGlyphs(DataGridView grid, DataGridViewColumn sortedColumn, bool ascending)
+    {
+        foreach (DataGridViewColumn column in grid.Columns)
+            column.HeaderCell.SortGlyphDirection = SortOrder.None;
+
+        sortedColumn.HeaderCell.SortGlyphDirection = ascending ? SortOrder.Ascending : SortOrder.Descending;
+    }
+
+    private static string BuildOrderBy(string column, bool ascending)
+    {
+        var direction = ascending ? "ASC" : "DESC";
+        return $"ORDER BY {column} {direction}, Id {direction}";
+    }
+
+    private void UpdateSelectionButtons()
     {
         var grid = GetActiveGrid();
-        createRuleButton.Enabled = grid?.SelectedRows.Count == 1 && grid.SelectedRows[0].Tag is LogViewEntry;
+        var selectedCount = grid?.SelectedRows.Count ?? 0;
+        createRuleButton.Enabled = selectedCount == 1 && grid!.SelectedRows[0].Tag is LogViewEntry;
+        deleteButton.Enabled = selectedCount > 0 && grid!.SelectedRows.Cast<DataGridViewRow>().Any(row => row.Tag is LogViewEntry);
     }
 
     private DataGridView? GetActiveGrid()
     {
         if (tabs.SelectedTab == null) return null;
-        if (tabs.SelectedTab.Text == "Folder Activity") return gridFolder;
         if (tabs.SelectedTab.Text == "App Activity") return gridApp;
         if (tabs.SelectedTab.Text == "File Activity") return gridFile;
         if (tabs.SelectedTab.Text == "User Activity") return gridUser;
@@ -120,10 +239,186 @@ public partial class ViewLogForm : Form
 
     private LogRuleCategory GetActiveCategory()
     {
-        if (tabs.SelectedTab?.Text == "Folder Activity") return LogRuleCategory.Folder;
         if (tabs.SelectedTab?.Text == "App Activity") return LogRuleCategory.App;
         if (tabs.SelectedTab?.Text == "User Activity") return LogRuleCategory.User;
         return LogRuleCategory.File;
+    }
+
+    private void DeleteButton_Click(object? sender, EventArgs e)
+    {
+        var grid = GetActiveGrid();
+        if (grid == null)
+            return;
+
+        var entries = grid.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Select(row => row.Tag as LogViewEntry)
+            .Where(entry => entry != null && long.TryParse(entry.Id, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            .Cast<LogViewEntry>()
+            .GroupBy(entry => entry.Id, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToList();
+
+        if (entries.Count == 0)
+            return;
+
+        var sectionName = tabs.SelectedTab?.Text ?? "activity";
+        using var deleteForm = new DeleteLogRecordsForm(entries.Count, sectionName);
+        if (deleteForm.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var createRules = deleteForm.CreateRules;
+
+        var tableName = tabs.SelectedTab?.Text switch
+        {
+            "App Activity" => "ProgramEvents",
+            "User Activity" => "UserEvents",
+            _ => "ActivityEvents"
+        };
+
+        try
+        {
+            Cursor = Cursors.WaitCursor;
+            statusLabel.Text = $"Deleting {entries.Count:N0} selected record(s)...";
+            Application.DoEvents();
+
+            var ids = entries
+                .Select(entry => long.Parse(entry.Id, CultureInfo.InvariantCulture))
+                .ToArray();
+
+            var deleted = DeleteSelectedIds(tableName, ids);
+            var rulesCreated = createRules ? CreateExclusionRulesForEntries(entries) : 0;
+            RefreshActiveTab();
+            statusLabel.Text = rulesCreated > 0
+                ? $"Deleted {deleted:N0} selected record(s) and created {rulesCreated:N0} exclusion rule(s)."
+                : $"Deleted {deleted:N0} selected record(s).";
+        }
+        catch (Exception ex)
+        {
+            statusLabel.Text = "The selected records could not be deleted.";
+            MessageBox.Show(
+                this,
+                "DeskPulse could not delete the selected log records.\n\n" + ex.Message,
+                "Delete selected log records",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+    }
+
+
+    private int CreateExclusionRulesForEntries(IReadOnlyList<LogViewEntry> entries)
+    {
+        var category = GetActiveCategory();
+        var settings = AppSettings.Load();
+        var target = category switch
+        {
+            LogRuleCategory.App => settings.AppActivityRuleSettings,
+            LogRuleCategory.File => settings.FileActivityRuleSettings,
+            _ => settings.UserActivityRuleSettings
+        };
+
+        var created = 0;
+        foreach (var entry in entries)
+        {
+            var value = category switch
+            {
+                LogRuleCategory.App => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.App,
+                LogRuleCategory.File => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.Subject,
+                _ => entry.Subject
+            };
+
+            value = value?.Trim() ?? string.Empty;
+            if (value.Length == 0)
+                continue;
+
+            var rule = new ActivityRuleSetting
+            {
+                Enabled = true,
+                RuleType = category switch
+                {
+                    LogRuleCategory.App => "process",
+                    LogRuleCategory.File => "file",
+                    _ => "event"
+                },
+                Action = "Exclude",
+                Value = value,
+                IncludeSubfolders = false
+            };
+
+            var duplicate = target.Any(existing =>
+                existing.RuleType.Equals(rule.RuleType, StringComparison.OrdinalIgnoreCase) &&
+                existing.Value.Equals(rule.Value, StringComparison.OrdinalIgnoreCase) &&
+                existing.Action.Equals(rule.Action, StringComparison.OrdinalIgnoreCase) &&
+                existing.IncludeSubfolders == rule.IncludeSubfolders);
+
+            if (duplicate)
+                continue;
+
+            // Specific rules must precede broad catch-all rules because the first match wins.
+            target.Insert(0, rule);
+            created++;
+        }
+
+        if (created > 0)
+        {
+            settings.Save();
+            _settingsChanged?.Invoke();
+        }
+
+        return created;
+    }
+
+    private int DeleteSelectedIds(string tableName, IReadOnlyList<long> ids)
+    {
+        var allowedTable = tableName switch
+        {
+            "ActivityEvents" => "ActivityEvents",
+            "ProgramEvents" => "ProgramEvents",
+            "UserEvents" => "UserEvents",
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName))
+        };
+
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = _databaseFilePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Cache = SqliteCacheMode.Shared
+        }.ToString());
+        connection.Open();
+        using (var busy = connection.CreateCommand())
+        {
+            busy.CommandText = "PRAGMA busy_timeout=5000;";
+            busy.ExecuteNonQuery();
+        }
+
+        var deletedTotal = 0;
+        using var transaction = connection.BeginTransaction();
+        const int batchSize = 400;
+
+        for (var offset = 0; offset < ids.Count; offset += batchSize)
+        {
+            var batch = ids.Skip(offset).Take(batchSize).ToArray();
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            var parameterNames = new List<string>(batch.Length);
+
+            for (var index = 0; index < batch.Length; index++)
+            {
+                var parameterName = "$id" + index;
+                parameterNames.Add(parameterName);
+                command.Parameters.AddWithValue(parameterName, batch[index]);
+            }
+
+            command.CommandText = $"DELETE FROM {allowedTable} WHERE Id IN ({string.Join(",", parameterNames)});";
+            deletedTotal += command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return deletedTotal;
     }
 
     private void CreateRuleButton_Click(object? sender, EventArgs e)
@@ -135,10 +430,9 @@ public partial class ViewLogForm : Form
         var category = GetActiveCategory();
         var suggestedValue = category switch
         {
-            LogRuleCategory.Folder => entry.Folder,
             LogRuleCategory.App => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.App,
             LogRuleCategory.File => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.Subject,
-            _ => entry.EventType
+            _ => entry.Subject
         };
 
         using var form = new AddLogRuleForm(category, suggestedValue);
@@ -151,19 +445,17 @@ public partial class ViewLogForm : Form
             Enabled = form.RuleEnabled,
             RuleType = category switch
             {
-                LogRuleCategory.Folder => "folder",
                 LogRuleCategory.App => "process",
                 LogRuleCategory.File => "file",
                 _ => "event"
             },
             Action = form.IsInclude ? "Include" : "Exclude",
             Value = form.RuleValue,
-            IncludeSubfolders = form.IncludeSubfolders
+            IncludeSubfolders = false
         };
 
         var target = category switch
         {
-            LogRuleCategory.Folder => settings.FolderActivityRuleSettings,
             LogRuleCategory.App => settings.AppActivityRuleSettings,
             LogRuleCategory.File => settings.FileActivityRuleSettings,
             _ => settings.UserActivityRuleSettings
@@ -241,20 +533,16 @@ public partial class ViewLogForm : Form
         connection.Open();
         using (var busy = connection.CreateCommand()) { busy.CommandText = "PRAGMA busy_timeout=5000;"; busy.ExecuteNonQuery(); }
 
-        if (category is LogRuleCategory.File or LogRuleCategory.Folder)
+        if (category == LogRuleCategory.File)
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id, COALESCE(FullPath, ''), COALESCE(FolderPath, '') FROM ActivityEvents;";
+            command.CommandText = "SELECT Id, COALESCE(FullPath, '') FROM ActivityEvents;";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
                 var id = reader.GetInt64(0);
                 var fullPath = reader.GetString(1);
-                var folder = reader.GetString(2);
-                var matches = category == LogRuleCategory.File
-                    ? FilePatternMatches(fullPath, rule.Value)
-                    : FolderPatternMatches(fullPath, folder, rule.Value, rule.IncludeSubfolders);
-                if (matches) result.ActivityIds.Add(id);
+                if (FilePatternMatches(fullPath, rule.Value)) result.ActivityIds.Add(id);
             }
         }
         else if (category == LogRuleCategory.App)
@@ -277,13 +565,12 @@ public partial class ViewLogForm : Form
         else
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id, COALESCE(EventType, ''), COALESCE(EventDescription, '') FROM UserEvents;";
+            command.CommandText = "SELECT Id, COALESCE(EventDescription, '') FROM UserEvents;";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
-                var eventType = reader.GetString(1);
-                var description = reader.GetString(2);
-                if (TextPatternMatches(eventType, rule.Value) || TextPatternMatches(description, rule.Value)) result.UserIds.Add(reader.GetInt64(0));
+                var description = reader.GetString(1);
+                if (TextPatternMatches(description, rule.Value)) result.UserIds.Add(reader.GetInt64(0));
             }
         }
 
@@ -392,28 +679,71 @@ public partial class ViewLogForm : Form
     private static bool FilePatternMatches(string fullPath, string pattern)
     {
         pattern = (pattern ?? "").Trim().Trim('"');
-        if (string.IsNullOrWhiteSpace(pattern)) return false;
+        if (string.IsNullOrWhiteSpace(pattern))
+            return false;
+
         if (Path.IsPathRooted(pattern) && !ContainsWildcard(pattern))
         {
             try { return Path.GetFullPath(fullPath).Equals(Path.GetFullPath(pattern), StringComparison.OrdinalIgnoreCase); }
             catch { return fullPath.Equals(pattern, StringComparison.OrdinalIgnoreCase); }
         }
-        return TextPatternMatches(Path.GetFileName(fullPath), pattern) || TextPatternMatches(fullPath, pattern);
+
+        var target = pattern.Contains(Path.DirectorySeparatorChar) || pattern.Contains(Path.AltDirectorySeparatorChar)
+            ? fullPath
+            : Path.GetFileName(fullPath);
+
+        var normalizedValue = (target ?? "").Replace('/', '\\');
+        var normalizedPattern = NormalizeWindowsGlobPattern(pattern.Replace('/', '\\'));
+        var regex = BuildWindowsGlobRegex(normalizedPattern);
+
+        return Regex.IsMatch(normalizedValue, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
-    private static bool FolderPatternMatches(string fullPath, string folder, string pattern, bool includeSubfolders)
+    private static string NormalizeWindowsGlobPattern(string pattern)
     {
-        var candidate = string.IsNullOrWhiteSpace(folder) ? Path.GetDirectoryName(fullPath) ?? "" : folder;
-        pattern = (pattern ?? "").Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (ContainsWildcard(pattern)) return TextPatternMatches(candidate, pattern);
-        try
+        return string.Join("\\", pattern.Split('\\').Select(segment => segment == "*.*" ? "*" : segment));
+    }
+
+    private static string BuildWindowsGlobRegex(string pattern)
+    {
+        var builder = new System.Text.StringBuilder("^");
+
+        for (var index = 0; index < pattern.Length; index++)
         {
-            var candidateFull = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var ruleFull = Path.GetFullPath(pattern).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return candidateFull.Equals(ruleFull, StringComparison.OrdinalIgnoreCase) ||
-                   (includeSubfolders && candidateFull.StartsWith(ruleFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            var current = pattern[index];
+
+            if (current == '\\' && index + 3 < pattern.Length &&
+                pattern[index + 1] == '*' && pattern[index + 2] == '*' && pattern[index + 3] == '\\')
+            {
+                builder.Append(@"\\(?:[^\\]+\\)*");
+                index += 3;
+                continue;
+            }
+
+            if (current == '*' && index + 1 < pattern.Length && pattern[index + 1] == '*')
+            {
+                builder.Append(".*");
+                index++;
+                continue;
+            }
+
+            if (current == '*')
+            {
+                builder.Append(@"[^\\]*");
+                continue;
+            }
+
+            if (current == '?')
+            {
+                builder.Append(@"[^\\]");
+                continue;
+            }
+
+            builder.Append(Regex.Escape(current.ToString()));
         }
-        catch { return candidate.Equals(pattern, StringComparison.OrdinalIgnoreCase); }
+
+        builder.Append('$');
+        return builder.ToString();
     }
 
     private static bool AppPatternMatches(string filePath, string processName, string pattern)
@@ -566,7 +896,6 @@ public partial class ViewLogForm : Form
 
     private void ResetPages()
     {
-        _folderPage = 0;
         _appPage = 0;
         _filePage = 0;
         _userPage = 0;
@@ -574,7 +903,6 @@ public partial class ViewLogForm : Form
 
     private int GetActivePage() => tabs.SelectedTab?.Text switch
     {
-        "Folder Activity" => _folderPage,
         "App Activity" => _appPage,
         "User Activity" => _userPage,
         _ => _filePage
@@ -582,7 +910,6 @@ public partial class ViewLogForm : Form
 
     private int GetActiveTotal() => tabs.SelectedTab?.Text switch
     {
-        "Folder Activity" => _folderTotal,
         "App Activity" => _appTotal,
         "User Activity" => _userTotal,
         _ => _fileTotal
@@ -593,7 +920,6 @@ public partial class ViewLogForm : Form
         page = Math.Max(0, page);
         switch (tabs.SelectedTab?.Text)
         {
-            case "Folder Activity": _folderPage = page; break;
             case "App Activity": _appPage = page; break;
             case "User Activity": _userPage = page; break;
             default: _filePage = page; break;
@@ -608,7 +934,6 @@ public partial class ViewLogForm : Form
 
     private void ClampAllPages()
     {
-        _folderPage = ClampPage(_folderPage, _folderTotal);
         _appPage = ClampPage(_appPage, _appTotal);
         _filePage = ClampPage(_filePage, _fileTotal);
         _userPage = ClampPage(_userPage, _userTotal);
@@ -633,6 +958,23 @@ public partial class ViewLogForm : Form
         pageLabel.Text = $"Page {page + 1:N0} of {totalPages:N0}   ({total:N0} record(s))";
     }
 
+    private void UpdatePageStatus()
+    {
+        var total = GetActiveTotal();
+        var page = GetActivePage();
+        var visibleRows = GetActiveGrid()?.Rows.Count ?? 0;
+
+        if (total <= 0 || visibleRows <= 0)
+        {
+            statusLabel.Text = "Showing 0 of 0 records.";
+            return;
+        }
+
+        var firstRecord = (page * PageSize) + 1;
+        var lastRecord = Math.Min(firstRecord + visibleRows - 1, total);
+        statusLabel.Text = $"Showing {firstRecord:N0} to {lastRecord:N0} of {total:N0} records.";
+    }
+
     private void RefreshActiveTab()
     {
         var start = dateStart.Value.Date;
@@ -648,12 +990,6 @@ public partial class ViewLogForm : Form
 
             switch (tabs.SelectedTab?.Text)
             {
-                case "Folder Activity":
-                    _folderTotal = CountEntries("ActivityEvents", start, endExclusive);
-                    _folderPage = ClampPage(_folderPage, _folderTotal);
-                    PopulateFolderGrid(ReadFileEntries(start, endExclusive, _folderPage));
-                    gridFolder.ClearSelection();
-                    break;
                 case "App Activity":
                     _appTotal = CountEntries("ProgramEvents", start, endExclusive);
                     _appPage = ClampPage(_appPage, _appTotal);
@@ -674,9 +1010,9 @@ public partial class ViewLogForm : Form
                     break;
             }
 
-            createRuleButton.Enabled = false;
+            UpdateSelectionButtons();
             UpdatePagingControls();
-            statusLabel.Text = $"Showing up to {PageSize:N0} records on the current page.";
+            UpdatePageStatus();
         }
         catch (Exception ex)
         {
@@ -708,29 +1044,25 @@ public partial class ViewLogForm : Form
 
             var endExclusive = end.AddDays(1);
             _fileTotal = CountEntries("ActivityEvents", start, endExclusive);
-            _folderTotal = _fileTotal;
             _appTotal = CountEntries("ProgramEvents", start, endExclusive);
             _userTotal = CountEntries("UserEvents", start, endExclusive);
             ClampAllPages();
 
             var fileEntries = ReadFileEntries(start, endExclusive, _filePage);
-            var folderEntries = ReadFileEntries(start, endExclusive, _folderPage);
             var appEntries = ReadAppEntries(start, endExclusive, _appPage);
             var userEntries = ReadUserEntries(start, endExclusive, _userPage);
 
             PopulateFileGrid(fileEntries);
-            PopulateFolderGrid(folderEntries);
             PopulateAppGrid(appEntries);
             PopulateUserGrid(userEntries);
 
-            gridFolder.ClearSelection();
             gridApp.ClearSelection();
             gridFile.ClearSelection();
             gridUser.ClearSelection();
-            createRuleButton.Enabled = false;
+            UpdateSelectionButtons();
 
             UpdatePagingControls();
-            statusLabel.Text = $"Loaded page-size {PageSize:N0}. File: {_fileTotal:N0}; Folder view: {_folderTotal:N0}; App: {_appTotal:N0}; User: {_userTotal:N0}.";
+            UpdatePageStatus();
         }
         catch (Exception ex)
         {
@@ -745,14 +1077,14 @@ public partial class ViewLogForm : Form
 
     private List<LogViewEntry> ReadFileEntries(DateTime start, DateTime endExclusive, int page)
     {
-        const string sql = """
+        var sql = $"""
             SELECT Id, CreatedAt, ActivityType, FullPath, FolderPath, FileName, Extension,
                    DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
                    LastWriteDate, LastWriteTime, WriteCount, SizeAtLastWrite, DateClosed,
                    TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note
             FROM ActivityEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
-            ORDER BY CreatedAt DESC, Id DESC
+            {BuildOrderBy(_fileSortColumn, _fileSortAscending)}
             LIMIT $limit OFFSET $offset;
             """;
 
@@ -779,18 +1111,18 @@ public partial class ViewLogForm : Form
 
             return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
                 EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)),
-                ReadText(reader, 19), file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);
+                file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);
         });
     }
 
     private List<LogViewEntry> ReadAppEntries(DateTime start, DateTime endExclusive, int page)
     {
-        const string sql = """
-            SELECT Id, CreatedAt, EventDate, EventTime, EventType, EventDescription, ProgramName,
+        var sql = $"""
+            SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, ProgramName,
                    ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note
             FROM ProgramEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
-            ORDER BY CreatedAt DESC, Id DESC
+            {BuildOrderBy(_appSortColumn, _appSortAscending)}
             LIMIT $limit OFFSET $offset;
             """;
 
@@ -799,22 +1131,22 @@ public partial class ViewLogForm : Form
             var fields = new Dictionary<string, string>
             {
                 ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
-                ["Event Type"] = ReadText(reader, 4), ["Event"] = ReadText(reader, 5), ["App"] = ReadText(reader, 6), ["Process ID"] = ReadText(reader, 7),
-                ["App Path"] = ReadText(reader, 8), ["Window Title"] = ReadText(reader, 9), ["User"] = ReadText(reader, 10),
-                ["Computer"] = ReadText(reader, 11), ["DeskPulse Version"] = ReadText(reader, 12), ["Note"] = ReadText(reader, 13)
+                ["Event"] = ReadText(reader, 4), ["App"] = ReadText(reader, 5), ["Process ID"] = ReadText(reader, 6),
+                ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
+                ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12)
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), ReadText(reader, 3), ReadText(reader, 4), ReadText(reader, 6), "", ReadText(reader, 6), ReadText(reader, 7), ReadText(reader, 8), fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), ReadText(reader, 3), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
         });
     }
 
     private List<LogViewEntry> ReadUserEntries(DateTime start, DateTime endExclusive, int page)
     {
-        const string sql = """
-            SELECT Id, CreatedAt, EventDate, EventTime, EventType, EventDescription, UserName,
+        var sql = $"""
+            SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, UserName,
                    MachineName, ProcessName, ProcessId, AppVersion, Note
             FROM UserEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
-            ORDER BY CreatedAt DESC, Id DESC
+            {BuildOrderBy(_userSortColumn, _userSortAscending)}
             LIMIT $limit OFFSET $offset;
             """;
 
@@ -823,10 +1155,10 @@ public partial class ViewLogForm : Form
             var fields = new Dictionary<string, string>
             {
                 ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
-                ["Event Type"] = ReadText(reader, 4), ["Event"] = ReadText(reader, 5), ["User"] = ReadText(reader, 6), ["Computer"] = ReadText(reader, 7),
-                ["Process"] = ReadText(reader, 8), ["Process ID"] = ReadText(reader, 9), ["DeskPulse Version"] = ReadText(reader, 10), ["Note"] = ReadText(reader, 11)
+                ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
+                ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10)
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), ReadText(reader, 3), ReadText(reader, 4), ReadText(reader, 5), "", ReadText(reader, 6), ReadText(reader, 9), "", fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), ReadText(reader, 3), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
         });
     }
 
@@ -882,25 +1214,19 @@ public partial class ViewLogForm : Form
     private void PopulateFileGrid(IEnumerable<LogViewEntry> entries)
     {
         gridFile.Rows.Clear();
-        foreach (var e in entries) AddRow(gridFile, e, e.Id, e.Date, e.Time, e.EventType, e.Subject, e.Folder, e.App);
-    }
-
-    private void PopulateFolderGrid(IEnumerable<LogViewEntry> entries)
-    {
-        gridFolder.Rows.Clear();
-        foreach (var e in entries) AddRow(gridFolder, e, e.Id, e.Date, e.Time, e.Folder, e.Subject, e.EventType, e.App);
+        foreach (var e in entries) AddRow(gridFile, e, e.Id, e.Date, e.Time, e.Subject, e.Folder, e.App);
     }
 
     private void PopulateAppGrid(IEnumerable<LogViewEntry> entries)
     {
         gridApp.Rows.Clear();
-        foreach (var e in entries) AddRow(gridApp, e, e.Id, e.Date, e.Time, e.EventType, e.App, e.ProcessId, e.Path);
+        foreach (var e in entries) AddRow(gridApp, e, e.Id, e.Date, e.Time, e.App, e.ProcessId, e.Path);
     }
 
     private void PopulateUserGrid(IEnumerable<LogViewEntry> entries)
     {
         gridUser.Rows.Clear();
-        foreach (var e in entries) AddRow(gridUser, e, e.Id, e.Date, e.Time, e.EventType, e.Subject, e.App, e.Fields.TryGetValue("Computer", out var computer) ? computer : "");
+        foreach (var e in entries) AddRow(gridUser, e, e.Id, e.Date, e.Time, e.Subject, e.App, e.Fields.TryGetValue("Computer", out var computer) ? computer : "");
     }
 
     private static void AddRow(DataGridView grid, LogViewEntry entry, params object[] values)
@@ -933,7 +1259,6 @@ public sealed record LogViewEntry(
     string CreatedAt,
     string Date,
     string Time,
-    string EventType,
     string Subject,
     string Folder,
     string App,

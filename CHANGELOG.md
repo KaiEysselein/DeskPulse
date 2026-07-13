@@ -1,19 +1,50 @@
 # Changelog
 
-## [0.1.3.1] - 2026-07-13 — Verified baseline
+### Changed — remove DeskPulse lifecycle entries from User Activity
+
+- Removed creation of `AppStarted` and `AppStopped` records in the User Activity log.
+- Removed those obsolete event types from the default User Activity rules.
+- Existing `AppStarted` and `AppStopped` User Activity rules are removed automatically when settings load or save.
+- Historical records already stored in SQLite are left unchanged and can still be deleted from View Log or by database housekeeping.
+
+### Changed — consistent window icons and full-result Log View sorting
+
+- Applied the DeskPulse application icon consistently to every WinForms window and dialog.
+- Changed Log View column sorting from page-local grid sorting to SQLite result-set sorting.
+- Clicking a sortable Log View header now resets that activity tab to page 1, reloads the fully sorted result set, and displays the active sort-direction glyph.
+
+### Changed — View Log multi-selection and deletion
+
+- Enabled multi-row selection in View Log.
+- Added a **Delete** button for permanently deleting the selected records from the active File, App, or User Activity table.
+- The **Create Rule** button is enabled only when exactly one row is selected and is disabled when multiple rows are selected.
+- Deletion requires confirmation, uses a SQLite transaction, and refreshes the active page afterward.
+
+### Changed — cancellable database housekeeping
+
+- Added a **Cancel** button to the database-housekeeping progress window.
+- Cancellation is checked while historical records are scanned and between deletion batches.
+- Historical deletions now run inside a SQLite transaction; cancelling before commit rolls back all pending deletions.
+- Once deletion has been committed and SQLite `VACUUM` begins, compaction must finish and can no longer be cancelled safely.
+
+## [0.1.3.2] - 2026-07-13
 
 ### Changed
 
-- Reconciled all active version references at `0.1.3.1`.
-- Rewrote README, HANDOVER, ROADMAP, and VERSION_CHECK to describe the actual current source and UI.
-- Corrected stale tray-menu and Maintenance-mode wording in Settings.
-- Added Visual Studio dependent-file relationships for View Log, Log Entry Details, and Rule Cleanup Progress forms.
-- Removed the obsolete diagnostic-log entry from `.gitignore`; debug logging remains fully removed.
+- Combined Folder Activity filtering into the File Activity rules list.
+- Removed the separate Folder Activity rules tab and Folder Activity log-view tab.
+- Added Windows-style path wildcard support: `*` matches within one folder level, while `**` matches zero or more folder levels.
+- Added **Add Folder...** in File Activity rules, with a choice between the selected folder only (`\*`) and the selected folder plus all descendants (`\**\*`).
+- Migrated existing Folder Activity registry rules into equivalent File Activity wildcard rules while preserving enabled state, Include/Exclude action, and rule order.
+- Advanced the registry settings schema to version 5 and removed the obsolete active `Rules\FolderActivity` registry value after migration.
+- Updated rule import/export so older schema-1 exports containing Folder Activity rules remain importable and are converted automatically.
+- Updated View Log, database housekeeping, documentation, and handover information for the unified File Activity model.
 
-### Release status
+### Compatibility
 
-- This package is the verified source baseline for local build, standalone publish, GitHub commit, and optional `v0.1.3.1` tag.
-- The next intentional development version is `0.1.4.0`.
+- Existing folder-only rules migrate to `<folder>\*`.
+- Existing recursive folder rules migrate to `<folder>\**\*`.
+- App Activity rules continue to take precedence for matching executable files.
 
 ### View Log paging/export refinement
 
@@ -650,3 +681,32 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 
 - Added JSON import/export for File Activity, Folder Activity, and App Activity rules.
 - Obsolete Maintenance source files are explicitly excluded from compilation if they remain in an older working folder.
+
+### 0.1.3.2 — Log View sort routing fix
+- Fixed User Activity column sorting incorrectly using File Activity database columns when a grid's runtime `Name` property was unavailable.
+- Sort-column routing now uses the actual grid instance, preventing SQLite errors such as `no such column: InferredAction` on the User Activity tab.
+
+### 0.1.3.2 - Event Type removal
+- Removed the Event Type column from File Activity, App Activity, and User Activity in View Log.
+- Removed Event Type from App Activity and User Activity database tables, insert statements, exports, detail views, sorting, and maintenance statistics.
+- Added an automatic database migration that drops the obsolete EventType columns and indexes while preserving the remaining records.
+
+### User lifecycle activity logging
+- Added `DeskPulse started (possible login)` and `DeskPulse stopped` to User Activity.
+- Added one `Windows started` record per detected Windows boot.
+- Retained Windows user logon, logoff, lock, unlock, console, and remote-session activity under User Activity.
+- Required lifecycle rules are enabled automatically for existing settings.
+
+### 0.1.3.2 - Report date defaults
+- All report date selectors now default from the earliest record in the DeskPulse database through today.
+- Added a `Today Only` button to View Log and the activity export date dialog; it changes the From/Start date to today.
+
+### 0.1.3.2 - Optional exclusion rules when deleting log records
+- Replaced the View Log delete confirmation message with a confirmation dialog that includes a `Create exclusion rule(s)` checkbox.
+- The checkbox is off by default, so records can be deleted without changing future logging rules.
+- When selected, DeskPulse creates unique exclusion rules for the deleted File Activity, App Activity, or User Activity records.
+- The same option applies to single-record and multi-record deletion on all three View Log tabs.
+
+### View Log pagination status
+- The status line now shows the exact visible record range and filtered total, for example `Showing 1,001 to 1,500 of 8,999 records.`
+- The displayed range updates when paging, sorting, refreshing, changing dates, or switching activity tabs.

@@ -9,6 +9,7 @@ public sealed partial class AboutForm : Form
     public AboutForm()
     {
         InitializeComponent();
+        AppIcon.Apply(this);
 
         titleLabel.Text = AppInfo.AppName;
         versionLabel.Text = "Version " + AppInfo.Version;

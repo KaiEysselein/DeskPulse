@@ -14,6 +14,7 @@ partial class ExportDateRangeForm
     private ProgressBar progressBar = null!;
     private Label progressLabel = null!;
     private Label separatorLabel = null!;
+    private Button todayOnlyButton = null!;
     private Button exportButton = null!;
     private Button cancelButton = null!;
 
@@ -37,6 +38,7 @@ partial class ExportDateRangeForm
         progressBar = new ProgressBar();
         progressLabel = new Label();
         separatorLabel = new Label();
+        todayOnlyButton = new Button();
         exportButton = new Button();
         cancelButton = new Button();
         startGroupBox.SuspendLayout();
@@ -59,7 +61,7 @@ partial class ExportDateRangeForm
         hintLabel.Name = "hintLabel";
         hintLabel.Size = new System.Drawing.Size(500, 34);
         hintLabel.TabIndex = 1;
-        hintLabel.Text = "Choose the first and last day to include. Both calendars default to today.";
+        hintLabel.Text = "The start day defaults to the first record in the database and the end day defaults to today.";
         // 
         // startGroupBox
         // 
@@ -124,13 +126,22 @@ partial class ExportDateRangeForm
         separatorLabel.Size = new System.Drawing.Size(512, 1);
         separatorLabel.TabIndex = 6;
         // 
+        // todayOnlyButton
+        // 
+        todayOnlyButton.FlatStyle = FlatStyle.System;
+        todayOnlyButton.Location = new System.Drawing.Point(248, 412);
+        todayOnlyButton.Name = "todayOnlyButton";
+        todayOnlyButton.Size = new System.Drawing.Size(96, 30);
+        todayOnlyButton.TabIndex = 7;
+        todayOnlyButton.Text = "Today Only";
+        // 
         // exportButton
         // 
         exportButton.FlatStyle = FlatStyle.System;
         exportButton.Location = new System.Drawing.Point(360, 412);
         exportButton.Name = "exportButton";
         exportButton.Size = new System.Drawing.Size(80, 30);
-        exportButton.TabIndex = 7;
+        exportButton.TabIndex = 8;
         exportButton.Text = "Export";
         // 
         // cancelButton
@@ -140,7 +151,7 @@ partial class ExportDateRangeForm
         cancelButton.Location = new System.Drawing.Point(456, 412);
         cancelButton.Name = "cancelButton";
         cancelButton.Size = new System.Drawing.Size(80, 30);
-        cancelButton.TabIndex = 8;
+        cancelButton.TabIndex = 9;
         cancelButton.Text = "Cancel";
         // 
         // ExportDateRangeForm
@@ -157,6 +168,7 @@ partial class ExportDateRangeForm
         Controls.Add(progressBar);
         Controls.Add(progressLabel);
         Controls.Add(separatorLabel);
+        Controls.Add(todayOnlyButton);
         Controls.Add(exportButton);
         Controls.Add(cancelButton);
         Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);

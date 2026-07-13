@@ -15,13 +15,23 @@ public sealed partial class ExportDateRangeForm : Form
     {
         _exportAction = exportAction ?? throw new ArgumentNullException(nameof(exportAction));
         InitializeComponent();
+        AppIcon.Apply(this);
 
-        startCalendar.SelectionStart = DateTime.Today;
-        startCalendar.SelectionEnd = DateTime.Today;
+        var firstRecordedDate = DatabaseDateRange.GetFirstRecordedDate(AppSettings.Load().DatabaseFilePath);
+        startCalendar.SelectionStart = firstRecordedDate;
+        startCalendar.SelectionEnd = firstRecordedDate;
         endCalendar.SelectionStart = DateTime.Today;
         endCalendar.SelectionEnd = DateTime.Today;
 
+        todayOnlyButton.Click += (_, _) => SetTodayOnly();
         exportButton.Click += async (_, _) => await ExportAsync();
+    }
+
+    private void SetTodayOnly()
+    {
+        startCalendar.SelectionStart = DateTime.Today;
+        startCalendar.SelectionEnd = DateTime.Today;
+        startCalendar.SetDate(DateTime.Today);
     }
 
     private async Task ExportAsync()
@@ -68,6 +78,7 @@ public sealed partial class ExportDateRangeForm : Form
     {
         startCalendar.Enabled = !inProgress;
         endCalendar.Enabled = !inProgress;
+        todayOnlyButton.Enabled = !inProgress;
         exportButton.Enabled = !inProgress;
         cancelButton.Enabled = !inProgress;
         ControlBox = !inProgress;

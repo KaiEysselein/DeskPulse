@@ -1,90 +1,60 @@
-# DeskPulse Handover — Version 0.1.3.1
+# DeskPulse Handover — Version 0.1.3.2
 
-## 1. Status
+## 1. Baseline
 
-DeskPulse `0.1.3.1` is the current verified source baseline. Use this package for the next local build, standalone publish, and GitHub synchronisation. Do not promote the active version to `0.1.4.0` until the next development cycle is intentionally started.
+This package is the authoritative DeskPulse `0.1.3.2` development baseline.
 
-Version references that must remain aligned:
+DeskPulse is a C# / .NET 8 WinForms tray application that stores selected activity in SQLite and exports reports to XLSX. The application requires Administrator privileges for kernel ETW file tracing.
+
+## 2. Active version references
+
+The following active references must all remain `0.1.3.2`:
 
 ```text
-Program.cs                     AppInfo.Version = 0.1.3.1
-DeskPulse.csproj               Version = 0.1.3.1
-DeskPulse.csproj               AssemblyVersion = 0.1.3.1
-DeskPulse.csproj               FileVersion = 0.1.3.1
-DeskPulse.csproj               InformationalVersion = 0.1.3.1
-app.manifest                   assemblyIdentity version = 0.1.3.1
-README.md                      current version = 0.1.3.1
-HANDOVER.md                    current version = 0.1.3.1
-VERSION_CHECK.md               expected version = 0.1.3.1
+Program.cs                     AppInfo.Version
+DeskPulse.csproj               Version
+DeskPulse.csproj               AssemblyVersion
+DeskPulse.csproj               FileVersion
+DeskPulse.csproj               InformationalVersion
+app.manifest                   assemblyIdentity version
+README.md                      current version
+HANDOVER.md                    current version
+VERSION_CHECK.md               expected version
 ```
 
-Historical version numbers in `CHANGELOG.md` are intentional and must not be mass-replaced.
-
-## 2. Technology and runtime
-
-- C# / .NET 8 WinForms
-- target framework: `net8.0-windows`
-- SQLite live storage through `Microsoft.Data.Sqlite`
-- ETW file I/O monitoring through `Microsoft.Diagnostics.Tracing.TraceEvent`
-- XLSX creation through ClosedXML
-- administrator elevation required by `app.manifest` for kernel ETW tracing
-
-DeskPulse is a tray application, not a Windows service. Program and user/session monitoring applies to the current interactive session while DeskPulse is running.
+Historical versions in `CHANGELOG.md` must not be rewritten.
 
 ## 3. Current source layout
 
 ```text
 Program.cs
+AppIcon.cs
 DeskPulse.csproj
 app.manifest
 file-logger.ico
-.gitignore
-LICENSE
+Forms/
+  AboutForm.*
+  AddLogRuleForm.cs
+  ExportDateRangeForm.*
+  InstalledAppSelectionForm.*
+  LogEntryDetailsForm.*
+  RuleCleanupProgressForm.*
+  SettingsForm.*
+  ViewLogForm.*
 README.md
 CHANGELOG.md
 HANDOVER.md
 ROADMAP.md
 VERSION_CHECK.md
-Forms/
-  AboutForm.cs
-  AboutForm.Designer.cs
-  AboutForm.resx
-  ExportDateRangeForm.cs
-  ExportDateRangeForm.Designer.cs
-  ExportDateRangeForm.resx
-  InstalledAppSelectionForm.cs
-  InstalledAppSelectionForm.Designer.cs
-  InstalledAppSelectionForm.resx
-  SettingsForm.cs
-  SettingsForm.Designer.cs
-  SettingsForm.resx
-  ViewLogForm.cs
-  ViewLogForm.Designer.cs
-  ViewLogForm.resx
-  LogEntryDetailsForm.cs
-  LogEntryDetailsForm.Designer.cs
-  LogEntryDetailsForm.resx
-  AddLogRuleForm.cs
-  RuleCleanupProgressForm.cs
-  RuleCleanupProgressForm.Designer.cs
-  RuleCleanupProgressForm.resx
-  RegisteredFileTypes.cs
+LICENSE
+.gitignore
 ```
 
-Obsolete files that must be deleted from an older checkout:
+Obsolete standalone Maintenance forms must not be reintroduced. Database housekeeping is a normal Settings tab.
 
-```text
-Forms\MaintenanceForm.cs
-Forms\MaintenanceProgressForm.cs
-Forms\MaintenanceProgressForm.Designer.cs
-Forms\MaintenanceProgressForm.resx
-```
-
-`DeskPulse.csproj` excludes these names defensively, but they should not be committed.
+All forms obtain their title-bar icon through `AppIcon.Apply(this)`. Log View sorting is performed in SQLite across the complete filtered result set; selecting a new sort header resets the active tab to page 1.
 
 ## 4. Tray behavior
-
-There is no right-click menu.
 
 Left-click menu:
 
@@ -96,94 +66,105 @@ About
 Exit
 ```
 
-Normal startup is quiet. Startup/monitoring failures may still display an error dialog.
+There is no right-click menu and no `-maintenance`, `-m`, `-debug`, or `-debug-skipped` mode.
 
-## 5. Settings
+Portable cleanup through `-uninstall` remains available.
 
-Top-level tabs:
+## 5. Settings structure
 
 ```text
 General
 Rules
+  File Activity
+  App Activity
+  User Activity
 Export Options
 Maintenance
 ```
 
 ### General
 
-- start DeskPulse when the user logs in
-- log program start and close activity
-- data/storage folder configuration
-- temporary-folder filtering
-
-Windows startup uses Task Scheduler and stores the exact path of the running executable.
+Contains application behavior and storage paths.
 
 ### Rules
 
-Sub-tabs, in order:
+All logging is strict rule-driven:
 
 ```text
-Folder Activity
-App Activity
-File Activity
-User Activity
+first matching Include → log
+first matching Exclude → suppress
+no match → suppress
 ```
-
-Rule behavior:
-
-- enabled rules are evaluated top-to-bottom
-- first matching rule wins
-- Include logs the matching activity
-- Exclude suppresses the matching activity
-- unmatched File, App, and User activity is not logged
-- Folder Activity rules filter File Activity by folder path
-- App Activity rules have explicit precedence for matching executable files
-- equivalent exact executable rules are deduplicated between File and App rules
-
-File rules support exact paths, filenames, extensions, and wildcard patterns. App rules support process names, executable names, full executable paths, and the installed-app selector. Folder rules support folder paths and subfolder scope. User rules are predefined event entries with Reset Defaults.
-
-File, Folder, and App rules can be exported/imported as JSON. Imported rules are written to the registry when Settings is saved.
-
-### Export Options
-
-Controls the standard database-to-XLSX worksheets and selected fields.
 
 ### Maintenance
 
-Contains one supported housekeeping action:
+Contains **Clean database with current rules...**. It saves the displayed rules, evaluates the full database history, deletes records that conflict with current rules, and compacts SQLite with `VACUUM` while showing progress.
+
+## 6. Unified File Activity model
+
+Version `0.1.3.2` removes the separate Folder Activity rules tab and the duplicate Folder Activity log-view tab.
+
+Folder scope is represented by File Activity path wildcards:
 
 ```text
-Clean database with current rules...
+C:\Projects\*             files directly in C:\Projects only
+C:\Projects\**\*          files directly in C:\Projects and all descendants
+C:\Projects\**\*.dwg      recursive DWG files
 ```
 
-This saves the currently displayed rules, evaluates all historical records, removes records that would no longer be logged, commits the changes, and runs SQLite `VACUUM`. The operation shows progress and a deletion summary.
+Wildcard semantics:
 
-This Maintenance tab is a normal Settings tab. There is no Maintenance command-line mode and no separate Maintenance form.
+- `*` does not cross `\`.
+- `?` matches one non-separator character.
+- `**` crosses folder boundaries.
+- `\**\` matches zero or more folder levels, so recursive patterns also match files directly in the selected root folder.
+- Matching is case-insensitive.
+- A complete `*.*` segment is normalized to `*` for Windows compatibility.
 
-## 6. Rule storage and migration
+The File Activity editor supports:
 
-Registry root:
+- manually entered filename or path patterns
+- exact-file selection with **Browse...**
+- folder selection with **Add Folder...**
+- Include and Exclude rows
+- On/off state
+- ordered first-match precedence
+- Move Up, Move Down, Remove, Duplicate, and Reset Defaults
+
+New entries are appended at the bottom as enabled Include rules.
+
+Explicit App Activity rules continue to take precedence for matching executable files. Equivalent exact executable rules are retained under App Activity rather than duplicated under File Activity.
+
+## 7. Registry schema
+
+Current schema:
+
+```text
+SettingsSchemaVersion = 5
+```
+
+Active registry layout:
 
 ```text
 HKCU\Software\DeskPulse
+├─ AppVersion
+├─ SettingsSchemaVersion
+├─ DatabaseFilePath
+├─ ExcelExportFilePath
+├─ General
+│  ├─ DataFolderPath
+│  ├─ IgnoreTempFolders
+│  ├─ StartWithWindows
+│  └─ LogProgramActivity
+├─ Rules
+│  ├─ FileActivity
+│  ├─ AppActivity
+│  └─ UserActivity
+└─ Export
+   └─ Sheets
 ```
 
-Current settings schema:
-
-```text
-SettingsSchemaVersion = 4
-```
-
-Active rule lists are stored as JSON under:
-
-```text
-HKCU\Software\DeskPulse\Rules\FileActivity
-HKCU\Software\DeskPulse\Rules\FolderActivity
-HKCU\Software\DeskPulse\Rules\UserActivity
-HKCU\Software\DeskPulse\Rules\AppActivity
-```
-
-Rule records preserve:
+Rule values are JSON arrays of objects containing:
 
 ```text
 Enabled
@@ -193,37 +174,111 @@ Value
 IncludeSubfolders
 ```
 
-Legacy root values are read for migration compatibility. Once schema 4 is active, intentional empty lists are preserved rather than silently repopulated.
+`IncludeSubfolders` remains in the serialized compatibility model but is always false for active File Activity wildcard rules.
 
-## 7. Logging behavior
+### Schema-5 migration
+
+Legacy Folder Activity rules are read and converted once:
+
+```text
+folder rule, Sub off → <folder>\*
+folder rule, Sub on  → <folder>\**\*
+```
+
+Migration preserves:
+
+- enabled state
+- Include/Exclude action
+- source rule order
+
+Converted folder rules are placed before broad existing file patterns so their more-specific path decisions retain precedence. Duplicate converted rules are removed. The obsolete active `Rules\FolderActivity` registry value is deleted when settings are saved.
+
+Legacy import packages with schema 1 and a `FolderActivity` list remain supported. Imported folder rules are converted into File Activity patterns. New exports use schema 2 and contain only File Activity and App Activity lists; User Activity remains intentionally excluded from rule-package import/export.
+
+## 8. Monitoring behavior
 
 ### File Activity
 
-ETW open/write/close events are considered only when an enabled File Include rule matches, unless an explicit App rule determines the result for a matching executable. Folder rules then apply path-based filtering.
+ETW file open/write/close events are logged only when File Activity rules allow them, except where an explicit App Activity rule takes precedence for an executable.
+
+DeskPulse excludes its own database and XLSX export file. Temporary folders are also excluded when **Ignore temporary folders** is enabled.
 
 ### App Activity
 
-Program start/stop events are logged only when an enabled App Include rule matches. Default rules exclude known noisy background processes and include DeskPulse itself plus a final catch-all Include rule unless the user removes it.
+Program start/close events are scanned in the current interactive Windows session. App rules are strict first-match rules. A final Include `*` rule may be used to preserve broad monitoring.
 
-DeskPulse start/stop appears in App Activity when program activity logging is enabled and the active App rules permit it.
+DeskPulse’s own application start/stop is logged under App Activity by default.
 
 ### User Activity
 
-User/session events are logged only when enabled User Include rules match. Default events include DeskPulse lifecycle, lock/unlock, logon/logoff, console connect/disconnect, and remote connect/disconnect where available.
+User/session events use the predefined enabled Include list for lock, unlock, logon, logoff, console, and remote-session events. DeskPulse application start/stop is not recorded in User Activity.
 
-### Folder Activity
+## 9. View Log
 
-Folder Activity is not a separate database event stream. It is a folder-oriented view/filter of File Activity records.
+View Log contains three tabs:
 
-## 8. Database
+```text
+File Activity
+App Activity
+User Activity
+```
 
-Default database:
+The former Folder Activity view was removed because it duplicated File Activity records rather than representing a separate database stream.
+
+Current behavior:
+
+- selected date range
+- newest records first
+- 500 records per page
+- `<< First Page`
+- `< Previous Page`
+- `Next Page >`
+- `Last Page >>`
+- ID column displayed
+- one selected row at a time
+- **More...** for all stored fields
+- **Create Rule** from the selected row
+- **Export** for the active tab and current 500-row page only
+
+## 10. Rule creation and cleanup
+
+Creating an Exclude rule from View Log can optionally remove conflicting historical records.
+
+Multiple rows can be selected in View Log and permanently deleted with the **Delete** button. **Create Rule** is available only when exactly one row is selected.
+
+Workflow:
+
+1. Count records affected by the proposed rule.
+2. If the count is greater than zero, show the exact number and request confirmation.
+3. Add the rule.
+4. Delete records in batches with determinate progress.
+5. Commit the transaction.
+6. Compact SQLite.
+7. Reload rules and refresh View Log.
+
+## 11. Rule import/export
+
+Settings includes:
+
+```text
+Import Rules...
+Export Rules...
+```
+
+New exports include File Activity and App Activity rule lists. Old schema-1 exports containing Folder Activity remain importable through conversion.
+
+Imported lists are displayed immediately and written to the registry only when **Save** is pressed.
+
+## 12. Database
+
+Default files:
 
 ```text
 %USERPROFILE%\Documents\DeskPulse\DeskPulse.db
+%USERPROFILE%\Documents\DeskPulse\DeskPulse-export.xlsx
 ```
 
-Primary tables:
+Main tables:
 
 ```text
 ActivityEvents
@@ -231,75 +286,11 @@ ProgramEvents
 UserEvents
 ```
 
-SQLite uses WAL mode. Cleanup operations may delete records in batches and compact the database with `VACUUM`.
+Folder Activity is not and has never been a separate table.
 
-## 9. View Log
+## 13. Local verification
 
-Tabs:
-
-```text
-Folder Activity
-App Activity
-File Activity
-User Activity
-```
-
-Current behavior:
-
-- inclusive From/To date range
-- newest records first
-- database ID displayed as the first column
-- 500 rows per page
-- independent page position per tab
-- `<< First Page`, `< Previous Page`, `Next Page >`, `Last Page >>`
-- Export button to the right of pager controls
-- export includes only the active tab and current 500-row page
-- single-row selection
-- `More...` opens all stored fields for the record
-- `Create Rule` is enabled when one row is selected
-
-Create Rule can optionally remove historical records conflicting with a new Exclude rule. DeskPulse counts affected records, requests confirmation when deletion is required, shows progress, deletes matching history, compacts the database, reloads settings, and refreshes the viewer.
-
-## 10. Debug and diagnostics
-
-DeskPulse has no debug logging feature.
-
-Removed/unsupported switches:
-
-```text
--debug
--debug-skipped
--maintenance
--m
-```
-
-DeskPulse does not create `DeskPulse-diagnostics.log`.
-
-A last-resort startup failure log may still be written to:
-
-```text
-%TEMP%\DeskPulse-startup.log
-```
-
-## 11. Supported command-line mode
-
-Portable cleanup/uninstall:
-
-```powershell
-DeskPulse.exe -uninstall
-```
-
-Accepted prefixes are `-`, `--`, and `/`. This removes current-user registry settings and generated files while preserving the SQLite database.
-
-## 12. Local build verification
-
-Normal iteration:
-
-```powershell
-dotnet build
-```
-
-Fresh verification:
+Run:
 
 ```powershell
 dotnet clean
@@ -307,102 +298,76 @@ dotnet restore
 dotnet build
 ```
 
-Expected result:
-
-```text
-Build succeeded.
-0 Warning(s)
-0 Error(s)
-```
-
-Runtime smoke test:
+Then test:
 
 ```powershell
 dotnet run
 ```
 
-Do not use `-m`; that switch no longer exists.
+Required functional checks:
 
-Verify:
+- Settings opens with only File, App, and User rule tabs.
+- Existing registry Folder Activity rules migrate into File Activity patterns.
+- `C:\Test\*` matches files directly in `C:\Test` but not deeper files.
+- `C:\Test\**\*` matches direct and nested files.
+- File and folder-path Include/Exclude ordering follows first-match behavior.
+- App precedence for `.exe` files remains intact.
+- View Log contains three tabs and paging works.
+- Current-page export works.
+- Maintenance cleanup applies the unified rules and compacts the database.
+- Rule JSON export/import works, including an older schema-1 package.
 
-- tray icon appears
-- left-click menu matches the current menu
-- no right-click menu appears
-- Settings opens all four top-level tabs
-- Rules opens Folder, App, File, and User tabs in that order
-- View Log loads and pages through 500-row pages
-- current-page export creates and opens XLSX
-- Create Rule can add a rule and optionally clean conflicting history
-- Maintenance housekeeping completes with progress
-- About reports `0.1.3.1`
-- Exit records DeskPulse shutdown where rules permit
-
-## 13. Publish a standalone executable
-
-From the repository root:
+## 14. Publish
 
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output ".\publish\v0.1.3.1"
+dotnet publish -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true `
+  --output ".\publish\v0.1.3.2"
 ```
 
 Expected executable:
 
 ```text
-publish\v0.1.3.1\DeskPulse.exe
+publish\v0.1.3.2\DeskPulse.exe
 ```
 
-Test the published executable from the final deployment path. If Start with Windows is enabled, disable/re-enable it from the final folder so Task Scheduler stores the correct path.
+## 15. GitHub handover
 
-## 14. GitHub synchronisation checklist
+Before committing:
 
-Before commit:
+- ensure `bin`, `obj`, `.vs`, and publish output are not committed
+- run a clean Release build
+- test registry migration on a copy or export of existing rules
+- update `CHANGELOG.md` only with confirmed behavior
+- tag only after local runtime verification
 
-```powershell
-dotnet clean
-dotnet restore
-dotnet build
-```
 
-Confirm that Git does not include:
+## Cancellable database housekeeping
 
-```text
-bin/
-obj/
-publish/
-.vs/
-*.db
-*.db-wal
-*.db-shm
-*.xlsx
-*.log
-*.exe
-*.zip
-```
+The Maintenance tab housekeeping progress window has a **Cancel** button. Cancellation is honoured during the full-history scan and between transactional deletion batches. If cancelled before commit, pending deletions are rolled back. SQLite compaction (`VACUUM`) begins only after the deletion transaction commits and cannot be safely interrupted.
 
-Recommended commit message:
+## Log View sort routing correction
+`ViewLogForm.GetDatabaseSortColumn` identifies File, App, and User grids by their control instances rather than the optional runtime `Name` property. This is required to keep each tab's SQL `ORDER BY` fields matched to its database table.
 
-```text
-Release DeskPulse 0.1.3.1 verified baseline
-```
+## Current 0.1.3.2 iteration - Event Type removal
+- `Event Type` is no longer shown in any View Log tab.
+- `EventType` is no longer stored in `UserEvents` or `ProgramEvents`.
+- Existing databases are migrated automatically by dropping the old EventType indexes and columns.
+- Event descriptions, user/session logging, application logging, file inferred-action data, rule handling, and all remaining fields are retained.
 
-Recommended tag after final smoke testing:
+## User lifecycle logging update
+User Activity now records DeskPulse startup/shutdown, Windows startup, Windows logon/logoff, and lock/unlock activity. DeskPulse startup is displayed as `DeskPulse started (possible login)` because application startup may coincide with login but is not itself definitive proof of a new Windows logon. Windows startup is deduplicated per boot using the approximate boot time stored in HKCU.
 
-```text
-v0.1.3.1
-```
+## Report date-range defaults
+- `DatabaseDateRange.GetFirstRecordedDate(...)` finds the earliest `CreatedAt` value across file, app and user activity.
+- View Log and the activity export dialog default from that date through today.
+- Both report interfaces include a `Today Only` shortcut that changes the start date to today.
 
-Suggested release title:
+## Optional rule creation during log deletion
+- Deleting selected records from any View Log tab now displays a dedicated confirmation dialog.
+- `Also create exclusion rule(s)` is optional and unchecked by default.
+- When enabled, unique exclusion rules are saved only after the selected database records are deleted successfully.
 
-```text
-DeskPulse 0.1.3.1
-```
-
-## 15. Next development cycle
-
-After this baseline is committed, tagged, and published, the next intentional development iteration should change all active version references to:
-
-```text
-0.1.4.0
-```
-
-Do not alter historical changelog headings when changing the active version.
+### Current iteration: precise View Log page range
+The View Log status line reports the exact range shown on the active page and the total number of matching records, e.g. `Showing 1,001 to 1,500 of 8,999 records.` It updates across all activity tabs after page navigation, sorting, filtering, refreshes and tab changes.

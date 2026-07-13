@@ -1,47 +1,40 @@
 # DeskPulse Roadmap
 
-## Current verified baseline
+## Current development baseline
 
 ```text
-0.1.3.1
+0.1.3.2
 ```
 
-This is the source baseline to build, publish, tag, and synchronise with GitHub before further changes.
+Version `0.1.3.2` unifies File and Folder filtering into one File Activity wildcard model.
 
-Current capabilities include:
+Completed in this version:
 
-- ETW file activity logging controlled by ordered rules
-- app start/stop logging controlled by ordered rules
-- user/session activity logging controlled by ordered rules
-- JSON registry schema 4 for File, Folder, User, and App rule lists
-- JSON import/export for File, Folder, and App rules
-- View Log with four activity views, record IDs, 500-row paging, and current-page export
-- full-record details and rule creation from selected log rows
-- optional historical cleanup and database compaction
-- normal Settings Maintenance tab for full-history rule housekeeping
-- left-click-only tray menu
-- no debug logging and no Maintenance command-line mode
+- removed the separate Folder Activity rules tab
+- removed the duplicate Folder Activity View Log tab
+- added path-aware `*`, `?`, and recursive `**` matching
+- added **Add Folder...** to create one-level or recursive patterns
+- migrated legacy folder rules to File Activity JSON
+- advanced registry schema to version 5
+- retained schema-1 rule-package import compatibility
+- updated database housekeeping and documentation
 
-## Next version: 0.1.4.0
+## Verification before promotion
 
-Candidate priorities after the `0.1.3.1` baseline is released:
+- compile and runtime-test locally
+- test migration using a copy of real registry values
+- verify direct-folder and recursive wildcard boundaries
+- confirm App Activity executable precedence
+- test View Log rule creation and cleanup
+- test current-page XLSX export
+- test full database cleanup and compaction
 
-- performance profiling of Settings, View Log, and installed-app loading
-- asynchronous loading with visible progress where useful
-- review whether Folder Activity should remain a separate rules/view concept
-- improve database query/index performance for large histories
-- add cancellation to long-running export and cleanup operations
-- add backup/restore safeguards before destructive housekeeping
-- improve current-page export naming and destination selection
-- add automated migration and rule-engine tests
-- add installer/deployment packaging after portable publishing is stable
+## Candidate next work
 
-## Later ideas
-
-- app session duration summaries
-- richer program metadata
-- optional user-selected log retention policy
-- database backup scheduling
-- installer with upgrade/uninstall support
-
-Completed work belongs in `CHANGELOG.md`; detailed defects and test evidence should be tracked as GitHub Issues.
+- move common glob matching into one reusable class used by monitoring, cleanup, and View Log rule previews
+- add an optional rule-test panel showing which path a pattern matches
+- add validation and visual warnings for malformed path patterns
+- add database backup before destructive housekeeping
+- improve asynchronous loading of Settings and View Log
+- add cancellation to long database operations
+- review installer and signed-release packaging

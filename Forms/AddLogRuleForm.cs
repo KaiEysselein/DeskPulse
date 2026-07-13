@@ -11,26 +11,26 @@ public sealed class AddLogRuleForm : Form
     private readonly RadioButton _include = new() { Text = "Include", AutoSize = true };
     private readonly RadioButton _exclude = new() { Text = "Exclude", Checked = true, AutoSize = true };
     private readonly TextBox _value = new() { Dock = DockStyle.Fill };
-    private readonly CheckBox _subfolders = new() { Text = "Include subfolders", Checked = true, AutoSize = true };
     private readonly CheckBox _cleanup = new() { Text = "Clean up old data, removing records in conflict with this rule", AutoSize = true };
 
     public AddLogRuleForm(LogRuleCategory category, string suggestedValue)
     {
         Category = category;
+        AppIcon.Apply(this);
         Text = "Add rule to rules list";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new System.Drawing.Size(620, category == LogRuleCategory.Folder ? 235 : 205);
+        ClientSize = new System.Drawing.Size(620, 205);
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = category == LogRuleCategory.Folder ? 5 : 4
+            RowCount = 4
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -40,7 +40,6 @@ public sealed class AddLogRuleForm : Form
             AutoSize = true,
             Text = category switch
             {
-                LogRuleCategory.Folder => "Folder / pattern:",
                 LogRuleCategory.App => "App / pattern:",
                 LogRuleCategory.File => "File / pattern:",
                 _ => "Event / text:"
@@ -60,13 +59,6 @@ public sealed class AddLogRuleForm : Form
         layout.Controls.Add(_value, 1, 1);
 
         var nextRow = 2;
-        if (category == LogRuleCategory.Folder)
-        {
-            layout.Controls.Add(new Label { Text = "Scope:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, nextRow);
-            layout.Controls.Add(_subfolders, 1, nextRow);
-            nextRow++;
-        }
-
         layout.Controls.Add(new Label { Text = "Existing data:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, nextRow);
         layout.Controls.Add(_cleanup, 1, nextRow);
         nextRow++;
@@ -98,13 +90,11 @@ public sealed class AddLogRuleForm : Form
     public bool RuleEnabled => _enabled.Checked;
     public bool IsInclude => _include.Checked;
     public string RuleValue => _value.Text.Trim();
-    public bool IncludeSubfolders => Category == LogRuleCategory.Folder && _subfolders.Checked;
     public bool CleanUpOldData => _cleanup.Checked;
 }
 
 public enum LogRuleCategory
 {
-    Folder,
     App,
     File,
     User

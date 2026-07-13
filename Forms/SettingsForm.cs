@@ -22,7 +22,6 @@ public partial class SettingsForm : Form
     private readonly Dictionary<string, CheckedListBox> _exportFieldListsBySheetId = new(StringComparer.OrdinalIgnoreCase);
     private DataGridView _loggingRulesGridView = null!; // legacy designer control, no longer shown
     private ActivityRuleEditor _fileActivityRuleEditor = null!;
-    private ActivityRuleEditor _folderActivityRuleEditor = null!;
     private ActivityRuleEditor _userActivityRuleEditor = null!;
     private ActivityRuleEditor _appActivityRuleEditor = null!;
     private TextBox _manualLoggingRuleTextBox = null!;
@@ -43,6 +42,7 @@ public partial class SettingsForm : Form
     public SettingsForm()
     {
         InitializeComponent();
+        AppIcon.Apply(this);
         ConfigureActivityRuleTabs();
         ConfigureRuleImportExportButtons();
         ConfigureMaintenanceTab();
@@ -64,24 +64,20 @@ public partial class SettingsForm : Form
     {
         _rulesSubTabControl.TabPages.Clear();
 
-        var folderPage = new TabPage("Folder Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
-        var appPage = new TabPage("App Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
         var filePage = new TabPage("File Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
+        var appPage = new TabPage("App Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
         var userPage = new TabPage("User Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
 
         _fileActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.File) { Dock = DockStyle.Fill };
-        _folderActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.Folder) { Dock = DockStyle.Fill };
-        _userActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.User) { Dock = DockStyle.Fill };
         _appActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.App) { Dock = DockStyle.Fill };
+        _userActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.User) { Dock = DockStyle.Fill };
 
         filePage.Controls.Add(_fileActivityRuleEditor);
-        folderPage.Controls.Add(_folderActivityRuleEditor);
-        userPage.Controls.Add(_userActivityRuleEditor);
         appPage.Controls.Add(_appActivityRuleEditor);
+        userPage.Controls.Add(_userActivityRuleEditor);
 
-        _rulesSubTabControl.TabPages.Add(folderPage);
-        _rulesSubTabControl.TabPages.Add(appPage);
         _rulesSubTabControl.TabPages.Add(filePage);
+        _rulesSubTabControl.TabPages.Add(appPage);
         _rulesSubTabControl.TabPages.Add(userPage);
     }
 
@@ -140,7 +136,7 @@ public partial class SettingsForm : Form
             Top = 28,
             Width = 785,
             Height = 54,
-            Text = "Apply the current File, Folder, App, and User Activity rules to the entire database history. " +
+            Text = "Apply the current File, App, and User Activity rules to the entire database history. " +
                    "Records that would not be logged under the current rules are permanently removed, after which the database is compacted."
         };
 
@@ -164,7 +160,7 @@ public partial class SettingsForm : Form
     {
         var confirm = MessageBox.Show(
             "This will permanently remove every historical DeskPulse record that conflicts with the rules currently displayed in Settings.\n\n" +
-            "The cleanup applies to File, Folder, App, and User Activity rules, and then compacts the SQLite database.\n\n" +
+            "The cleanup applies to File, App, and User Activity rules, and then compacts the SQLite database.\n\n" +
             "The current rules will also be saved before cleanup begins. Deleted records cannot be recovered unless you have a database backup.\n\nContinue?",
             "Clean Database With Current Rules",
             MessageBoxButtons.YesNo,
@@ -182,11 +178,11 @@ public partial class SettingsForm : Form
         using var progressForm = new RuleCleanupProgressForm(
             "DeskPulse Database Housekeeping",
             "Applying current rules to database history",
-            progress =>
+            (progress, cancellationToken) =>
             {
                 using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
                 database.Initialize();
-                return database.CleanDatabaseWithCurrentRules(settings, progress);
+                return database.CleanDatabaseWithCurrentRules(settings, progress, cancellationToken);
             });
 
         if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
@@ -223,11 +219,9 @@ public partial class SettingsForm : Form
         var existingSettings = AppSettings.Load();
         var appActivityRuleSettings = _appActivityRuleEditor.GetRuleSettings();
         var fileActivityRuleSettings = RemoveFileRulesDuplicatedByAppRules(_fileActivityRuleEditor.GetRuleSettings(), appActivityRuleSettings);
-        var folderActivityRuleSettings = _folderActivityRuleEditor.GetRuleSettings();
         var userActivityRuleSettings = _userActivityRuleEditor.GetRuleSettings();
 
         var fileActivityRules = fileActivityRuleSettings.Where(rule => rule.Enabled).Select(rule => rule.ToRuleText()).ToList();
-        var folderActivityRules = folderActivityRuleSettings.Where(rule => rule.Enabled).Select(rule => rule.ToRuleText()).ToList();
         var appActivityRules = appActivityRuleSettings.Where(rule => rule.Enabled).Select(rule => rule.ToRuleText()).ToList();
 
         return new AppSettings
@@ -236,12 +230,12 @@ public partial class SettingsForm : Form
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = _startWithWindowsCheckBox.Checked,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
-            LoggingRules = fileActivityRules.Concat(folderActivityRules).Concat(appActivityRules).ToList(),
+            LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
             FileActivityRuleSettings = fileActivityRuleSettings,
-            FolderActivityRuleSettings = folderActivityRuleSettings,
+            FolderActivityRuleSettings = new List<ActivityRuleSetting>(),
             UserActivityRuleSettings = userActivityRuleSettings,
             AppActivityRuleSettings = appActivityRuleSettings,
-            ExcludedFolders = ExtractFolderRules(folderActivityRules),
+            ExcludedFolders = new List<string>(),
             ExcludedProcesses = new HashSet<string>(ExtractProcessRules(appActivityRules), StringComparer.OrdinalIgnoreCase),
             ExtensionsToMonitor = existingSettings.ExtensionsToMonitor,
             ExportSheets = exportSheets
@@ -266,16 +260,15 @@ public partial class SettingsForm : Form
         {
             var package = new RuleSettingsExportPackage
             {
-                SchemaVersion = 1,
+                SchemaVersion = 2,
                 DeskPulseVersion = AppInfo.Version,
                 ExportedAt = DateTime.Now,
                 FileActivity = _fileActivityRuleEditor.GetRuleSettings(),
-                FolderActivity = _folderActivityRuleEditor.GetRuleSettings(),
                 AppActivity = _appActivityRuleEditor.GetRuleSettings()
             };
 
             File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true }));
-            MessageBox.Show("The File, Folder, and App Activity rules were exported successfully.", "Export Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("The File and App Activity rules were exported successfully.", "Export Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
@@ -302,7 +295,7 @@ public partial class SettingsForm : Form
                 File.ReadAllText(dialog.FileName),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            if (package == null || package.SchemaVersion != 1)
+            if (package == null || (package.SchemaVersion != 1 && package.SchemaVersion != 2))
                 throw new InvalidDataException("The selected file is not a supported DeskPulse rules export.");
 
             package.FileActivity ??= new List<ActivityRuleSetting>();
@@ -317,15 +310,15 @@ public partial class SettingsForm : Form
                 throw new InvalidDataException("The file contains rules assigned to the wrong activity category.");
 
             var confirm = MessageBox.Show(
-                "Importing will replace the current File, Folder, and App Activity rule lists shown in Settings.\n\n" +
+                "Importing will replace the current File and App Activity rule lists shown in Settings.\n\n" +
                 "User Activity rules are not included and will remain unchanged.\n\nContinue?",
                 "Import Rules", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
             if (confirm != DialogResult.Yes)
                 return;
 
-            _fileActivityRuleEditor.LoadRuleSettings(package.FileActivity);
-            _folderActivityRuleEditor.LoadRuleSettings(package.FolderActivity);
+            var importedFileRules = AppSettings.MergeFolderRulesIntoFileRules(package.FileActivity, package.FolderActivity);
+            _fileActivityRuleEditor.LoadRuleSettings(importedFileRules);
             _appActivityRuleEditor.LoadRuleSettings(package.AppActivity);
 
             MessageBox.Show("The rules were imported into Settings. Click Save to apply them and write them to the registry.", "Import Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -414,10 +407,10 @@ public partial class SettingsForm : Form
     private void LoadRuleSettings(AppSettings settings)
     {
         var appRuleSettings = settings.AppActivityRuleSettings;
-        var fileRuleSettings = RemoveFileRulesDuplicatedByAppRules(settings.FileActivityRuleSettings, appRuleSettings);
+        var mergedFileRules = AppSettings.MergeFolderRulesIntoFileRules(settings.FileActivityRuleSettings, settings.FolderActivityRuleSettings);
+        var fileRuleSettings = RemoveFileRulesDuplicatedByAppRules(mergedFileRules, appRuleSettings);
 
         _fileActivityRuleEditor.LoadRuleSettings(fileRuleSettings);
-        _folderActivityRuleEditor.LoadRuleSettings(settings.FolderActivityRuleSettings);
         _userActivityRuleEditor.LoadRuleSettings(settings.UserActivityRuleSettings);
         _appActivityRuleEditor.LoadRuleSettings(appRuleSettings);
 
@@ -686,7 +679,7 @@ public partial class SettingsForm : Form
             36);
 
         var behaviourLabel = CreateHintLabel(
-            "DeskPulse keeps running from the tray icon. Left-click opens View Log, Settings, About, and Exit.",
+            "DeskPulse keeps running from the tray icon. Left-click opens Export/Settings; right-click opens About/Exit.",
             18,
             106,
             760,
@@ -1460,7 +1453,6 @@ public partial class SettingsForm : Form
     private void RemoveExcludedPastRecords(AppSettings settings)
     {
         var loggingRules = settings.FileActivityRules
-            .Concat(settings.FolderActivityRules)
             .Concat(settings.AppActivityRules)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -2283,11 +2275,9 @@ public partial class SettingsForm : Form
         var fileActivityRuleSettings = RemoveFileRulesDuplicatedByAppRules(
             _fileActivityRuleEditor.GetRuleSettings(),
             appActivityRuleSettings);
-        var folderActivityRuleSettings = _folderActivityRuleEditor.GetRuleSettings();
         var userActivityRuleSettings = _userActivityRuleEditor.GetRuleSettings();
 
         var fileActivityRules = fileActivityRuleSettings.Where(rule => rule.Enabled).Select(rule => rule.ToRuleText()).ToList();
-        var folderActivityRules = folderActivityRuleSettings.Where(rule => rule.Enabled).Select(rule => rule.ToRuleText()).ToList();
         var appActivityRules = appActivityRuleSettings.Where(rule => rule.Enabled).Select(rule => rule.ToRuleText()).ToList();
 
         var settings = new AppSettings
@@ -2296,12 +2286,12 @@ public partial class SettingsForm : Form
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = startWithWindows,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
-            LoggingRules = fileActivityRules.Concat(folderActivityRules).Concat(appActivityRules).ToList(),
+            LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
             FileActivityRuleSettings = fileActivityRuleSettings,
-            FolderActivityRuleSettings = folderActivityRuleSettings,
+            FolderActivityRuleSettings = new List<ActivityRuleSetting>(),
             UserActivityRuleSettings = userActivityRuleSettings,
             AppActivityRuleSettings = appActivityRuleSettings,
-            ExcludedFolders = ExtractFolderRules(folderActivityRules),
+            ExcludedFolders = new List<string>(),
             ExcludedProcesses = new HashSet<string>(ExtractProcessRules(appActivityRules), StringComparer.OrdinalIgnoreCase),
             ExtensionsToMonitor = existingSettings.ExtensionsToMonitor,
             ExportSheets = exportSheets
@@ -2371,14 +2361,13 @@ public partial class SettingsForm : Form
 internal enum ActivityRuleCategory
 {
     File,
-    Folder,
     User,
     App
 }
 
 public sealed class RuleSettingsExportPackage
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public string DeskPulseVersion { get; set; } = "";
     public DateTime ExportedAt { get; set; }
     public List<ActivityRuleSetting>? FileActivity { get; set; }
@@ -2406,8 +2395,7 @@ internal sealed class ActivityRuleEditor : UserControl
             Height = _category == ActivityRuleCategory.File ? 34 : 38,
             Text = _category switch
             {
-                ActivityRuleCategory.File => "Add exact files, file names, extensions, or wildcard patterns such as *.exe and Report*.xlsx.",
-                ActivityRuleCategory.Folder => "Folder-path rules applied to File Activity. Rules are checked from top to bottom; the first match wins.",
+                ActivityRuleCategory.File => "Add file, extension, and folder-path patterns. Use \\* for one folder or \\**\\* for that folder and all subfolders.",
                 ActivityRuleCategory.User => "Select which predefined user/session events DeskPulse may log, such as lock, unlock, logon and logoff.",
                 _ => "Rules for application start and close activity. Rules are checked from top to bottom; the first match wins."
             },
@@ -2422,26 +2410,25 @@ internal sealed class ActivityRuleEditor : UserControl
             Text = _category switch
             {
                 ActivityRuleCategory.File => "File / pattern",
-                ActivityRuleCategory.Folder => "File / Pattern",
                 ActivityRuleCategory.User => "Event / text",
                 ActivityRuleCategory.App => "App / pattern",
                 _ => "Value"
             },
             Left = 0,
             Top = 9,
-            Width = _category is ActivityRuleCategory.File or ActivityRuleCategory.Folder or ActivityRuleCategory.App ? 92 : 78
+            Width = _category is ActivityRuleCategory.File or ActivityRuleCategory.App ? 92 : 78
         };
 
-        if (_category is ActivityRuleCategory.File or ActivityRuleCategory.Folder or ActivityRuleCategory.App)
+        if (_category is ActivityRuleCategory.File or ActivityRuleCategory.App)
         {
             _valueText.Left = 98;
             _valueText.Top = 5;
-            _valueText.Width = _category == ActivityRuleCategory.App ? 335 : 470;
+            _valueText.Width = _category == ActivityRuleCategory.App ? 335 : 390;
 
             var browse = new Button
             {
                 Text = "Browse...",
-                Left = _category == ActivityRuleCategory.App ? 440 : 575,
+                Left = _category == ActivityRuleCategory.App ? 440 : 495,
                 Top = 4,
                 Width = 82,
                 Height = 29,
@@ -2449,9 +2436,7 @@ internal sealed class ActivityRuleEditor : UserControl
             };
             browse.Click += (_, _) =>
             {
-                if (_category == ActivityRuleCategory.Folder)
-                    BrowseForFolder();
-                else if (_category == ActivityRuleCategory.App)
+                if (_category == ActivityRuleCategory.App)
                     BrowseForApplication();
                 else
                     BrowseForExactFile();
@@ -2460,7 +2445,7 @@ internal sealed class ActivityRuleEditor : UserControl
             var add = new Button
             {
                 Text = "Add",
-                Left = _category == ActivityRuleCategory.App ? 700 : 672,
+                Left = _category == ActivityRuleCategory.App ? 700 : 688,
                 Top = 4,
                 Width = _category == ActivityRuleCategory.App ? 70 : 98,
                 Height = 29,
@@ -2469,6 +2454,21 @@ internal sealed class ActivityRuleEditor : UserControl
             add.Click += (_, _) => AddRule();
 
             addPanel!.Controls.AddRange(new Control[] { valueLabel, _valueText, browse });
+
+            if (_category == ActivityRuleCategory.File)
+            {
+                var addFolder = new Button
+                {
+                    Text = "Add Folder...",
+                    Left = 583,
+                    Top = 4,
+                    Width = 98,
+                    Height = 29,
+                    FlatStyle = FlatStyle.System
+                };
+                addFolder.Click += (_, _) => AddFolderPattern();
+                addPanel.Controls.Add(addFolder);
+            }
 
             if (_category == ActivityRuleCategory.App)
             {
@@ -2510,23 +2510,6 @@ internal sealed class ActivityRuleEditor : UserControl
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 300
             });
-            _grid.CellContentClick += (_, e) => { if (e.RowIndex >= 0) _grid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-            _grid.CellValueChanged += (_, e) =>
-            {
-                if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-                var row = _grid.Rows[e.RowIndex];
-                var name = _grid.Columns[e.ColumnIndex].Name;
-                if (name == "Exclude" && Checked(row, "Exclude")) row.Cells["Include"].Value = false;
-                if (name == "Include" && Checked(row, "Include")) row.Cells["Exclude"].Value = false;
-                if (!Checked(row, "Exclude") && !Checked(row, "Include")) row.Cells["Include"].Value = true;
-            };
-        }
-        else if (_category == ActivityRuleCategory.Folder)
-        {
-            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Exclude", HeaderText = "Exclude", Width = 58 });
-            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Include", HeaderText = "Include", Width = 58 });
-            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Subfolders", HeaderText = "Sub", Width = 42 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", HeaderText = "Folder / pattern", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 300 });
             _grid.CellContentClick += (_, e) => { if (e.RowIndex >= 0) _grid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             _grid.CellValueChanged += (_, e) =>
             {
@@ -2589,7 +2572,7 @@ internal sealed class ActivityRuleEditor : UserControl
             {
                 Dock = DockStyle.Bottom,
                 Height = 44,
-                Text = "Files / extensions not listed by an Include rule are not monitored. Explicit App Activity rules take precedence for matching executable files; duplicate exact .exe rules are kept only under App Activity.",
+                Text = "Files, extensions, and folder patterns not matched by an Include rule are not monitored. Use \\* for one folder and \\**\\* for all subfolders. Explicit App Activity rules take precedence for matching executable files.",
                 ForeColor = System.Drawing.SystemColors.GrayText,
                 TextAlign = System.Drawing.ContentAlignment.MiddleLeft
             });
@@ -2601,17 +2584,31 @@ internal sealed class ActivityRuleEditor : UserControl
         Controls.Add(intro);
     }
 
-    private void BrowseForFolder()
+    private void AddFolderPattern()
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Select a folder to add to Folder Activity rules",
+            Description = "Select a folder to add as a File Activity pattern",
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false
         };
 
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-            _valueText.Text = dialog.SelectedPath;
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var recursive = MessageBox.Show(
+            this,
+            "Include files in all subfolders too?\n\nYes: folder and all subfolders\nNo: selected folder only",
+            "Add Folder Pattern",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question);
+
+        if (recursive == DialogResult.Cancel)
+            return;
+
+        var folder = dialog.SelectedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var pattern = folder + (recursive == DialogResult.Yes ? @"\**\*" : @"\*");
+        _grid.Rows.Add(true, false, true, pattern);
     }
 
     private void BrowseForExactFile()
@@ -2689,11 +2686,6 @@ internal sealed class ActivityRuleEditor : UserControl
             // New File Activity rules are enabled Include rules and are appended at the bottom.
             _grid.Rows.Add(true, false, true, value);
         }
-        else if (_category == ActivityRuleCategory.Folder)
-        {
-            // New Folder Activity rules are enabled Include rules, include subfolders, and are appended at the bottom.
-            _grid.Rows.Add(true, false, true, true, value);
-        }
         else if (_category == ActivityRuleCategory.App)
         {
             // New App Activity rules are enabled Include rules and are appended at the bottom.
@@ -2719,7 +2711,6 @@ internal sealed class ActivityRuleEditor : UserControl
             var expectedType = _category switch
             {
                 ActivityRuleCategory.File => "file",
-                ActivityRuleCategory.Folder => "folder",
                 ActivityRuleCategory.User => "event",
                 _ => "process"
             };
@@ -2731,13 +2722,6 @@ internal sealed class ActivityRuleEditor : UserControl
             {
                 var fileIsInclude = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
                 _grid.Rows.Add(setting.Enabled, !fileIsInclude, fileIsInclude, setting.Value);
-                continue;
-            }
-
-            if (_category == ActivityRuleCategory.Folder)
-            {
-                var folderIsInclude = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
-                _grid.Rows.Add(setting.Enabled, !folderIsInclude, folderIsInclude, setting.IncludeSubfolders, setting.Value);
                 continue;
             }
 
@@ -2765,7 +2749,6 @@ internal sealed class ActivityRuleEditor : UserControl
             var type = _category switch
             {
                 ActivityRuleCategory.File => "file",
-                ActivityRuleCategory.Folder => "folder",
                 ActivityRuleCategory.User => "event",
                 _ => "process"
             };
@@ -2776,7 +2759,7 @@ internal sealed class ActivityRuleEditor : UserControl
                 RuleType = type,
                 Action = Checked(row, "Include") ? "Include" : "Exclude",
                 Value = value,
-                IncludeSubfolders = type == "folder" && Checked(row, "Subfolders")
+                IncludeSubfolders = false
             });
         }
         return result;
@@ -2812,7 +2795,6 @@ internal sealed class ActivityRuleEditor : UserControl
             LoadRules(_category switch
             {
                 ActivityRuleCategory.File => AppSettings.GetDefaultFileActivityRules(),
-                ActivityRuleCategory.Folder => AppSettings.GetDefaultFolderActivityRules(),
                 ActivityRuleCategory.App => AppSettings.GetDefaultAppActivityRules(),
                 ActivityRuleCategory.User => AppSettings.GetDefaultUserActivityRules(),
                 _ => Array.Empty<string>()

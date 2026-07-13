@@ -43,7 +43,7 @@ internal static class Program
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.1.3.1";
+    public const string Version = "0.1.3.2";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
 }
 
@@ -284,7 +284,8 @@ public sealed class FileIoMonitor : IDisposable
         _programActivityMonitor = new ProgramActivityMonitor(GetSettingsSnapshot, GetDatabaseSnapshot);
 
         WriteDeskPulseProgramEvent("ProgramStarted", "Program started", "DeskPulse application startup completed");
-        WriteUserEvent("AppStarted", "DeskPulse started", "Application startup completed");
+        WriteUserEvent("DeskPulseStarted", "DeskPulse started (possible login)", "DeskPulse application startup detected; this may coincide with a Windows user login");
+        WriteWindowsStartupEventOnce();
         SubscribeSessionEvents();
     }
 
@@ -320,7 +321,7 @@ public sealed class FileIoMonitor : IDisposable
                 WriteUserEvent("SessionLogon", "User logged on", "Windows session logon detected");
                 break;
             case SessionSwitchReason.SessionLogoff:
-                WriteUserEvent("SessionLogoff", "User logging off", "Windows session logoff detected");
+                WriteUserEvent("SessionLogoff", "User logged off", "Windows session logoff detected");
                 break;
             case SessionSwitchReason.ConsoleConnect:
                 WriteUserEvent("ConsoleConnect", "Console connected", "Console session connected");
@@ -334,6 +335,31 @@ public sealed class FileIoMonitor : IDisposable
             case SessionSwitchReason.RemoteDisconnect:
                 WriteUserEvent("RemoteDisconnect", "Remote session disconnected", "Remote session disconnected");
                 break;
+        }
+    }
+
+    private void WriteWindowsStartupEventOnce()
+    {
+        try
+        {
+            var bootTime = DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64);
+            var bootKey = bootTime.ToUniversalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+            using var key = Registry.CurrentUser.CreateSubKey(@"Software\DeskPulse");
+            var lastRecordedBoot = key?.GetValue("LastRecordedWindowsBootUtc") as string;
+            if (string.Equals(lastRecordedBoot, bootKey, StringComparison.Ordinal))
+                return;
+
+            WriteUserEvent(
+                "WindowsStarted",
+                "Windows started",
+                $"Windows boot detected at approximately {bootTime:yyyy-MM-dd HH:mm:ss}");
+
+            key?.SetValue("LastRecordedWindowsBootUtc", bootKey, RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            TryWriteStartupDiagnostic(ex);
         }
     }
 
@@ -351,7 +377,6 @@ public sealed class FileIoMonitor : IDisposable
             GetDatabaseSnapshot().InsertProgramEvent(new ProgramEventRecord
             {
                 EventTime = DateTime.Now,
-                EventType = eventType,
                 EventDescription = eventDescription,
                 ProgramName = AppInfo.AppName,
                 ProcessId = Environment.ProcessId,
@@ -380,7 +405,6 @@ public sealed class FileIoMonitor : IDisposable
             GetDatabaseSnapshot().InsertUserEvent(new UserEventRecord
             {
                 EventTime = DateTime.Now,
-                EventType = eventType,
                 EventDescription = eventDescription,
                 UserName = Environment.UserName,
                 MachineName = Environment.MachineName,
@@ -799,23 +823,13 @@ public sealed class FileIoMonitor : IDisposable
                 : null;
 
             if (appRuleDecision == false)
-            {
                 return false;
-            }
 
             var appIncludeOverridesFileRules = appRuleDecision == true;
 
             if (!appIncludeOverridesFileRules &&
                 !LoggingRulesEngine.IsFileActivityMonitored(fullPath, settings.FileActivityRules))
-            {
                 return false;
-            }
-
-            if (!appIncludeOverridesFileRules &&
-                LoggingRulesEngine.IsFileActivityExcluded(fullPath, processName, settings.FolderActivityRules))
-            {
-                return false;
-            }
 
             var dbPath = Path.GetFullPath(settings.DatabaseFilePath);
             var exportPath = Path.GetFullPath(settings.ExcelExportFilePath);
@@ -912,8 +926,8 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
+            WriteUserEvent("DeskPulseStopped", "DeskPulse stopped", "DeskPulse application shutdown started");
             WriteDeskPulseProgramEvent("ProgramStopped", "Program closed", "DeskPulse application shutdown started");
-            WriteUserEvent("AppStopped", "DeskPulse stopped", "Application shutdown started");
         }
         catch
         {
@@ -1135,7 +1149,6 @@ public sealed class ProgramActivityMonitor : IDisposable
             _getDatabase().InsertProgramEvent(new ProgramEventRecord
             {
                 EventTime = eventTime,
-                EventType = eventType,
                 EventDescription = eventDescription,
                 ProgramName = snapshot.ProcessName,
                 ProcessId = snapshot.ProcessId,
@@ -1334,7 +1347,6 @@ public sealed class DeskPulseDatabase : IDisposable
                     CreatedAt TEXT NOT NULL,
                     EventDate TEXT NULL,
                     EventTime TEXT NULL,
-                    EventType TEXT NOT NULL,
                     EventDescription TEXT NULL,
                     UserName TEXT NULL,
                     MachineName TEXT NULL,
@@ -1373,7 +1385,6 @@ public sealed class DeskPulseDatabase : IDisposable
                     CreatedAt TEXT NOT NULL,
                     EventDate TEXT NULL,
                     EventTime TEXT NULL,
-                    EventType TEXT NOT NULL,
                     EventDescription TEXT NULL,
                     ProgramName TEXT NULL,
                     ProcessId INTEGER NULL,
@@ -1386,6 +1397,11 @@ public sealed class DeskPulseDatabase : IDisposable
                 );
                 """);
 
+            ExecuteNonQuery(connection, "DROP INDEX IF EXISTS IX_UserEvents_EventType;");
+            ExecuteNonQuery(connection, "DROP INDEX IF EXISTS IX_ProgramEvents_EventType;");
+            RemoveColumnIfExists(connection, "UserEvents", "EventType");
+            RemoveColumnIfExists(connection, "ProgramEvents", "EventType");
+
             ExecuteNonQuery(
                 connection,
                 "CREATE INDEX IF NOT EXISTS IX_UserEvents_CreatedAt ON UserEvents (CreatedAt);"
@@ -1393,17 +1409,7 @@ public sealed class DeskPulseDatabase : IDisposable
 
             ExecuteNonQuery(
                 connection,
-                "CREATE INDEX IF NOT EXISTS IX_UserEvents_EventType ON UserEvents (EventType);"
-            );
-
-            ExecuteNonQuery(
-                connection,
                 "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_CreatedAt ON ProgramEvents (CreatedAt);"
-            );
-
-            ExecuteNonQuery(
-                connection,
-                "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_EventType ON ProgramEvents (EventType);"
             );
 
             ExecuteNonQuery(
@@ -1526,7 +1532,6 @@ public sealed class DeskPulseDatabase : IDisposable
                     CreatedAt,
                     EventDate,
                     EventTime,
-                    EventType,
                     EventDescription,
                     UserName,
                     MachineName,
@@ -1540,7 +1545,6 @@ public sealed class DeskPulseDatabase : IDisposable
                     $CreatedAt,
                     $EventDate,
                     $EventTime,
-                    $EventType,
                     $EventDescription,
                     $UserName,
                     $MachineName,
@@ -1556,7 +1560,6 @@ public sealed class DeskPulseDatabase : IDisposable
             AddText(command, "$CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
             AddText(command, "$EventDate", eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             AddText(command, "$EventTime", eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
-            AddText(command, "$EventType", record.EventType);
             AddText(command, "$EventDescription", record.EventDescription);
             AddText(command, "$UserName", record.UserName);
             AddText(command, "$MachineName", record.MachineName);
@@ -1587,7 +1590,6 @@ public sealed class DeskPulseDatabase : IDisposable
                     CreatedAt,
                     EventDate,
                     EventTime,
-                    EventType,
                     EventDescription,
                     ProgramName,
                     ProcessId,
@@ -1603,7 +1605,6 @@ public sealed class DeskPulseDatabase : IDisposable
                     $CreatedAt,
                     $EventDate,
                     $EventTime,
-                    $EventType,
                     $EventDescription,
                     $ProgramName,
                     $ProcessId,
@@ -1621,7 +1622,6 @@ public sealed class DeskPulseDatabase : IDisposable
             AddText(command, "$CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
             AddText(command, "$EventDate", eventTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             AddText(command, "$EventTime", eventTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
-            AddText(command, "$EventType", record.EventType);
             AddText(command, "$EventDescription", record.EventDescription);
             AddText(command, "$ProgramName", record.ProgramName);
             AddInteger(command, "$ProcessId", record.ProcessId);
@@ -1733,12 +1733,12 @@ public sealed class DeskPulseDatabase : IDisposable
                     """
                     SELECT
                         COALESCE(NULLIF(ProgramName, ''), '(blank)') AS Value,
-                        COALESCE(NULLIF(EventType, ''), '(mixed)') AS Extra,
+                        COALESCE(NULLIF(EventDescription, ''), '(mixed)') AS Extra,
                         COUNT(*) AS EventCount,
                         MIN(CreatedAt) AS FirstSeen,
                         MAX(CreatedAt) AS LastSeen
                     FROM ProgramEvents
-                    GROUP BY COALESCE(NULLIF(ProgramName, ''), '(blank)'), COALESCE(NULLIF(EventType, ''), '(mixed)')
+                    GROUP BY COALESCE(NULLIF(ProgramName, ''), '(blank)'), COALESCE(NULLIF(EventDescription, ''), '(mixed)')
                     ORDER BY EventCount DESC, Value ASC
                     LIMIT 100;
                     """);
@@ -1804,7 +1804,8 @@ public sealed class DeskPulseDatabase : IDisposable
 
     public MaintenanceExclusionCleanupResult CleanDatabaseWithCurrentRules(
         AppSettings settings,
-        IProgress<ExportProgressInfo>? progress = null)
+        IProgress<ExportProgressInfo>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         if (settings == null)
             throw new ArgumentNullException(nameof(settings));
@@ -1844,6 +1845,7 @@ public sealed class DeskPulseDatabase : IDisposable
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var id = reader.GetInt64(0);
                     var fullPath = reader.GetString(1);
                     var processName = reader.GetString(2);
@@ -1857,14 +1859,14 @@ public sealed class DeskPulseDatabase : IDisposable
 
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT Id, COALESCE(EventType, ''), COALESCE(EventDescription, '') FROM UserEvents;";
+                command.CommandText = "SELECT Id, COALESCE(EventDescription, '') FROM UserEvents;";
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var id = reader.GetInt64(0);
-                    var eventType = reader.GetString(1);
-                    var eventDescription = reader.GetString(2);
-                    if (!LoggingRulesEngine.IsUserActivityMonitored(eventType, eventDescription, settings.UserActivityRules))
+                    var eventDescription = reader.GetString(1);
+                    if (!LoggingRulesEngine.IsUserActivityMonitored("", eventDescription, settings.UserActivityRules))
                         userIdsToDelete.Add(id);
                     ReportScanProgress();
                 }
@@ -1876,6 +1878,7 @@ public sealed class DeskPulseDatabase : IDisposable
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var id = reader.GetInt64(0);
                     var filePath = reader.GetString(1);
                     var programName = reader.GetString(2);
@@ -1905,11 +1908,26 @@ public sealed class DeskPulseDatabase : IDisposable
                     deleted.ToString("N0", CultureInfo.InvariantCulture) + " of " + totalToDelete.ToString("N0", CultureInfo.InvariantCulture) + ")"));
             }
 
-            DeleteRowsByIds(connection, "ActivityEvents", activityIdsToDelete, count => ReportDeleteProgress(count, "file activity records"));
-            DeleteRowsByIds(connection, "UserEvents", userIdsToDelete, count => ReportDeleteProgress(count, "user activity records"));
-            DeleteRowsByIds(connection, "ProgramEvents", programIdsToDelete, count => ReportDeleteProgress(count, "app activity records"));
+            cancellationToken.ThrowIfCancellationRequested();
 
-            progress?.Report(new ExportProgressInfo(92, "92%  Compacting SQLite database"));
+            using (var transaction = connection.BeginTransaction())
+            {
+                try
+                {
+                    DeleteRowsByIds(connection, transaction, "ActivityEvents", activityIdsToDelete, cancellationToken, count => ReportDeleteProgress(count, "file activity records"));
+                    DeleteRowsByIds(connection, transaction, "UserEvents", userIdsToDelete, cancellationToken, count => ReportDeleteProgress(count, "user activity records"));
+                    DeleteRowsByIds(connection, transaction, "ProgramEvents", programIdsToDelete, cancellationToken, count => ReportDeleteProgress(count, "app activity records"));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    transaction.Commit();
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+
+            progress?.Report(new ExportProgressInfo(92, "92%  Deletions committed; compacting SQLite database (cannot be cancelled)"));
             ExecuteNonQuery(connection, "VACUUM;");
             progress?.Report(new ExportProgressInfo(100, "100% Database housekeeping complete"));
 
@@ -1944,8 +1962,6 @@ public sealed class DeskPulseDatabase : IDisposable
         if (!appIncludeOverrides && !LoggingRulesEngine.IsFileActivityMonitored(fullPath, settings.FileActivityRules))
             return false;
 
-        if (!appIncludeOverrides && LoggingRulesEngine.IsFileActivityExcluded(fullPath, processName, settings.FolderActivityRules))
-            return false;
 
         try
         {
@@ -2100,6 +2116,39 @@ public sealed class DeskPulseDatabase : IDisposable
         }
 
         return result;
+    }
+
+    private static void DeleteRowsByIds(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string tableName,
+        IReadOnlyList<long> ids,
+        CancellationToken cancellationToken,
+        Action<int>? progressCallback = null)
+    {
+        if (ids.Count == 0)
+            return;
+
+        foreach (var chunk in ids.Chunk(500))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+
+            var parameterNames = new List<string>();
+
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                var parameterName = "$id" + i.ToString(CultureInfo.InvariantCulture);
+                parameterNames.Add(parameterName);
+                command.Parameters.AddWithValue(parameterName, chunk[i]);
+            }
+
+            command.CommandText = "DELETE FROM " + tableName + " WHERE Id IN (" + string.Join(",", parameterNames) + ");";
+            command.ExecuteNonQuery();
+            progressCallback?.Invoke(chunk.Length);
+        }
     }
 
     private static void DeleteRowsByIds(SqliteConnection connection, string tableName, IReadOnlyList<long> ids, Action<int>? progressCallback = null)
@@ -2539,9 +2588,6 @@ public sealed class DeskPulseDatabase : IDisposable
             case "event-time":
                 cell.Value = row.EventTime;
                 break;
-            case "event-type":
-                cell.Value = row.EventType;
-                break;
             case "event-description":
                 cell.Value = row.EventDescription;
                 break;
@@ -2585,9 +2631,6 @@ public sealed class DeskPulseDatabase : IDisposable
                 break;
             case "event-time":
                 cell.Value = row.EventTime;
-                break;
-            case "event-type":
-                cell.Value = row.EventType;
                 break;
             case "event-description":
                 cell.Value = row.EventDescription;
@@ -2914,7 +2957,6 @@ public sealed class DeskPulseDatabase : IDisposable
                 CreatedAt,
                 EventDate,
                 EventTime,
-                EventType,
                 EventDescription,
                 UserName,
                 MachineName,
@@ -2936,14 +2978,13 @@ public sealed class DeskPulseDatabase : IDisposable
                 CreatedAt = ReadText(reader, 1),
                 EventDate = ReadText(reader, 2),
                 EventTime = ReadText(reader, 3),
-                EventType = ReadText(reader, 4),
-                EventDescription = ReadText(reader, 5),
-                UserName = ReadText(reader, 6),
-                MachineName = ReadText(reader, 7),
-                ProcessName = ReadText(reader, 8),
-                ProcessId = ReadNullableLong(reader, 9),
-                AppVersion = ReadText(reader, 10),
-                Note = ReadText(reader, 11)
+                EventDescription = ReadText(reader, 4),
+                UserName = ReadText(reader, 5),
+                MachineName = ReadText(reader, 6),
+                ProcessName = ReadText(reader, 7),
+                ProcessId = ReadNullableLong(reader, 8),
+                AppVersion = ReadText(reader, 9),
+                Note = ReadText(reader, 10)
             });
         }
 
@@ -2968,7 +3009,6 @@ public sealed class DeskPulseDatabase : IDisposable
                 CreatedAt,
                 EventDate,
                 EventTime,
-                EventType,
                 EventDescription,
                 ProgramName,
                 ProcessId,
@@ -2992,20 +3032,27 @@ public sealed class DeskPulseDatabase : IDisposable
                 CreatedAt = ReadText(reader, 1),
                 EventDate = ReadText(reader, 2),
                 EventTime = ReadText(reader, 3),
-                EventType = ReadText(reader, 4),
-                EventDescription = ReadText(reader, 5),
-                ProgramName = ReadText(reader, 6),
-                ProcessId = ReadNullableLong(reader, 7),
-                FilePath = ReadText(reader, 8),
-                WindowTitle = ReadText(reader, 9),
-                UserName = ReadText(reader, 10),
-                MachineName = ReadText(reader, 11),
-                AppVersion = ReadText(reader, 12),
-                Note = ReadText(reader, 13)
+                EventDescription = ReadText(reader, 4),
+                ProgramName = ReadText(reader, 5),
+                ProcessId = ReadNullableLong(reader, 6),
+                FilePath = ReadText(reader, 7),
+                WindowTitle = ReadText(reader, 8),
+                UserName = ReadText(reader, 9),
+                MachineName = ReadText(reader, 10),
+                AppVersion = ReadText(reader, 11),
+                Note = ReadText(reader, 12)
             });
         }
 
         return result;
+    }
+
+    private static void RemoveColumnIfExists(SqliteConnection connection, string tableName, string columnName)
+    {
+        if (!ColumnExists(connection, tableName, columnName))
+            return;
+
+        ExecuteNonQuery(connection, $"ALTER TABLE {tableName} DROP COLUMN {columnName};");
     }
 
     private static void EnsureColumnExists(SqliteConnection connection, string tableName, string columnName, string columnDefinition)
@@ -3308,7 +3355,6 @@ public sealed class ExportSheetOption
                 Field("created-at", "Created At", "Created At"),
                 Field("event-date", "Date", "Date"),
                 Field("event-time", "Time", "Time"),
-                Field("event-type", "Event Type", "Event Type"),
                 Field("event-description", "Event", "Event"),
                 Field("user-name", "User", "User"),
                 Field("machine-name", "Computer", "Computer"),
@@ -3327,7 +3373,6 @@ public sealed class ExportSheetOption
                 Field("created-at", "Created At", "Created At"),
                 Field("event-date", "Date", "Date"),
                 Field("event-time", "Time", "Time"),
-                Field("event-type", "Event Type", "Event Type"),
                 Field("event-description", "Event", "Event"),
                 Field("program-name", "Program", "Program"),
                 Field("process-id", "Process ID", "Process ID"),
@@ -3505,7 +3550,6 @@ public sealed class ExportSheetOption
 public sealed class UserEventRecord
 {
     public DateTime EventTime { get; set; }
-    public string EventType { get; set; } = "";
     public string EventDescription { get; set; } = "";
     public string UserName { get; set; } = "";
     public string MachineName { get; set; } = "";
@@ -3521,7 +3565,6 @@ public sealed class UserExportRow
     public string CreatedAt { get; set; } = "";
     public string EventDate { get; set; } = "";
     public string EventTime { get; set; } = "";
-    public string EventType { get; set; } = "";
     public string EventDescription { get; set; } = "";
     public string UserName { get; set; } = "";
     public string MachineName { get; set; } = "";
@@ -3534,7 +3577,6 @@ public sealed class UserExportRow
 public sealed class ProgramEventRecord
 {
     public DateTime EventTime { get; set; }
-    public string EventType { get; set; } = "";
     public string EventDescription { get; set; } = "";
     public string ProgramName { get; set; } = "";
     public int ProcessId { get; set; }
@@ -3552,7 +3594,6 @@ public sealed class ProgramExportRow
     public string CreatedAt { get; set; } = "";
     public string EventDate { get; set; } = "";
     public string EventTime { get; set; } = "";
-    public string EventType { get; set; } = "";
     public string EventDescription { get; set; } = "";
     public string ProgramName { get; set; } = "";
     public long? ProcessId { get; set; }
@@ -4248,7 +4289,7 @@ public static class LoggingRulesEngine
             var target = expandedRule.Contains(Path.DirectorySeparatorChar) || expandedRule.Contains(Path.AltDirectorySeparatorChar)
                 ? fullPath
                 : fileName;
-            return WildcardMatches(target, expandedRule);
+            return FileWildcardMatches(target, expandedRule);
         }
 
         if (!Path.IsPathRooted(expandedRule) && expandedRule.IndexOfAny(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }) < 0)
@@ -4266,6 +4307,71 @@ public static class LoggingRulesEngine
         {
             return false;
         }
+    }
+
+    private static bool FileWildcardMatches(string value, string pattern)
+    {
+        var normalizedValue = (value ?? "").Replace('/', '\\');
+        var normalizedPattern = NormalizeWindowsGlobPattern((pattern ?? "").Replace('/', '\\'));
+        var regexPattern = BuildWindowsGlobRegex(normalizedPattern);
+
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            normalizedValue,
+            regexPattern,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static string NormalizeWindowsGlobPattern(string pattern)
+    {
+        // Windows treats a path segment of *.* as all filenames, including names without
+        // an extension. Only complete path segments are normalised so patterns such as
+        // report*.* keep their intended meaning.
+        return string.Join("\\", pattern.Split('\\').Select(segment => segment == "*.*" ? "*" : segment));
+    }
+
+    private static string BuildWindowsGlobRegex(string pattern)
+    {
+        var builder = new System.Text.StringBuilder("^");
+
+        for (var index = 0; index < pattern.Length; index++)
+        {
+            var current = pattern[index];
+
+            // A recursive folder token (\**\) matches zero or more complete folder levels.
+            // This means C:\Work\**\* matches files directly in C:\Work as well as files
+            // in any descendant folder.
+            if (current == '\\' && index + 3 < pattern.Length &&
+                pattern[index + 1] == '*' && pattern[index + 2] == '*' && pattern[index + 3] == '\\')
+            {
+                builder.Append(@"\\(?:[^\\]+\\)*");
+                index += 3;
+                continue;
+            }
+
+            if (current == '*' && index + 1 < pattern.Length && pattern[index + 1] == '*')
+            {
+                builder.Append(".*");
+                index++;
+                continue;
+            }
+
+            if (current == '*')
+            {
+                builder.Append(@"[^\\]*");
+                continue;
+            }
+
+            if (current == '?')
+            {
+                builder.Append(@"[^\\]");
+                continue;
+            }
+
+            builder.Append(System.Text.RegularExpressions.Regex.Escape(current.ToString()));
+        }
+
+        builder.Append('$');
+        return builder.ToString();
     }
 
     private static bool ContainsWildcard(string value)
@@ -4470,7 +4576,7 @@ public sealed class ActivityRuleSetting
 public sealed class AppSettings
 {
     private const string RegistryPath = @"Software\DeskPulse";
-    private const int CurrentSettingsSchemaVersion = 4;
+    private const int CurrentSettingsSchemaVersion = 5;
 
     public string DataFolderPath { get; set; } = GetDefaultDataFolderPath();
 
@@ -4574,9 +4680,15 @@ public sealed class AppSettings
         {
             LoadSchemaV2(settings, key);
 
+            var addedRequiredUserActivityRules = EnsureRequiredUserActivityRules(settings);
+
             if (schemaVersion < CurrentSettingsSchemaVersion)
             {
                 UpgradeRuleSchema(settings);
+                settings.Save();
+            }
+            else if (addedRequiredUserActivityRules)
+            {
                 settings.Save();
             }
 
@@ -4675,6 +4787,7 @@ public sealed class AppSettings
         if (settings.AppActivityRules.Count == 0)
             settings.AppActivityRules = GetDefaultAppActivityRules();
 
+        EnsureRequiredUserActivityRules(settings);
         settings.Save();
 
         return settings;
@@ -4701,8 +4814,11 @@ public sealed class AppSettings
 
         using (var rulesKey = key.CreateSubKey("Rules"))
         {
+            EnsureRequiredUserActivityRules(this);
+            FileActivityRuleSettings = MergeFolderRulesIntoFileRules(FileActivityRuleSettings, FolderActivityRuleSettings);
+            FolderActivityRuleSettings = new List<ActivityRuleSetting>();
             WriteRuleSettingsJson(rulesKey, "FileActivity", FileActivityRuleSettings);
-            WriteRuleSettingsJson(rulesKey, "FolderActivity", FolderActivityRuleSettings);
+            rulesKey?.DeleteValue("FolderActivity", false);
             WriteRuleSettingsJson(rulesKey, "UserActivity", UserActivityRuleSettings);
             WriteRuleSettingsJson(rulesKey, "AppActivity", AppActivityRuleSettings);
         }
@@ -4727,6 +4843,9 @@ public sealed class AppSettings
             settings.FolderActivityRuleSettings = ReadRuleSettingsJson(rulesKey, "FolderActivity", ToRuleSettings(GetDefaultFolderActivityRules()));
             settings.UserActivityRuleSettings = ReadRuleSettingsJson(rulesKey, "UserActivity", ToRuleSettings(GetDefaultUserActivityRules()));
             settings.AppActivityRuleSettings = ReadRuleSettingsJson(rulesKey, "AppActivity", ToRuleSettings(GetDefaultAppActivityRules()));
+            settings.FileActivityRuleSettings = MergeFolderRulesIntoFileRules(
+                settings.FileActivityRuleSettings, settings.FolderActivityRuleSettings);
+            settings.FolderActivityRuleSettings = new List<ActivityRuleSetting>();
         }
 
         using (var exportKey = rootKey.OpenSubKey("Export"))
@@ -4737,10 +4856,56 @@ public sealed class AppSettings
             settings.ExportSheets = ExportSheetOption.ParseList(exportText);
         }
 
-        settings.ExcludedFolders = ExtractLegacyFolderValues(settings.FolderActivityRules);
+        settings.ExcludedFolders = new List<string>();
         settings.ExcludedProcesses = new HashSet<string>(ExtractLegacyProcessValues(settings.AppActivityRules), StringComparer.OrdinalIgnoreCase);
-        settings.LoggingRules = settings.FileActivityRules.Concat(settings.FolderActivityRules).Concat(settings.AppActivityRules).ToList();
+        settings.LoggingRules = settings.FileActivityRules.Concat(settings.AppActivityRules).ToList();
         settings.ExtensionsToMonitor = ExtractExtensions(settings.FileActivityRuleSettings);
+    }
+
+    public static List<ActivityRuleSetting> MergeFolderRulesIntoFileRules(
+        IEnumerable<ActivityRuleSetting>? fileRules,
+        IEnumerable<ActivityRuleSetting>? folderRules)
+    {
+        var result = new List<ActivityRuleSetting>();
+
+        // Folder rules are placed first so their more-specific path decisions take
+        // precedence over broad file patterns such as *.xlsx.
+        foreach (var folderRule in folderRules ?? Array.Empty<ActivityRuleSetting>())
+        {
+            if (string.IsNullOrWhiteSpace(folderRule.Value))
+                continue;
+
+            var folder = Environment.ExpandEnvironmentVariables(folderRule.Value.Trim().Trim('"'))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (folder.Length == 0)
+                continue;
+
+            var suffix = folderRule.IncludeSubfolders ? @"\**\*" : @"\*";
+            result.Add(new ActivityRuleSetting
+            {
+                Enabled = folderRule.Enabled,
+                RuleType = "file",
+                Action = folderRule.Action,
+                Value = folder + suffix,
+                IncludeSubfolders = false
+            });
+        }
+
+        foreach (var fileRule in fileRules ?? Array.Empty<ActivityRuleSetting>())
+        {
+            if (string.IsNullOrWhiteSpace(fileRule.Value))
+                continue;
+
+            var clone = fileRule.Clone();
+            clone.RuleType = "file";
+            clone.IncludeSubfolders = false;
+            result.Add(clone);
+        }
+
+        return result
+            .GroupBy(rule => $"{rule.Enabled}|{rule.Action}|{rule.Value}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
     }
 
     private static void WriteRuleSettingsJson(RegistryKey? key, string valueName, IEnumerable<ActivityRuleSetting> rules)
@@ -4863,12 +5028,58 @@ public sealed class AppSettings
             .ToList();
     }
 
+    private static bool EnsureRequiredUserActivityRules(AppSettings settings)
+    {
+        var changed = false;
+        var requiredEvents = new[]
+        {
+            "DeskPulseStarted",
+            "DeskPulseStopped",
+            "WindowsStarted",
+            "SessionLocked",
+            "SessionUnlocked",
+            "SessionLogon",
+            "SessionLogoff"
+        };
+
+        foreach (var eventType in requiredEvents)
+        {
+            var existing = settings.UserActivityRuleSettings.FirstOrDefault(setting =>
+                setting.RuleType.Equals("event", StringComparison.OrdinalIgnoreCase) &&
+                setting.Value.Trim().Equals(eventType, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null)
+            {
+                if (!existing.Enabled || !existing.Action.Equals("Include", StringComparison.OrdinalIgnoreCase))
+                {
+                    existing.Enabled = true;
+                    existing.Action = "Include";
+                    changed = true;
+                }
+                continue;
+            }
+
+            settings.UserActivityRuleSettings.Add(new ActivityRuleSetting
+            {
+                Enabled = true,
+                RuleType = "event",
+                Action = "Include",
+                Value = eventType,
+                IncludeSubfolders = false
+            });
+            changed = true;
+        }
+
+        return changed;
+    }
+
     public static List<string> GetDefaultUserActivityRules()
     {
         return new[]
         {
-            "AppStarted",
-            "AppStopped",
+            "DeskPulseStarted",
+            "DeskPulseStopped",
+            "WindowsStarted",
             "SessionLocked",
             "SessionUnlocked",
             "SessionLogon",
@@ -4901,6 +5112,12 @@ public sealed class AppSettings
 
     private static void UpgradeRuleSchema(AppSettings settings)
     {
+        // Schema 5 combines Folder Activity into File Activity. Existing folder
+        // rules are converted to path wildcard patterns and the old list is cleared.
+        settings.FileActivityRuleSettings = MergeFolderRulesIntoFileRules(
+            settings.FileActivityRuleSettings, settings.FolderActivityRuleSettings);
+        settings.FolderActivityRuleSettings = new List<ActivityRuleSetting>();
+
         // User Activity previously defaulted to logging unmatched events. Populate explicit
         // Include rules so schema 3 preserves the existing useful session/app lifecycle data.
         if (settings.UserActivityRuleSettings.Count == 0)

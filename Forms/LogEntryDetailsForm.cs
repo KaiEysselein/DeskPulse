@@ -10,6 +10,7 @@ public partial class LogEntryDetailsForm : Form
     public LogEntryDetailsForm(IReadOnlyDictionary<string, string> fields)
     {
         InitializeComponent();
+        AppIcon.Apply(this);
         foreach (var field in fields)
         {
             var row = detailsGrid.Rows.Add(field.Key, field.Value);
