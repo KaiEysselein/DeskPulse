@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace DeskPulse;
 
-public sealed partial class MaintenanceProgressForm : Form
+public sealed partial class RuleCleanupProgressForm : Form
 {
     private readonly string _caption;
     private readonly string _operationTitle;
@@ -13,12 +13,12 @@ public sealed partial class MaintenanceProgressForm : Form
 
     public MaintenanceExclusionCleanupResult? Result { get; private set; }
 
-    public MaintenanceProgressForm(
+    public RuleCleanupProgressForm(
         string caption,
         string operationTitle,
         Func<IProgress<ExportProgressInfo>, MaintenanceExclusionCleanupResult> action)
     {
-        _caption = string.IsNullOrWhiteSpace(caption) ? "DeskPulse Maintenance" : caption;
+        _caption = string.IsNullOrWhiteSpace(caption) ? "DeskPulse Cleanup" : caption;
         _operationTitle = string.IsNullOrWhiteSpace(operationTitle) ? "Working" : operationTitle;
         _action = action ?? throw new ArgumentNullException(nameof(action));
 
@@ -49,7 +49,7 @@ public sealed partial class MaintenanceProgressForm : Form
             ControlBox = true;
 
             MessageBox.Show(
-                "The maintenance action could not be completed.\n\n" + ex.Message,
+                "The cleanup action could not be completed.\n\n" + ex.Message,
                 _caption,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);

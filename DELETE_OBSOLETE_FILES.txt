@@ -1,0 +1,8 @@
+Delete these obsolete files from your local Forms folder if they still exist:
+
+Forms\MaintenanceForm.cs
+Forms\MaintenanceProgressForm.cs
+Forms\MaintenanceProgressForm.Designer.cs
+Forms\MaintenanceProgressForm.resx
+
+The project file also excludes them from compilation for safety.

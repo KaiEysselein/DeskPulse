@@ -1,8 +1,247 @@
 # Changelog
 
+## [0.1.3.1] - 2026-07-13 — Verified baseline
+
+### Changed
+
+- Reconciled all active version references at `0.1.3.1`.
+- Rewrote README, HANDOVER, ROADMAP, and VERSION_CHECK to describe the actual current source and UI.
+- Corrected stale tray-menu and Maintenance-mode wording in Settings.
+- Added Visual Studio dependent-file relationships for View Log, Log Entry Details, and Rule Cleanup Progress forms.
+- Removed the obsolete diagnostic-log entry from `.gitignore`; debug logging remains fully removed.
+
+### Release status
+
+- This package is the verified source baseline for local build, standalone publish, GitHub commit, and optional `v0.1.3.1` tag.
+- The next intentional development version is `0.1.4.0`.
+
+### View Log paging/export refinement
+
+- Replaced the two-button pager with First Page, Previous Page, Next Page, and Last Page controls.
+- Moved Export from the top toolbar to the right of the paging controls.
+- Export now writes only the active View Log tab and the currently displayed 500-record page to an XLSX file.
+- The exported workbook includes the visible columns, including the database ID, and excludes the More button column.
+
+## [0.1.3.1] - View Log pagination
+
+### Changed
+
+- Added the database record ID as the first column in all four View Log tabs.
+- Reduced View Log page size from 1,000 to 500 records.
+- Added Previous and Next navigation at the bottom of View Log.
+- Added independent paging for Folder, App, File, and User Activity tabs across the selected date range.
+- Added page and total-record indicators for the active tab.
+
+## [0.1.3.1] - 2026-07-13 — Tray and Maintenance removal
+
+### Added — Maintenance database housekeeping
+
+- Added a normal `Maintenance` tab to the right of `Export Options`.
+- Added `Clean database with current rules...`.
+- The action saves the rules currently displayed in Settings, evaluates the entire File, Folder, App, and User activity history against those rules, permanently removes conflicting records, and compacts the SQLite database.
+- Added determinate progress and a completion summary by activity category.
+
+
+### Changed
+
+- Removed the tray icon right-click menu entirely.
+- Added `Exit` directly below `About` on the left-click menu.
+- Removed Maintenance mode command-line handling (`-maintenance` and `-m`).
+- Removed the dedicated `MaintenanceForm`.
+- Renamed the reusable maintenance progress window to `RuleCleanupProgressForm` so View Log rule cleanup and database compaction continue without a Maintenance feature.
+- Kept normal Settings, Rules, View Log, export, rule-based cleanup, database compaction, About, and uninstall functionality intact.
+
+
+## [0.1.3.1] - Debug logging removal and DeskPulse app lifecycle
+
+### Changed
+
+- Removed all command-line debug and skipped-event logging functionality.
+- Removed the DeskPulse diagnostic log, related Maintenance controls, and generated-file cleanup action.
+- DeskPulse now records its own start and stop events in App Activity when program activity logging and the applicable App Activity rule allow it.
+- Added an explicit default App Activity Include rule for `DeskPulse` before the catch-all Include rule.
+
+## [0.1.3.1] - 2026-07-13
+
+### Added — View Log cleanup progress
+
+- Added a determinate progress window when a View Log rule is applied together with old-data cleanup.
+- Progress now reports rule saving, batched record deletion, transaction commit, database compaction, and finalisation.
+
+### Fixed
+
+- Fixed the View Log grid-selection handler build error by making `ConfigureGrid` an instance method so it can call `UpdateCreateRuleButton()`.
+
+### Added — View Log rule creation
+
+- Added single-row selection in View Log and a disabled-until-selected `Create Rule` button.
+- Added an `Add rule to rules list` dialog with category-appropriate rule options.
+- Added optional cleanup of existing records conflicting with a new Exclude rule.
+- Added a record-count warning before destructive cleanup; no warning appears when no records would be removed.
+- Added database compaction after confirmed cleanup and immediate monitor settings reload.
+
+## [0.1.3.1] - View Log iteration
+
+### Added
+
+- Added `View Log...` to the tray icon left-click menu.
+- Added a date-filtered four-tab log viewer for Folder, App, File, and User activity.
+- Added per-row `More...` details dialogs showing all stored database fields.
+- Limited each tab to the newest 1,000 matching records for responsive viewing.
+
+### Fixed
+
+- Renamed the `ViewLogForm` SQLite reader helper from `Text` to `ReadText` so it no longer hides the inherited WinForms `Form.Text` property or breaks the Designer assignment.
+
+## [0.1.3.1] - User Activity tab cleanup
+
+- Removed the User Activity Type selector, manual Event/Text entry, Add Rule controls, Include/Exclude selectors, and Include subfolders option.
+- Removed the User Activity table columns for Exclude, Type, and Sub.
+- Retained only On, Include, and the predefined event description in the User Activity table.
+- Removed Move Up, Move Down, Remove, and Duplicate actions from User Activity; Reset Defaults remains available.
+- Prevented User Activity rows from being manually deleted and removed now-unused shared rule-entry control code.
+
+
+### Strict activity-rule allow-lists and registry schema 3
+
+- Changed App Activity logging to require an enabled matching Include rule; unmatched applications are no longer logged.
+- Changed User Activity logging to require an enabled matching Include rule; unmatched user/session events are no longer logged.
+- Kept first-match-wins behavior: a matching Exclude suppresses logging and a matching Include permits it.
+- Added default User Activity Include rules for DeskPulse start/stop, lock/unlock, logon/logoff, console connect/disconnect, and remote connect/disconnect.
+- Added a final `*` App Activity Include rule after the default noisy-process exclusions, preserving useful existing behavior while making it rule-driven.
+- Increased `SettingsSchemaVersion` to `3`. Existing schema-2 settings are migrated once: empty User Activity rules receive the default event Includes, and App Activity receives a final Include-all rule if it does not already have one.
+- Removed the now-unused legacy `IsProgramActivityExcluded` helper.
+
+## [0.1.3.1] - Installed application picker
+
+### Added
+
+- Added an `Add App...` button to Rules > App Activity.
+- Added a searchable installed-application selection form with multi-select checkboxes.
+- Selected applications are appended to App Activity as enabled Include rules.
+- Applications already present as exact App Activity values are not added again.
+- The picker reads registered application executables from Windows uninstall registration and App Paths data.
+
+### Notes
+
+- Only applications for which Windows exposes a resolvable executable path are shown. Some Microsoft Store and portable applications may not appear and can still be added with Browse or by typing a process/path pattern.
+
+## [0.1.3.1] - Folder Activity rule editor cleanup
+
+### App Activity UI cleanup
+
+- Removed the fixed Type selector and the Include/Exclude/Subfolders controls above the App Activity list.
+- Removed the Type and Sub columns from the App Activity grid.
+- Added an editable App / pattern field with Browse support for executable files.
+- New App Activity rules are appended at the bottom and default to On + Include.
+- App rules do not use subfolder semantics; child processes are independent process events, not sub-app rules.
+
+- Moved the Rules sub-tabs to: Folder Activity, App Activity, File Activity, User Activity.
+- Removed the Folder Activity Type selector and the Include/Exclude/Include subfolders controls above the list.
+- New Folder Activity rules are appended at the bottom and default to On, Include, and Sub.
+- Added an editable `File / Pattern` entry field with a folder Browse button.
+- Removed the Type column from the Folder Activity rules grid while retaining the internal `folder` rule type in JSON registry storage.
+
+
+
+## [0.1.3.1] - File Activity Include/Exclude and File Browse
+
+### File/App rule de-duplication
+
+- Exact enabled `.exe` rules duplicated in both File Activity and App Activity are now retained only in App Activity.
+- App Activity remains authoritative for matching executable rules; wildcard file rules such as `*.exe` are not treated as duplicates of a specific app rule.
+
+
+### Changed
+
+- Removed the File Activity Include/Exclude selectors above the list; new rules are appended as enabled Include rules by default.
+
+- Added mutually exclusive Include and Exclude checkboxes to File Activity rule rows.
+- Added Include/Exclude selection when creating a File Activity rule.
+- Added a Browse button that selects an exact file and inserts its full path.
+- File Activity rules now use first-match-wins order: a matching Include rule monitors the file and a matching Exclude rule suppresses it.
+- Added working wildcard and filename matching for patterns such as `*.exe`, `Report*.xlsx`, and `desktop.ini`.
+- Clarified that files or extensions not matched by an Include rule are not monitored.
+
+## [0.1.3.1] - 2026-07-13
+
+### Registry settings schema revision
+
+- Added `SettingsSchemaVersion = 2`.
+- Reorganised current settings into registry subkeys: `General`, `Rules`, and `Export`.
+- Changed the four activity-rule lists to JSON values under `HKCU\Software\DeskPulse\Rules`.
+- Added explicit `Enabled`, `RuleType`, `Action`, `Value`, and `IncludeSubfolders` fields for each stored rule.
+- Added automatic migration from legacy `ExtensionsToMonitor`, combined `LoggingRules`, and the earlier multiline activity-rule values.
+- Fixed migration so an empty or unusable legacy File Activity value falls back to the existing monitored-extension list and converts entries such as `.xlsx` to `*.xlsx`.
+- Preserved deliberately empty File Activity lists after schema 2 migration, meaning no files are monitored until entries are added.
+- Disabled rule rows are now retained in the registry instead of being discarded when Settings is saved.
+- Legacy registry values are read for migration but are no longer rewritten as the active settings format.
+
+## [0.1.3.1] - Incremental development
+
+### Rules type separation
+
+- Restricted File Activity to File rules only.
+- Restricted Folder Activity to Folder rules only.
+- Restricted User Activity to Event rules only.
+- Restricted App Activity to Process rules only.
+- Added automatic redistribution of existing mixed rules into the matching activity-specific lists.
+- File monitoring now evaluates both exact-file rules and folder-path rules.
+- Clarified that Folder Activity is a folder-path filter for File Activity, not a separate folder event stream.
+
+### Changed
+
+- Added a separate `Folder Activity` tab under Settings > Rules.
+- Duplicated the activity-rule editor pattern so Folder Activity has its own ordered Include/Exclude rules list.
+- Added independent `FolderActivityRules` registry persistence, initially migrated from the current File Activity rules when absent.
+
 All notable changes to DeskPulse will be documented in this file.
 
 The format is loosely based on Keep a Changelog, and this project currently follows early pre-release versioning.
+
+
+### File Activity allow-list update
+
+- Changed File Activity into an explicit monitored-file allow-list.
+- Added exact file, filename, extension wildcard (`*.exe`), and general wildcard matching.
+- Removed the File Activity Type selector, Include/Exclude controls, and Include subfolders control.
+- Added the note: `Files / extensions not listed are not monitored.`
+- Kept folder include/exclude behavior under Folder Activity.
+
+## [0.1.3.1] - 2026-07-13 — Activity-specific rules
+
+### Changed
+
+- Moved the `Storage` group from the former `Files` tab into `General`.
+- Removed the now-empty top-level `Files` tab.
+- Replaced the previous combined Rules layout with three activity-specific tabs: File Activity, User Activity, and App Activity.
+- Added an independent ordered rules editor to each activity tab.
+- File Activity rules support Folder, File, and Process matching.
+- User Activity rules support event-type or event-description text matching.
+- App Activity rules support Folder, File, and Process matching.
+- Existing combined logging rules migrate into both File Activity and App Activity rule lists to preserve current exclusions.
+- Added separate registry-backed `FileActivityRules`, `UserActivityRules`, and `AppActivityRules` settings.
+
+## [0.1.3.1] - 2026-07-13
+
+### Changed in Settings rules consolidation
+
+- Renamed the top-level `Monitoring` tab to `Rules`.
+- Added nested `File Activity`, `Exclusions`, and `Logging Rules` sub-tabs under `Rules`.
+- Removed the visible `Monitored file types` section from Settings while preserving the existing monitored-extension setting for compatibility.
+- Kept Maintenance limited to Database, Cleanup, and Diagnostics.
+
+
+### Changed
+
+- Began the active development cycle that will become version `0.1.4.0` after completion and verification.
+- Added a normal Settings tab named `Monitoring`.
+- Moved `File activity filters` and `Monitored file types` from `Files` to `Monitoring`.
+- Kept `Files` focused on storage settings.
+- Moved the former Maintenance `Statistics` contents into a normal Settings tab named `Exclusions`.
+- Moved `Logging Rules` from Maintenance into a normal Settings tab.
+- Reduced Maintenance sub-tabs to `Database`, `Cleanup`, and `Diagnostics`.
+- Updated active application, project, manifest, and package documentation version references to `0.1.3.1`.
 
 
 ## [0.1.3.0] - 2026-07-07
@@ -408,3 +647,6 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 - Added ordered exclusion rules for folder/process filtering where the upper rule takes priority over lower rules.
 - Added Include/Exclude rule support for folder exclusions, allowing broad exclusions with specific include exceptions above them.
 - Added Move Up/Move Down controls for exclusion rule ordering.
+
+- Added JSON import/export for File Activity, Folder Activity, and App Activity rules.
+- Obsolete Maintenance source files are explicitly excluded from compilation if they remain in an older working folder.

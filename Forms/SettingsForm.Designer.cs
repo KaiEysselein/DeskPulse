@@ -10,7 +10,9 @@ partial class SettingsForm
     private IContainer? components = null;
     private TabControl _settingsTabControl = null!;
     private TabPage _generalTabPage = null!;
-    private TabPage _filesTabPage = null!;
+    private TabPage _rulesTabPage = null!;
+    private TabControl _rulesSubTabControl = null!;
+    private TabPage _fileActivityRulesTabPage = null!;
     private TabPage _exportOptionsTabPage = null!;
     private TabPage _maintenanceTabPage = null!;
     private Label _footerLine = null!;
@@ -80,7 +82,6 @@ partial class SettingsForm
     private Button _maintenanceAddProcessExclusionButton = null!;
     private GroupBox _maintenanceGeneratedFilesGroupBox = null!;
     private Button _maintenanceDeleteExportButton = null!;
-    private Button _maintenanceDeleteDiagnosticsButton = null!;
     private Button _maintenanceDeleteStartupLogButton = null!;
     private Label _maintenanceGeneratedFilesHintLabel = null!;
     private GroupBox _maintenanceUnwantedDataGroupBox = null!;
@@ -107,8 +108,6 @@ partial class SettingsForm
     private Button _maintenanceRemovePastRecordsButton = null!;
     private Label _maintenancePastRecordsHintLabel = null!;
     private GroupBox _maintenanceDiagnosticsGroupBox = null!;
-    private Label _maintenanceDiagnosticsStatusLabel = null!;
-    private Button _maintenanceOpenDiagnosticsLogButton = null!;
     private Button _maintenanceShowActiveExtensionsButton = null!;
     private Button _maintenanceShowStartupStatusButton = null!;
     private GroupBox _maintenanceRegistryGroupBox = null!;
@@ -140,7 +139,9 @@ partial class SettingsForm
 
         _settingsTabControl = new TabControl();
         _generalTabPage = new TabPage();
-        _filesTabPage = new TabPage();
+        _rulesTabPage = new TabPage();
+        _rulesSubTabControl = new TabControl();
+        _fileActivityRulesTabPage = new TabPage();
         _exportOptionsTabPage = new TabPage();
         _maintenanceTabPage = new TabPage();
         _footerLine = new Label();
@@ -211,7 +212,6 @@ partial class SettingsForm
         _statisticsGrid = new DataGridView();
         _maintenanceGeneratedFilesGroupBox = new GroupBox();
         _maintenanceDeleteExportButton = new Button();
-        _maintenanceDeleteDiagnosticsButton = new Button();
         _maintenanceDeleteStartupLogButton = new Button();
         _maintenanceGeneratedFilesHintLabel = new Label();
         _maintenanceUnwantedDataGroupBox = new GroupBox();
@@ -246,8 +246,6 @@ partial class SettingsForm
         _maintenanceRemovePastRecordsButton = new Button();
         _maintenancePastRecordsHintLabel = new Label();
         _maintenanceDiagnosticsGroupBox = new GroupBox();
-        _maintenanceDiagnosticsStatusLabel = new Label();
-        _maintenanceOpenDiagnosticsLogButton = new Button();
         _maintenanceShowActiveExtensionsButton = new Button();
         _maintenanceShowStartupStatusButton = new Button();
         _maintenanceRegistryGroupBox = new GroupBox();
@@ -257,7 +255,9 @@ partial class SettingsForm
 
         _settingsTabControl.SuspendLayout();
         _generalTabPage.SuspendLayout();
-        _filesTabPage.SuspendLayout();
+        _rulesTabPage.SuspendLayout();
+        _rulesSubTabControl.SuspendLayout();
+        _fileActivityRulesTabPage.SuspendLayout();
         _exportOptionsTabPage.SuspendLayout();
         _startupGroupBox.SuspendLayout();
         _behaviourGroupBox.SuspendLayout();
@@ -289,7 +289,7 @@ partial class SettingsForm
 
         // _settingsTabControl
         _settingsTabControl.Controls.Add(_generalTabPage);
-        _settingsTabControl.Controls.Add(_filesTabPage);
+        _settingsTabControl.Controls.Add(_rulesTabPage);
         _settingsTabControl.Controls.Add(_exportOptionsTabPage);
         _settingsTabControl.Controls.Add(_maintenanceTabPage);
         _settingsTabControl.Location = new System.Drawing.Point(16, 16);
@@ -302,6 +302,7 @@ partial class SettingsForm
         _generalTabPage.BackColor = System.Drawing.SystemColors.Window;
         _generalTabPage.Controls.Add(_startupGroupBox);
         _generalTabPage.Controls.Add(_behaviourGroupBox);
+        _generalTabPage.Controls.Add(_storageGroupBox);
         _generalTabPage.Location = new System.Drawing.Point(4, 24);
         _generalTabPage.Name = "_generalTabPage";
         _generalTabPage.Padding = new Padding(16);
@@ -381,19 +382,38 @@ partial class SettingsForm
         _behaviourHintLabel.Name = "_behaviourHintLabel";
         _behaviourHintLabel.Size = new System.Drawing.Size(760, 22);
         _behaviourHintLabel.TabIndex = 2;
-        _behaviourHintLabel.Text = "DeskPulse keeps running from the tray icon. Left-click opens Export/Settings; right-click opens About/Exit.";
+        _behaviourHintLabel.Text = "DeskPulse keeps running from the tray icon. Left-click opens View Log, Settings, About, and Exit.";
 
-        // _filesTabPage
-        _filesTabPage.BackColor = System.Drawing.SystemColors.Window;
-        _filesTabPage.Controls.Add(_storageGroupBox);
-        _filesTabPage.Controls.Add(_fileFilterGroupBox);
-        _filesTabPage.Controls.Add(_fileTypesGroupBox);
-        _filesTabPage.Location = new System.Drawing.Point(4, 24);
-        _filesTabPage.Name = "_filesTabPage";
-        _filesTabPage.Padding = new Padding(16);
-        _filesTabPage.Size = new System.Drawing.Size(880, 572);
-        _filesTabPage.TabIndex = 1;
-        _filesTabPage.Text = "Files";
+        // _rulesTabPage
+        _rulesTabPage.BackColor = System.Drawing.SystemColors.Window;
+        _rulesTabPage.Controls.Add(_rulesSubTabControl);
+        _rulesTabPage.Location = new System.Drawing.Point(4, 24);
+        _rulesTabPage.Name = "_rulesTabPage";
+        _rulesTabPage.Padding = new Padding(8);
+        _rulesTabPage.Size = new System.Drawing.Size(880, 572);
+        _rulesTabPage.TabIndex = 2;
+        _rulesTabPage.Text = "Rules";
+
+        // _rulesSubTabControl
+        _rulesSubTabControl.Controls.Add(_fileActivityRulesTabPage);
+        _rulesSubTabControl.Controls.Add(_maintenanceStatisticsTabPage);
+        _rulesSubTabControl.Controls.Add(_maintenanceLoggingRulesTabPage);
+        _rulesSubTabControl.Dock = DockStyle.Fill;
+        _rulesSubTabControl.Location = new System.Drawing.Point(8, 8);
+        _rulesSubTabControl.Name = "_rulesSubTabControl";
+        _rulesSubTabControl.SelectedIndex = 0;
+        _rulesSubTabControl.Size = new System.Drawing.Size(864, 556);
+        _rulesSubTabControl.TabIndex = 0;
+
+        // _fileActivityRulesTabPage
+        _fileActivityRulesTabPage.BackColor = System.Drawing.SystemColors.Window;
+        _fileActivityRulesTabPage.Controls.Add(_fileFilterGroupBox);
+        _fileActivityRulesTabPage.Location = new System.Drawing.Point(4, 24);
+        _fileActivityRulesTabPage.Name = "_fileActivityRulesTabPage";
+        _fileActivityRulesTabPage.Padding = new Padding(16);
+        _fileActivityRulesTabPage.Size = new System.Drawing.Size(856, 528);
+        _fileActivityRulesTabPage.TabIndex = 0;
+        _fileActivityRulesTabPage.Text = "File Activity";
 
         // _storageGroupBox
         _storageGroupBox.BackColor = System.Drawing.SystemColors.Window;
@@ -401,11 +421,11 @@ partial class SettingsForm
         _storageGroupBox.Controls.Add(_dataFolderTextBox);
         _storageGroupBox.Controls.Add(_browseDataFolderButton);
         _storageGroupBox.Controls.Add(_databaseHintLabel);
-        _storageGroupBox.Location = new System.Drawing.Point(24, 24);
+        _storageGroupBox.Location = new System.Drawing.Point(24, 368);
         _storageGroupBox.Name = "_storageGroupBox";
         _storageGroupBox.Padding = new Padding(12);
         _storageGroupBox.Size = new System.Drawing.Size(820, 122);
-        _storageGroupBox.TabIndex = 0;
+        _storageGroupBox.TabIndex = 2;
         _storageGroupBox.TabStop = false;
         _storageGroupBox.Text = "Storage";
 
@@ -444,11 +464,11 @@ partial class SettingsForm
         _fileFilterGroupBox.BackColor = System.Drawing.SystemColors.Window;
         _fileFilterGroupBox.Controls.Add(_ignoreTempFoldersCheckBox);
         _fileFilterGroupBox.Controls.Add(_tempFolderHintLabel);
-        _fileFilterGroupBox.Location = new System.Drawing.Point(24, 166);
+        _fileFilterGroupBox.Location = new System.Drawing.Point(18, 18);
         _fileFilterGroupBox.Name = "_fileFilterGroupBox";
         _fileFilterGroupBox.Padding = new Padding(12);
         _fileFilterGroupBox.Size = new System.Drawing.Size(820, 88);
-        _fileFilterGroupBox.TabIndex = 1;
+        _fileFilterGroupBox.TabIndex = 0;
         _fileFilterGroupBox.TabStop = false;
         _fileFilterGroupBox.Text = "File activity filters";
 
@@ -477,11 +497,11 @@ partial class SettingsForm
         _fileTypesGroupBox.Controls.Add(_monitoredExtensionsLabel);
         _fileTypesGroupBox.Controls.Add(_monitoredExtensionsListBox);
         _fileTypesGroupBox.Controls.Add(_dragHintLabel);
-        _fileTypesGroupBox.Location = new System.Drawing.Point(24, 274);
+        _fileTypesGroupBox.Location = new System.Drawing.Point(24, 132);
         _fileTypesGroupBox.Name = "_fileTypesGroupBox";
         _fileTypesGroupBox.Padding = new Padding(12);
         _fileTypesGroupBox.Size = new System.Drawing.Size(820, 280);
-        _fileTypesGroupBox.TabIndex = 2;
+        _fileTypesGroupBox.TabIndex = 1;
         _fileTypesGroupBox.TabStop = false;
         _fileTypesGroupBox.Text = "Monitored file types";
 
@@ -563,7 +583,7 @@ partial class SettingsForm
         _exportOptionsTabPage.Name = "_exportOptionsTabPage";
         _exportOptionsTabPage.Padding = new Padding(16);
         _exportOptionsTabPage.Size = new System.Drawing.Size(880, 572);
-        _exportOptionsTabPage.TabIndex = 2;
+        _exportOptionsTabPage.TabIndex = 5;
         _exportOptionsTabPage.Text = "Export Options";
 
         // _exportIntroLabel
@@ -717,7 +737,7 @@ partial class SettingsForm
         _maintenanceTabPage.Name = "_maintenanceTabPage";
         _maintenanceTabPage.Padding = new Padding(16);
         _maintenanceTabPage.Size = new System.Drawing.Size(880, 572);
-        _maintenanceTabPage.TabIndex = 3;
+        _maintenanceTabPage.TabIndex = 6;
         _maintenanceTabPage.Text = "Maintenance";
 
         // _maintenanceIntroLabel
@@ -726,13 +746,11 @@ partial class SettingsForm
         _maintenanceIntroLabel.Name = "_maintenanceIntroLabel";
         _maintenanceIntroLabel.Size = new System.Drawing.Size(820, 24);
         _maintenanceIntroLabel.TabIndex = 0;
-        _maintenanceIntroLabel.Text = "Maintenance tools are visible only when DeskPulse is started with -maintenance or -m.";
+        _maintenanceIntroLabel.Text = "Database housekeeping applies the current rules to stored history and compacts the database.";
 
         // _maintenanceSubTabControl
         _maintenanceSubTabControl.Controls.Add(_maintenanceDatabaseTabPage);
-        _maintenanceSubTabControl.Controls.Add(_maintenanceStatisticsTabPage);
         _maintenanceSubTabControl.Controls.Add(_maintenanceCleanupTabPage);
-        _maintenanceSubTabControl.Controls.Add(_maintenanceLoggingRulesTabPage);
         _maintenanceSubTabControl.Controls.Add(_maintenanceDiagnosticsTabPage);
         _maintenanceSubTabControl.Location = new System.Drawing.Point(24, 48);
         _maintenanceSubTabControl.Name = "_maintenanceSubTabControl";
@@ -830,16 +848,16 @@ partial class SettingsForm
         _maintenanceStatisticsTabPage.Location = new System.Drawing.Point(4, 24);
         _maintenanceStatisticsTabPage.Name = "_maintenanceStatisticsTabPage";
         _maintenanceStatisticsTabPage.Padding = new Padding(16);
-        _maintenanceStatisticsTabPage.Size = new System.Drawing.Size(812, 478);
+        _maintenanceStatisticsTabPage.Size = new System.Drawing.Size(856, 528);
         _maintenanceStatisticsTabPage.TabIndex = 1;
-        _maintenanceStatisticsTabPage.Text = "Statistics";
+        _maintenanceStatisticsTabPage.Text = "Exclusions";
 
         _maintenanceStatisticsTopLabel.ForeColor = System.Drawing.SystemColors.GrayText;
         _maintenanceStatisticsTopLabel.Location = new System.Drawing.Point(18, 18);
         _maintenanceStatisticsTopLabel.Name = "_maintenanceStatisticsTopLabel";
         _maintenanceStatisticsTopLabel.Size = new System.Drawing.Size(740, 24);
         _maintenanceStatisticsTopLabel.TabIndex = 0;
-        _maintenanceStatisticsTopLabel.Text = "Use these Top 100 views to find noisy paths, folders, extensions, and processes that may need exclusions.";
+        _maintenanceStatisticsTopLabel.Text = "Use these Top 100 views to identify noisy files, folders, extensions, and processes and add suitable exclusions.";
 
         _statisticsViewComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _statisticsViewComboBox.Items.AddRange(new object[] { "Top 100 full paths", "Top 100 folders", "Top 100 file processes", "Top 100 extensions", "Top 100 program events" });
@@ -914,7 +932,6 @@ partial class SettingsForm
 
         _maintenanceGeneratedFilesGroupBox.BackColor = System.Drawing.SystemColors.Window;
         _maintenanceGeneratedFilesGroupBox.Controls.Add(_maintenanceDeleteExportButton);
-        _maintenanceGeneratedFilesGroupBox.Controls.Add(_maintenanceDeleteDiagnosticsButton);
         _maintenanceGeneratedFilesGroupBox.Controls.Add(_maintenanceDeleteStartupLogButton);
         _maintenanceGeneratedFilesGroupBox.Controls.Add(_maintenanceGeneratedFilesHintLabel);
         _maintenanceGeneratedFilesGroupBox.Location = new System.Drawing.Point(18, 18);
@@ -933,14 +950,6 @@ partial class SettingsForm
         _maintenanceDeleteExportButton.UseVisualStyleBackColor = true;
         _maintenanceDeleteExportButton.Click += MaintenanceDeleteExportButton_Click;
 
-        _maintenanceDeleteDiagnosticsButton.FlatStyle = FlatStyle.System;
-        _maintenanceDeleteDiagnosticsButton.Location = new System.Drawing.Point(184, 34);
-        _maintenanceDeleteDiagnosticsButton.Name = "_maintenanceDeleteDiagnosticsButton";
-        _maintenanceDeleteDiagnosticsButton.Size = new System.Drawing.Size(160, 30);
-        _maintenanceDeleteDiagnosticsButton.TabIndex = 1;
-        _maintenanceDeleteDiagnosticsButton.Text = "Delete Diagnostic Log";
-        _maintenanceDeleteDiagnosticsButton.UseVisualStyleBackColor = true;
-        _maintenanceDeleteDiagnosticsButton.Click += MaintenanceDeleteDiagnosticsButton_Click;
 
         _maintenanceDeleteStartupLogButton.FlatStyle = FlatStyle.System;
         _maintenanceDeleteStartupLogButton.Location = new System.Drawing.Point(360, 34);
@@ -1049,8 +1058,8 @@ partial class SettingsForm
         _maintenanceLoggingRulesTabPage.Location = new System.Drawing.Point(4, 24);
         _maintenanceLoggingRulesTabPage.Name = "_maintenanceLoggingRulesTabPage";
         _maintenanceLoggingRulesTabPage.Padding = new Padding(16);
-        _maintenanceLoggingRulesTabPage.Size = new System.Drawing.Size(812, 478);
-        _maintenanceLoggingRulesTabPage.TabIndex = 3;
+        _maintenanceLoggingRulesTabPage.Size = new System.Drawing.Size(856, 528);
+        _maintenanceLoggingRulesTabPage.TabIndex = 2;
         _maintenanceLoggingRulesTabPage.Text = "Logging Rules";
 
         _maintenanceAddRuleGroupBox.BackColor = System.Drawing.SystemColors.Window;
@@ -1253,33 +1262,19 @@ partial class SettingsForm
         _maintenanceDiagnosticsTabPage.Text = "Diagnostics";
 
         _maintenanceDiagnosticsGroupBox.BackColor = System.Drawing.SystemColors.Window;
-        _maintenanceDiagnosticsGroupBox.Controls.Add(_maintenanceDiagnosticsStatusLabel);
-        _maintenanceDiagnosticsGroupBox.Controls.Add(_maintenanceOpenDiagnosticsLogButton);
         _maintenanceDiagnosticsGroupBox.Controls.Add(_maintenanceShowActiveExtensionsButton);
         _maintenanceDiagnosticsGroupBox.Controls.Add(_maintenanceShowStartupStatusButton);
         _maintenanceDiagnosticsGroupBox.Location = new System.Drawing.Point(18, 20);
         _maintenanceDiagnosticsGroupBox.Name = "_maintenanceDiagnosticsGroupBox";
-        _maintenanceDiagnosticsGroupBox.Size = new System.Drawing.Size(760, 186);
+        _maintenanceDiagnosticsGroupBox.Size = new System.Drawing.Size(760, 112);
         _maintenanceDiagnosticsGroupBox.TabIndex = 0;
         _maintenanceDiagnosticsGroupBox.TabStop = false;
         _maintenanceDiagnosticsGroupBox.Text = "Diagnostics";
 
-        _maintenanceDiagnosticsStatusLabel.ForeColor = System.Drawing.SystemColors.GrayText;
-        _maintenanceDiagnosticsStatusLabel.Location = new System.Drawing.Point(18, 30);
-        _maintenanceDiagnosticsStatusLabel.Name = "_maintenanceDiagnosticsStatusLabel";
-        _maintenanceDiagnosticsStatusLabel.Size = new System.Drawing.Size(700, 40);
-        _maintenanceDiagnosticsStatusLabel.Text = "Diagnostic logging status is loaded when the form opens.";
 
-        _maintenanceOpenDiagnosticsLogButton.FlatStyle = FlatStyle.System;
-        _maintenanceOpenDiagnosticsLogButton.Location = new System.Drawing.Point(18, 82);
-        _maintenanceOpenDiagnosticsLogButton.Name = "_maintenanceOpenDiagnosticsLogButton";
-        _maintenanceOpenDiagnosticsLogButton.Size = new System.Drawing.Size(170, 30);
-        _maintenanceOpenDiagnosticsLogButton.Text = "Open Diagnostic Log";
-        _maintenanceOpenDiagnosticsLogButton.UseVisualStyleBackColor = true;
-        _maintenanceOpenDiagnosticsLogButton.Click += MaintenanceOpenDiagnosticsLogButton_Click;
 
         _maintenanceShowActiveExtensionsButton.FlatStyle = FlatStyle.System;
-        _maintenanceShowActiveExtensionsButton.Location = new System.Drawing.Point(202, 82);
+        _maintenanceShowActiveExtensionsButton.Location = new System.Drawing.Point(18, 40);
         _maintenanceShowActiveExtensionsButton.Name = "_maintenanceShowActiveExtensionsButton";
         _maintenanceShowActiveExtensionsButton.Size = new System.Drawing.Size(180, 30);
         _maintenanceShowActiveExtensionsButton.Text = "Show Active Extensions";
@@ -1287,7 +1282,7 @@ partial class SettingsForm
         _maintenanceShowActiveExtensionsButton.Click += MaintenanceShowActiveExtensionsButton_Click;
 
         _maintenanceShowStartupStatusButton.FlatStyle = FlatStyle.System;
-        _maintenanceShowStartupStatusButton.Location = new System.Drawing.Point(398, 82);
+        _maintenanceShowStartupStatusButton.Location = new System.Drawing.Point(214, 40);
         _maintenanceShowStartupStatusButton.Name = "_maintenanceShowStartupStatusButton";
         _maintenanceShowStartupStatusButton.Size = new System.Drawing.Size(170, 30);
         _maintenanceShowStartupStatusButton.Text = "Show Startup Status";
@@ -1298,7 +1293,7 @@ partial class SettingsForm
         _maintenanceRegistryGroupBox.Controls.Add(_maintenanceRegistryPathLabel);
         _maintenanceRegistryGroupBox.Controls.Add(_maintenanceRemoveRegistrySettingsButton);
         _maintenanceRegistryGroupBox.Controls.Add(_maintenanceRegistryHintLabel);
-        _maintenanceRegistryGroupBox.Location = new System.Drawing.Point(18, 226);
+        _maintenanceRegistryGroupBox.Location = new System.Drawing.Point(18, 152);
         _maintenanceRegistryGroupBox.Name = "_maintenanceRegistryGroupBox";
         _maintenanceRegistryGroupBox.Size = new System.Drawing.Size(760, 156);
         _maintenanceRegistryGroupBox.TabIndex = 1;
@@ -1402,7 +1397,9 @@ partial class SettingsForm
         _behaviourGroupBox.ResumeLayout(false);
         _startupGroupBox.ResumeLayout(false);
         _exportOptionsTabPage.ResumeLayout(false);
-        _filesTabPage.ResumeLayout(false);
+        _fileActivityRulesTabPage.ResumeLayout(false);
+        _rulesSubTabControl.ResumeLayout(false);
+        _rulesTabPage.ResumeLayout(false);
         _generalTabPage.ResumeLayout(false);
         _settingsTabControl.ResumeLayout(false);
         ResumeLayout(false);

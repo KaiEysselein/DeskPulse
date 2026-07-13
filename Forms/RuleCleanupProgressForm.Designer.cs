@@ -2,7 +2,7 @@ using System.Windows.Forms;
 
 namespace DeskPulse;
 
-partial class MaintenanceProgressForm
+partial class RuleCleanupProgressForm
 {
     private System.ComponentModel.IContainer components = null!;
     private Label titleLabel = null!;
@@ -62,7 +62,7 @@ partial class MaintenanceProgressForm
         closeButton.TabIndex = 3;
         closeButton.Text = "Close";
         // 
-        // MaintenanceProgressForm
+        // RuleCleanupProgressForm
         // 
         AutoScaleMode = AutoScaleMode.Font;
         BackColor = System.Drawing.SystemColors.Window;
@@ -76,9 +76,9 @@ partial class MaintenanceProgressForm
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        Name = "MaintenanceProgressForm";
+        Name = "RuleCleanupProgressForm";
         StartPosition = FormStartPosition.CenterParent;
-        Text = "DeskPulse Maintenance";
+        Text = "DeskPulse Cleanup";
         ResumeLayout(false);
     }
 }
