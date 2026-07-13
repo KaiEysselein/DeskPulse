@@ -1,31 +1,37 @@
-# Changelog
+﻿# Changelog
 
-### Changed — remove DeskPulse lifecycle entries from User Activity
+## [0.2.0.0] - 2026-07-13
 
-- Removed creation of `AppStarted` and `AppStopped` records in the User Activity log.
-- Removed those obsolete event types from the default User Activity rules.
-- Existing `AppStarted` and `AppStopped` User Activity rules are removed automatically when settings load or save.
-- Historical records already stored in SQLite are left unchanged and can still be deleted from View Log or by database housekeeping.
+### Architecture and deployment
 
-### Changed — consistent window icons and full-result Log View sorting
+- Split DeskPulse into Windows Service, tray app and shared-library projects.
+- Moved ETW, application and Windows session monitoring into `DeskPulse.Service`.
+- Removed normal elevation requirements from the tray application.
+- Added secured local named-pipe communication between tray and service.
+- Added self-contained win-x64 build and publish scripts.
+- Added an Inno Setup installer that registers and starts `DeskPulse.Service` and starts the tray once per user login.
+- Added comprehensive uninstall cleanup while preserving `Documents\DeskPulse` and its database.
+- Corrected the pipe ACL package reference to `System.IO.Pipes.AccessControl` 5.0.0.
 
-- Applied the DeskPulse application icon consistently to every WinForms window and dialog.
-- Changed Log View column sorting from page-local grid sorting to SQLite result-set sorting.
-- Clicking a sortable Log View header now resets that activity tab to page 1, reloads the fully sorted result set, and displays the active sort-direction glyph.
+### Controls and reliability
 
-### Changed — View Log multi-selection and deletion
+- Added Pause Logging / Resume Logging to the tray menu.
+- Added service status reporting and logging-state feedback.
+- Added Settings → Maintenance → Restart Windows Service.
+- Ensured only one top-level DeskPulse form is open at a time.
+- Corrected named-pipe access for the non-elevated tray.
 
-- Enabled multi-row selection in View Log.
-- Added a **Delete** button for permanently deleting the selected records from the active File, App, or User Activity table.
-- The **Create Rule** button is enabled only when exactly one row is selected and is disabled when multiple rows are selected.
-- Deletion requires confirmation, uses a SQLite transaction, and refreshes the active page afterward.
+### Logging and reports
 
-### Changed — cancellable database housekeeping
-
-- Added a **Cancel** button to the database-housekeeping progress window.
-- Cancellation is checked while historical records are scanned and between deletion batches.
-- Historical deletions now run inside a SQLite transaction; cancelling before commit rolls back all pending deletions.
-- Once deletion has been committed and SQLite `VACUUM` begins, compaction must finish and can no longer be cancelled safely.
+- Added Windows startup, login, logout, lock and unlock logging under User Activity.
+- Added `DeskPulse service started` and `DeskPulse started (possible login)` wording.
+- Removed Event Type from active database, logs and forms.
+- Added full-result database sorting with page reset to page 1.
+- Added exact visible-record ranges in Log View.
+- Changed default report dates to earliest database record through today and added Today Only.
+- Added optional exclusion-rule creation during deletion.
+- Applied the DeskPulse icon consistently to all forms.
+- Set the default database folder to `%USERPROFILE%\Documents\DeskPulse`.
 
 ## [0.1.3.2] - 2026-07-13
 
@@ -710,3 +716,15 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 ### View Log pagination status
 - The status line now shows the exact visible record range and filtered total, for example `Showing 1,001 to 1,500 of 8,999 records.`
 - The displayed range updates when paging, sorting, refreshing, changing dates, or switching activity tabs.
+
+- Added **Restart Windows Service** under Settings → Maintenance. The action requests administrator approval, restarts `DeskPulse.Service`, waits for it to return to Running, and reports the resulting service status.
+- Corrected the Inno Setup service name to `DeskPulse.Service` so installer maintenance actions target the same service registered by the deployment scripts.
+
+- Fixed service/tray named-pipe permissions so a normal non-elevated tray user can query status and issue pause/resume/reload commands to the LocalSystem service.
+
+### 0.2.0.0 - Single active tray window
+- Opening View Log, Settings, or About from the tray now closes any other DeskPulse top-level window first.
+- Tray-opened windows are non-modal, allowing the user to switch directly between DeskPulse windows from the tray menu.
+
+### 0.2.0.0 build correction
+- Fixed service restore failure by changing `System.IO.Pipes.AccessControl` from unavailable version `8.0.0` to stable version `5.0.0`.

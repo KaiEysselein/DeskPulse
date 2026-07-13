@@ -1,40 +1,21 @@
 # DeskPulse Roadmap
 
-## Current development baseline
+## Current baseline: 0.2.0.0
 
-```text
-0.1.3.2
-```
+The service/tray split, installer, pause/resume control, service restart control and core Log View improvements are implemented.
 
-Version `0.1.3.2` unifies File and Folder filtering into one File Activity wildcard model.
+## 0.2.x priorities
 
-Completed in this version:
+- Complete clean-PC installation, upgrade, restart and uninstall regression testing.
+- Move all tray-side database mutations behind service IPC so the service becomes the sole database writer.
+- Add structured and versioned named-pipe request/response contracts.
+- Add service health, reconnect and diagnostics views.
+- Add installer logging and clearer upgrade/recovery diagnostics.
+- Review multi-user Windows behaviour and per-user tray startup.
+- Add automated database backup/restore controls.
 
-- removed the separate Folder Activity rules tab
-- removed the duplicate Folder Activity View Log tab
-- added path-aware `*`, `?`, and recursive `**` matching
-- added **Add Folder...** to create one-level or recursive patterns
-- migrated legacy folder rules to File Activity JSON
-- advanced registry schema to version 5
-- retained schema-1 rule-package import compatibility
-- updated database housekeeping and documentation
+## Later
 
-## Verification before promotion
-
-- compile and runtime-test locally
-- test migration using a copy of real registry values
-- verify direct-folder and recursive wildcard boundaries
-- confirm App Activity executable precedence
-- test View Log rule creation and cleanup
-- test current-page XLSX export
-- test full database cleanup and compaction
-
-## Candidate next work
-
-- move common glob matching into one reusable class used by monitoring, cleanup, and View Log rule previews
-- add an optional rule-test panel showing which path a pattern matches
-- add validation and visual warnings for malformed path patterns
-- add database backup before destructive housekeeping
-- improve asynchronous loading of Settings and View Log
-- add cancellation to long database operations
-- review installer and signed-release packaging
+- Code-sign release binaries and installer.
+- Add automated build/release workflow for GitHub.
+- Add optional retention policies and performance safeguards for very large databases.

@@ -1,134 +1,64 @@
-# DeskPulse
+# DeskPulse 0.2.0.0
 
-DeskPulse is a Windows tray application built with C# / .NET 8 WinForms. It records selected file, application, and user/session activity in a local SQLite database and exports data to Excel.
+DeskPulse is a Windows activity logger split into a privileged Windows service and a normal per-user tray application.
 
-## Version
+## Architecture
 
-Current development version: `0.1.3.2`
+- `DeskPulse.Service` owns ETW file monitoring, application monitoring, Windows startup/session events and database writes.
+- `DeskPulse.Tray` provides the tray menu, Settings, View Log, Export, Maintenance and About without requiring elevation.
+- `DeskPulse.Shared` contains models, rules, settings, database access and shared monitoring logic.
+- The service and tray communicate through the local named pipe `DeskPulse.Service.0.2`.
 
-## Current tray menu
+## Data locations
 
-Left-click the tray icon:
+- Shared settings: `%ProgramData%\DeskPulse\settings.json`
+- Activity database and exports: `%USERPROFILE%\Documents\DeskPulse`
+- Default database: `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`
 
-```text
-View Log...
-Settings...
-────────────
-About
-Exit
-```
-
-There is no right-click tray menu.
-
-## Rules model
-
-DeskPulse uses strict ordered rules. Rules are evaluated from top to bottom and the first matching rule wins.
-
-```text
-Matching Include → log
-Matching Exclude → do not log
-No matching rule → do not log
-```
-
-Settings contains three rule tabs:
-
-```text
-File Activity
-App Activity
-User Activity
-```
-
-The previous separate Folder Activity rule list has been removed. Folder filtering is now expressed as File Activity path wildcards.
-
-### File Activity patterns
-
-Examples:
-
-```text
-*.xlsx                         all XLSX filenames
-Report*.pdf                    matching PDF filenames
-C:\Projects\Specific.dwg       one exact file
-C:\Projects\*                  all files directly in C:\Projects
-C:\Projects\**\*               all files in C:\Projects and every subfolder
-C:\Projects\**\*.dwg           all DWG files recursively
-```
-
-Wildcard meaning:
-
-- `*` matches characters within one path segment and never crosses a folder separator.
-- `?` matches one character within one path segment.
-- `**` matches zero or more complete folder levels.
-- Matching is case-insensitive on Windows.
-- A complete `*.*` path segment is treated as `*` for Windows-style compatibility.
-
-The File Activity tab includes **Browse...** for an exact file and **Add Folder...** for creating either a one-folder pattern (`\*`) or a recursive pattern (`\**\*`).
-
-Explicit App Activity rules retain precedence for matching executable files.
-
-## Registry settings
-
-Current settings schema: `5`
-
-```text
-HKCU\Software\DeskPulse
-├─ SettingsSchemaVersion
-├─ General
-├─ Rules
-│  ├─ FileActivity
-│  ├─ AppActivity
-│  └─ UserActivity
-└─ Export
-```
-
-Rule lists are stored as JSON. On first load of schema 5, legacy `Rules\FolderActivity` rules are converted into File Activity wildcard rules:
-
-```text
-folder only       → <folder>\*
-include subfolders → <folder>\**\*
-```
-
-After migration, the obsolete `Rules\FolderActivity` value is removed.
-
-## View Log
-
-View Log contains:
-
-```text
-File Activity
-App Activity
-User Activity
-```
-
-Each tab loads 500 records per page and supports First, Previous, Next, and Last navigation. Export writes only the active tab and currently displayed page. Selecting one row enables **Create Rule** and **More...** opens the complete stored record.
-
-## Database housekeeping
-
-Settings → Maintenance contains **Clean database with current rules...**. It reapplies the currently displayed rules to all historical records, removes records that would no longer be logged, and compacts the SQLite database.
+The uninstaller removes the program, service, startup registrations and settings, but intentionally preserves the database and exports in `Documents\DeskPulse`.
 
 ## Build
 
-```powershell
-dotnet build
-```
-
-## Publish a standalone executable
+Open PowerShell in the repository root:
 
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true `
-  -p:IncludeNativeLibrariesForSelfExtract=true `
-  --output ".\publish\v0.1.3.2"
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\Build.ps1
+.\scripts\Publish.ps1
 ```
 
-Output:
+Published self-contained x64 applications are created under:
+
+- `publish\service\DeskPulse.Service.exe`
+- `publish\tray\DeskPulse.Tray.exe`
+
+The target PC does not require .NET to be installed.
+
+## Installer
+
+After publishing:
+
+```powershell
+.\Installer\Build-Installer.ps1
+```
+
+The installer is created at:
 
 ```text
-publish\v0.1.3.2\DeskPulse.exe
+Installer\Output\DeskPulse_Setup_0.2.0.0.exe
 ```
 
-DeskPulse requires Administrator privileges because kernel ETW file monitoring requires elevation.
+The installer registers `DeskPulse.Service` for automatic startup and creates one per-user Startup-folder shortcut for the tray.
 
+## Main controls
 
-### Cancelling database housekeeping
+- **Pause Logging / Resume Logging** in the tray menu temporarily stops and restarts file and program monitoring without stopping the service.
+- **Service status** reports service connectivity and logging state.
+- **Settings → Maintenance → Restart Windows Service** restarts the service after UAC approval.
+- Only one top-level DeskPulse form is kept open at a time.
 
-The Maintenance cleanup progress window includes **Cancel**. Cancelling during the scan or deletion phase stops the operation and rolls back uncommitted deletions. Database compaction starts only after deletions are committed and must then finish.
+## Repository
+
+Project page: https://github.com/KaiEysselein/DeskPulse
+
+License: GNU GPL v3.
