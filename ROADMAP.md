@@ -1,12 +1,12 @@
-﻿# DeskPulse Roadmap
+# DeskPulse Roadmap
 
-## Current baseline: 0.2.0.1
+## Current baseline: 0.2.1.2
 
 The service/tray split, installer, pause/resume control, service restart control, Windows-system activity controls, and service-owned SQLite write architecture are implemented.
 
 ## Baseline status
 
-Version 0.2.0.1 is locked for compilation, installation and acceptance testing. New feature work should use the next development version.
+Version 0.2.1.2 is locked for compilation, installation and acceptance testing. New feature work should use the next development version.
 
 ## 0.2.x priorities
 

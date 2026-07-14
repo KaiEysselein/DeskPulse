@@ -1,7 +1,38 @@
-﻿
-- Fixed selected-record deletion waiting indefinitely: service write commands now use the monitor-owned database instance and shared database lock instead of pausing ETW and opening a competing database instance.
-- View Log deletion now awaits the service asynchronously so the form remains responsive.
 # Changelog
+
+## [0.2.1.2] - 2026-07-14
+
+### Fixed
+
+- Replaced the non-working Settings **Cancel** action with a consistent **Save**, **Save and Close**, and **Close** footer.
+- Added unsaved-change protection for **Close**, the window X, and Esc.
+- Corrected tray menu command activation so View Log, Settings, About, and Quit respond on the first click and restore an existing window instead of creating duplicates.
+- Renamed **Exit tray** to **Quit DeskPulse**.
+- Added live database-housekeeping progress from the Windows service to the tray, including record counts and separate File Activity, App Activity, deletion, and compaction stages.
+- Throttled deletion progress updates to each 10% of records deleted.
+
+### Changed
+
+- Updated all active application, project, publish, installer, documentation, handover, and release references to 0.2.1.2.
+
+## [0.2.1.1] - 2026-07-14
+
+### Changed
+
+- Rules Import now presents explicit **Merge with existing rules** and **Replace existing rules** radio-button modes.
+- Merge is the safer default: existing File Activity and App Activity rules are preserved, new imported rules are appended, and matching rules are updated without duplicates.
+- User Activity rules remain unchanged by rules import.
+
+## [0.2.1.0] - 2026-07-14
+
+### Fixed
+
+- Removed the duplicated installer option for starting the DeskPulse tray; the option now appears only on the final installer page.
+- Prevented rule-based database housekeeping from scanning or deleting user/session activity records.
+- Simplified User Activity settings to one Log checkbox per supported predefined event.
+- Preserved unchecked User Activity events across Save and reload, including migration from the former Include/Exclude representation.
+- Verified File Activity, App Activity, User Activity, and Export Options reset-default behaviour.
+- Removed the obsolete hidden Maintenance logging-rules Reset Defaults control and handler.
 
 ## [0.2.0.1] - 2026-07-14
 

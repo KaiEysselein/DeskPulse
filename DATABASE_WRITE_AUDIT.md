@@ -1,4 +1,4 @@
-﻿# DeskPulse 0.2.0.1 Database Write Audit
+# DeskPulse 0.2.1.2 Database Write Audit
 
 The tray application has been audited for SQLite write access.
 

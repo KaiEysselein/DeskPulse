@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -20,7 +20,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.2.0.1";
+    public const string Version = "0.2.1.2";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -1758,29 +1758,20 @@ public sealed class DeskPulseDatabase : IDisposable
             connection.Open();
             ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
 
-            progress?.Report(new ExportProgressInfo(1, "1%   Reading database history"));
+            progress?.Report(new ExportProgressInfo(18, "18%  Preparing database housekeeping"));
 
             var activityIdsToDelete = new List<long>();
-            var userIdsToDelete = new List<long>();
             var programIdsToDelete = new List<long>();
 
-            long totalRecords = CountTableRows(connection, "ActivityEvents") +
-                                CountTableRows(connection, "UserEvents") +
-                                CountTableRows(connection, "ProgramEvents");
-            long scanned = 0;
+            // User/session history is intentionally excluded from rule-based housekeeping.
+            // It can only be removed through the dedicated Clear User/Session Records action.
+            var activityTotal = CountTableRows(connection, "ActivityEvents");
+            var programTotal = CountTableRows(connection, "ProgramEvents");
+            progress?.Report(new ExportProgressInfo(20,
+                "20%  Counting records: " + activityTotal.ToString("N0", CultureInfo.InvariantCulture) +
+                " file and " + programTotal.ToString("N0", CultureInfo.InvariantCulture) + " app activity records"));
 
-            void ReportScanProgress()
-            {
-                scanned++;
-                if (scanned % 250 != 0 && scanned != totalRecords)
-                    return;
-
-                var percent = totalRecords == 0 ? 35 : 1 + (int)Math.Round((double)scanned / totalRecords * 34D);
-                progress?.Report(new ExportProgressInfo(Math.Min(35, percent),
-                    Math.Min(35, percent).ToString(CultureInfo.InvariantCulture) + "%   Evaluating historical records (" +
-                    scanned.ToString("N0", CultureInfo.InvariantCulture) + " of " + totalRecords.ToString("N0", CultureInfo.InvariantCulture) + ")"));
-            }
-
+            long activityScanned = 0;
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "SELECT Id, COALESCE(FullPath, ''), COALESCE(ProcessName, ''), COALESCE(Extension, '') FROM ActivityEvents;";
@@ -1792,28 +1783,25 @@ public sealed class DeskPulseDatabase : IDisposable
                     var fullPath = reader.GetString(1);
                     var processName = reader.GetString(2);
                     var extension = reader.GetString(3);
-                    var keep = ShouldKeepHistoricalFileRecord(fullPath, processName, extension, settings);
-                    if (!keep)
+                    if (!ShouldKeepHistoricalFileRecord(fullPath, processName, extension, settings))
                         activityIdsToDelete.Add(id);
-                    ReportScanProgress();
+
+                    activityScanned++;
+                    if (activityScanned % 250 == 0 || activityScanned == activityTotal)
+                    {
+                        var percent = activityTotal == 0 ? 60 : 20 + (int)Math.Round((double)activityScanned / activityTotal * 40D);
+                        progress?.Report(new ExportProgressInfo(Math.Min(60, percent),
+                            Math.Min(60, percent).ToString(CultureInfo.InvariantCulture) + "%  Checking File Activity: " +
+                            activityScanned.ToString("N0", CultureInfo.InvariantCulture) + " of " + activityTotal.ToString("N0", CultureInfo.InvariantCulture) +
+                            "; matches: " + activityIdsToDelete.Count.ToString("N0", CultureInfo.InvariantCulture)));
+                    }
                 }
             }
 
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT Id, COALESCE(EventDescription, '') FROM UserEvents;";
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var id = reader.GetInt64(0);
-                    var eventDescription = reader.GetString(1);
-                    if (!LoggingRulesEngine.IsUserActivityMonitored("", eventDescription, settings.UserActivityRules))
-                        userIdsToDelete.Add(id);
-                    ReportScanProgress();
-                }
-            }
+            if (activityTotal == 0)
+                progress?.Report(new ExportProgressInfo(60, "60%  No File Activity records to check"));
 
+            long programScanned = 0;
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "SELECT Id, COALESCE(FilePath, ''), COALESCE(ProgramName, '') FROM ProgramEvents;";
@@ -1828,39 +1816,59 @@ public sealed class DeskPulseDatabase : IDisposable
                         (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsProcessExcluded(programName)) ||
                         !LoggingRulesEngine.IsProgramActivityMonitored(filePath, programName, settings.AppActivityRules))
                         programIdsToDelete.Add(id);
-                    ReportScanProgress();
+
+                    programScanned++;
+                    if (programScanned % 250 == 0 || programScanned == programTotal)
+                    {
+                        var percent = programTotal == 0 ? 80 : 60 + (int)Math.Round((double)programScanned / programTotal * 20D);
+                        progress?.Report(new ExportProgressInfo(Math.Min(80, percent),
+                            Math.Min(80, percent).ToString(CultureInfo.InvariantCulture) + "%  Checking App Activity: " +
+                            programScanned.ToString("N0", CultureInfo.InvariantCulture) + " of " + programTotal.ToString("N0", CultureInfo.InvariantCulture) +
+                            "; matches: " + programIdsToDelete.Count.ToString("N0", CultureInfo.InvariantCulture)));
+                    }
                 }
             }
 
-            var totalToDelete = activityIdsToDelete.Count + userIdsToDelete.Count + programIdsToDelete.Count;
+            if (programTotal == 0)
+                progress?.Report(new ExportProgressInfo(80, "80%  No App Activity records to check"));
+
+            var totalToDelete = activityIdsToDelete.Count + programIdsToDelete.Count;
             if (totalToDelete == 0)
             {
-                progress?.Report(new ExportProgressInfo(92, "92%  No conflicting records found; compacting database"));
+                progress?.Report(new ExportProgressInfo(98, "98%  No matching records found; compacting database"));
                 ExecuteNonQuery(connection, "VACUUM;");
                 progress?.Report(new ExportProgressInfo(100, "100% Database housekeeping complete"));
                 return new MaintenanceExclusionCleanupResult();
             }
 
             var deleted = 0;
-            void ReportDeleteProgress(int count, string description)
+            var lastReportedDeletionPercent = 0;
+            void ReportDeleteProgress(int count)
             {
                 deleted += count;
-                var percent = 35 + (int)Math.Round((double)deleted / Math.Max(1, totalToDelete) * 55D);
-                percent = Math.Max(36, Math.Min(90, percent));
-                progress?.Report(new ExportProgressInfo(percent,
-                    percent.ToString(CultureInfo.InvariantCulture) + "%   Removing " + description + " (" +
-                    deleted.ToString("N0", CultureInfo.InvariantCulture) + " of " + totalToDelete.ToString("N0", CultureInfo.InvariantCulture) + ")"));
+                var deletionPercent = Math.Min(100, (int)Math.Floor((double)deleted / totalToDelete * 100D));
+                var threshold = deletionPercent >= 100 ? 100 : (deletionPercent / 10) * 10;
+                if (threshold <= lastReportedDeletionPercent)
+                    return;
+
+                lastReportedDeletionPercent = threshold;
+                var overallPercent = 80 + (int)Math.Round(threshold / 100D * 15D);
+                progress?.Report(new ExportProgressInfo(Math.Min(95, overallPercent),
+                    Math.Min(95, overallPercent).ToString(CultureInfo.InvariantCulture) + "%  Deleting records: " +
+                    threshold.ToString(CultureInfo.InvariantCulture) + "% — " +
+                    deleted.ToString("N0", CultureInfo.InvariantCulture) + " of " + totalToDelete.ToString("N0", CultureInfo.InvariantCulture)));
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new ExportProgressInfo(80,
+                "80%  Deleting records: 0% — 0 of " + totalToDelete.ToString("N0", CultureInfo.InvariantCulture)));
 
+            cancellationToken.ThrowIfCancellationRequested();
             using (var transaction = connection.BeginTransaction())
             {
                 try
                 {
-                    DeleteRowsByIds(connection, transaction, "ActivityEvents", activityIdsToDelete, cancellationToken, count => ReportDeleteProgress(count, "file activity records"));
-                    DeleteRowsByIds(connection, transaction, "UserEvents", userIdsToDelete, cancellationToken, count => ReportDeleteProgress(count, "user activity records"));
-                    DeleteRowsByIds(connection, transaction, "ProgramEvents", programIdsToDelete, cancellationToken, count => ReportDeleteProgress(count, "app activity records"));
+                    DeleteRowsByIds(connection, transaction, "ActivityEvents", activityIdsToDelete, cancellationToken, ReportDeleteProgress);
+                    DeleteRowsByIds(connection, transaction, "ProgramEvents", programIdsToDelete, cancellationToken, ReportDeleteProgress);
                     cancellationToken.ThrowIfCancellationRequested();
                     transaction.Commit();
                 }
@@ -1871,14 +1879,14 @@ public sealed class DeskPulseDatabase : IDisposable
                 }
             }
 
-            progress?.Report(new ExportProgressInfo(92, "92%  Deletions committed; compacting SQLite database (cannot be cancelled)"));
+            progress?.Report(new ExportProgressInfo(98, "98%  Deletions committed; compacting SQLite database"));
             ExecuteNonQuery(connection, "VACUUM;");
             progress?.Report(new ExportProgressInfo(100, "100% Database housekeeping complete"));
 
             return new MaintenanceExclusionCleanupResult
             {
                 ActivityRecordsDeleted = activityIdsToDelete.Count,
-                UserRecordsDeleted = userIdsToDelete.Count,
+                UserRecordsDeleted = 0,
                 ProgramRecordsDeleted = programIdsToDelete.Count
             };
         }
@@ -5102,7 +5110,7 @@ public sealed class AppSettings
     private static bool EnsureRequiredUserActivityRules(AppSettings settings)
     {
         var changed = false;
-        var requiredEvents = new[]
+        var supportedEvents = new[]
         {
             "DeskPulseStarted",
             "DeskPulseStopped",
@@ -5110,25 +5118,36 @@ public sealed class AppSettings
             "SessionLocked",
             "SessionUnlocked",
             "SessionLogon",
-            "SessionLogoff"
+            "SessionLogoff",
+            "ConsoleConnect",
+            "ConsoleDisconnect",
+            "RemoteConnect",
+            "RemoteDisconnect"
         };
 
-        foreach (var eventType in requiredEvents)
+        // Migrate the old On + Include/Exclude representation to the new single
+        // checkbox model. A prior Exclude selection becomes an unchecked event.
+        foreach (var setting in settings.UserActivityRuleSettings.Where(setting =>
+                     setting.RuleType.Equals("event", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (setting.Action.Equals("Exclude", StringComparison.OrdinalIgnoreCase))
+            {
+                setting.Enabled = false;
+                setting.Action = "Include";
+                changed = true;
+            }
+        }
+
+        // Add newly supported predefined events without overriding any existing
+        // enabled/disabled choice made by the user.
+        foreach (var eventType in supportedEvents)
         {
             var existing = settings.UserActivityRuleSettings.FirstOrDefault(setting =>
                 setting.RuleType.Equals("event", StringComparison.OrdinalIgnoreCase) &&
                 setting.Value.Trim().Equals(eventType, StringComparison.OrdinalIgnoreCase));
 
             if (existing != null)
-            {
-                if (!existing.Enabled || !existing.Action.Equals("Include", StringComparison.OrdinalIgnoreCase))
-                {
-                    existing.Enabled = true;
-                    existing.Action = "Include";
-                    changed = true;
-                }
                 continue;
-            }
 
             settings.UserActivityRuleSettings.Add(new ActivityRuleSetting
             {

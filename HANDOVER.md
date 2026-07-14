@@ -1,10 +1,10 @@
-﻿# DeskPulse 0.2.0.1 Handover
+# DeskPulse 0.2.1.2 Handover
 
 - Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
 
 ## Authoritative baseline
 
-This package is the complete DeskPulse 0.2.0.1 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.0.1.
+This package is the complete DeskPulse 0.2.1.2 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.1.2.
 
 Repository: https://github.com/KaiEysselein/DeskPulse
 
@@ -37,7 +37,21 @@ User Activity includes Windows startup, logon/logoff, lock/unlock, `DeskPulse se
 
 Legacy registry settings are migrated into the shared settings file. The uninstaller intentionally preserves `Documents\DeskPulse`, including the activity database and exports, while removing program files, service registration, shared settings and startup registrations.
 
-## Completed 0.2.0.1 functionality
+## Completed 0.2.1.2 functionality
+
+### 0.2.1.2 corrective changes
+
+- Settings uses **Save**, **Save and Close**, and **Close** consistently on editable tabs; Close/X/Esc prompt before discarding unsaved changes.
+- Tray menu commands activate on the first click, restore an already-open window, and avoid duplicate top-level forms.
+- Tray menu text is **Quit DeskPulse**.
+- Database housekeeping streams service-side progress to the tray with real counts and stages.
+- Deletion progress is reported only when each 10% threshold is crossed.
+- Rules Import provides **Merge** and **Replace** modes.
+- Installer startup choice appears only on the final completion page.
+- Rule-based database housekeeping processes file and app activity only; user/session history is preserved.
+- User Activity uses one Log checkbox per supported predefined event, and unchecked events persist.
+- Reset Defaults remains available on File Activity, App Activity, User Activity, and Export Options.
+
 
 - Service/tray/shared-library architecture.
 - Self-contained win-x64 publish output; target PCs do not require .NET.
@@ -46,7 +60,7 @@ Legacy registry settings are migrated into the shared settings file. The uninsta
 - Pause/Resume Logging tray toggle.
 - Service status command and corrected named-pipe permissions.
 - Maintenance command to restart the Windows service after UAC approval.
-- Context-sensitive Settings footer: Save/Cancel on editable tabs, Import/Export only on Rules, and Close only on Maintenance; the Windows-system tracking toggle saves immediately.
+- Context-sensitive Settings footer: Save, Save and Close, and Close on editable tabs; Import/Export only on Rules; Close only on Maintenance; the Windows-system tracking toggle saves immediately.
 - Single active top-level DeskPulse form.
 - Consistent form icons.
 - Full-result Log View sorting with reset to page 1.
@@ -86,13 +100,13 @@ Use either the installer or the manual service scripts for a test installation, 
 
 ## Absolute data-path migration
 
-DeskPulse 0.2.0.1 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
+DeskPulse 0.2.1.2 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
 
 
 
 ## Windows system activity control
 
-Version 0.2.0.1 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
+Version 0.2.1.2 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
 
 ## Latest correction
 
@@ -105,9 +119,11 @@ All SQLite write operations initiated by the tray (selected-record deletion, rul
 
 ## Baseline lock
 
-Version **0.2.0.1** is locked as the authoritative stabilisation baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.0.1 corrective rebuild is required during compilation or acceptance testing.
+Version **0.2.1.2** is locked as the authoritative stabilisation baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.1.2 corrective rebuild is required during compilation or acceptance testing.
 
 ## Selected-record deletion stability
 
 - Fixed selected-record deletion waiting indefinitely: service write commands now use the monitor-owned database instance and shared database lock instead of pausing ETW and opening a competing database instance.
 - View Log deletion now awaits the service asynchronously so the form remains responsive.
+
+- Rules Import offers **Merge with existing rules** (default) or **Replace existing rules**. Merge updates matching File/App rules and adds new ones without duplicates; User Activity rules are unchanged.

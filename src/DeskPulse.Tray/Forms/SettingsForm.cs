@@ -42,6 +42,9 @@ public partial class SettingsForm : Form
     private Label _windowsServiceStatusLabel = null!;
     private CheckBox _trackWindowsSystemActivityCheckBox = null!;
     private bool _initializingUi = true;
+    private readonly Button _saveAndCloseButton = new();
+    private bool _isDirty;
+    private bool _allowClose;
 
     public SettingsForm()
     {
@@ -59,14 +62,114 @@ public partial class SettingsForm : Form
         _settingsTabControl.TabPages.Add(_exportOptionsTabPage);
         _settingsTabControl.TabPages.Add(_maintenanceHousekeepingTabPage);
         _settingsTabControl.SelectedIndexChanged += SettingsTabControl_SelectedIndexChanged;
-        _cancelButton.Click += CancelOrCloseButton_Click;
+
+        ConfigureSettingsFooterButtons();
 
         var settings = AppSettings.Load();
         LoadDesignerSettings(settings);
         LoadRuleSettings(settings);
 
         _initializingUi = false;
+        HookDirtyTracking(this);
+        _isDirty = false;
         UpdateFooterForSelectedTab();
+        FormClosing += SettingsForm_FormClosing;
+    }
+
+    private void ConfigureSettingsFooterButtons()
+    {
+        _saveButton.DialogResult = DialogResult.None;
+        _saveButton.Text = "Save";
+        _saveButton.Location = new System.Drawing.Point(584, 644);
+        _saveButton.Size = new System.Drawing.Size(84, 30);
+
+        _saveAndCloseButton.Text = "Save and Close";
+        _saveAndCloseButton.FlatStyle = FlatStyle.System;
+        _saveAndCloseButton.Location = new System.Drawing.Point(680, 644);
+        _saveAndCloseButton.Size = new System.Drawing.Size(116, 30);
+        _saveAndCloseButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+        _saveAndCloseButton.Click += SaveAndCloseButton_Click;
+        Controls.Add(_saveAndCloseButton);
+        _saveAndCloseButton.BringToFront();
+
+        _cancelButton.DialogResult = DialogResult.None;
+        _cancelButton.Text = "Close";
+        _cancelButton.Location = new System.Drawing.Point(808, 644);
+        _cancelButton.Size = new System.Drawing.Size(96, 30);
+        _cancelButton.Click += (_, _) => Close();
+
+        AcceptButton = _saveAndCloseButton;
+        CancelButton = _cancelButton;
+    }
+
+    private void HookDirtyTracking(Control parent)
+    {
+        foreach (Control control in parent.Controls)
+        {
+            switch (control)
+            {
+                case TextBoxBase textBox:
+                    textBox.TextChanged += (_, _) => MarkDirty();
+                    break;
+                case CheckBox checkBox:
+                    checkBox.CheckedChanged += (_, _) => MarkDirty();
+                    break;
+                case RadioButton radioButton:
+                    radioButton.CheckedChanged += (_, _) => MarkDirty();
+                    break;
+                case ComboBox comboBox:
+                    comboBox.SelectedIndexChanged += (_, _) => MarkDirty();
+                    break;
+                case CheckedListBox checkedList:
+                    checkedList.ItemCheck += (_, _) => BeginInvoke(new Action(MarkDirty));
+                    break;
+                case DataGridView grid:
+                    grid.CellValueChanged += (_, _) => MarkDirty();
+                    grid.RowsAdded += (_, _) => MarkDirty();
+                    grid.RowsRemoved += (_, _) => MarkDirty();
+                    break;
+            }
+
+            if (control.HasChildren)
+                HookDirtyTracking(control);
+        }
+    }
+
+    private void MarkDirty()
+    {
+        if (_initializingUi)
+            return;
+
+        _isDirty = true;
+        UpdateFooterForSelectedTab();
+    }
+
+    private void SaveAndCloseButton_Click(object? sender, EventArgs e)
+    {
+        if (!SaveSettings())
+            return;
+
+        _allowClose = true;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    private void SettingsForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (_allowClose || !_isDirty)
+            return;
+
+        var discard = MessageBox.Show(
+            "Close DeskPulse Settings and discard unsaved changes?",
+            "Unsaved Settings",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+
+        if (discard != DialogResult.Yes)
+            e.Cancel = true;
+        else
+            _allowClose = true;
     }
 
     private void SettingsTabControl_SelectedIndexChanged(object? sender, EventArgs e)
@@ -83,22 +186,14 @@ public partial class SettingsForm : Form
         _exportRulesButton.Visible = isRulesTab;
 
         _saveButton.Visible = !isMaintenanceTab;
-        _saveButton.Enabled = !isMaintenanceTab;
+        _saveAndCloseButton.Visible = !isMaintenanceTab;
+        _saveButton.Enabled = !isMaintenanceTab && _isDirty;
+        _saveAndCloseButton.Enabled = !isMaintenanceTab && _isDirty;
+        _cancelButton.Text = "Close";
+        _cancelButton.Enabled = true;
 
-        _cancelButton.Text = isMaintenanceTab ? "Close" : "Cancel";
-        _cancelButton.DialogResult = isMaintenanceTab ? DialogResult.None : DialogResult.Cancel;
-
-        AcceptButton = isMaintenanceTab ? null : _saveButton;
+        AcceptButton = isMaintenanceTab ? null : _saveAndCloseButton;
         CancelButton = _cancelButton;
-    }
-
-    private void CancelOrCloseButton_Click(object? sender, EventArgs e)
-    {
-        if (!ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage))
-            return;
-
-        DialogResult = DialogResult.None;
-        Close();
     }
 
     private void SaveWindowsSystemActivitySettingImmediately()
@@ -407,13 +502,7 @@ public partial class SettingsForm : Form
         using var progressForm = new RuleCleanupProgressForm(
             "DeskPulse Database Housekeeping",
             "Applying current rules through the DeskPulse service",
-            progress =>
-            {
-                progress.Report(new ExportProgressInfo(10, "10%  Sending housekeeping request to Windows service"));
-                var result = ServicePipeClient.RunDatabaseHousekeepingAsync().GetAwaiter().GetResult();
-                progress.Report(new ExportProgressInfo(100, "100% Database housekeeping complete"));
-                return result;
-            });
+            progress => ServicePipeClient.RunDatabaseHousekeepingAsync(progress).GetAwaiter().GetResult());
 
         if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
             return;
@@ -533,31 +622,97 @@ public partial class SettingsForm : Form
             package.FolderActivity ??= new List<ActivityRuleSetting>();
             package.AppActivity ??= new List<ActivityRuleSetting>();
 
-            var invalid = package.FileActivity.Any(rule => !rule.RuleType.Equals("file", StringComparison.OrdinalIgnoreCase))
-                || package.FolderActivity.Any(rule => !rule.RuleType.Equals("folder", StringComparison.OrdinalIgnoreCase))
-                || package.AppActivity.Any(rule => !rule.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase));
+            var invalid = package.FileActivity.Any(rule => !string.Equals(rule.RuleType, "file", StringComparison.OrdinalIgnoreCase))
+                || package.FolderActivity.Any(rule => !string.Equals(rule.RuleType, "folder", StringComparison.OrdinalIgnoreCase))
+                || package.AppActivity.Any(rule => !string.Equals(rule.RuleType, "process", StringComparison.OrdinalIgnoreCase));
 
             if (invalid)
                 throw new InvalidDataException("The file contains rules assigned to the wrong activity category.");
 
-            var confirm = MessageBox.Show(
-                "Importing will replace the current File and App Activity rule lists shown in Settings.\n\n" +
-                "User Activity rules are not included and will remain unchanged.\n\nContinue?",
-                "Import Rules", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            var importedFileRules = AppSettings.MergeFolderRulesIntoFileRules(package.FileActivity, package.FolderActivity);
 
-            if (confirm != DialogResult.Yes)
+            using var modeDialog = new RuleImportModeForm();
+            if (modeDialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
-            var importedFileRules = AppSettings.MergeFolderRulesIntoFileRules(package.FileActivity, package.FolderActivity);
-            _fileActivityRuleEditor.LoadRuleSettings(importedFileRules);
-            _appActivityRuleEditor.LoadRuleSettings(package.AppActivity);
+            if (modeDialog.ImportMode == RuleImportMode.Replace)
+            {
+                _fileActivityRuleEditor.LoadRuleSettings(importedFileRules);
+                _appActivityRuleEditor.LoadRuleSettings(package.AppActivity);
+            }
+            else
+            {
+                _fileActivityRuleEditor.LoadRuleSettings(MergeImportedRules(
+                    _fileActivityRuleEditor.GetRuleSettings(), importedFileRules));
+                _appActivityRuleEditor.LoadRuleSettings(MergeImportedRules(
+                    _appActivityRuleEditor.GetRuleSettings(), package.AppActivity));
+            }
 
-            MessageBox.Show("The rules were imported into Settings. Click Save to apply them and write them to the registry.", "Import Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var action = modeDialog.ImportMode == RuleImportMode.Replace ? "replaced" : "merged";
+            MessageBox.Show(
+                $"The File and App Activity rules were {action} in Settings. User Activity rules were unchanged.\n\nClick Save to apply the imported rules and write them to the registry.",
+                "Import Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
             MessageBox.Show("The rules could not be imported.\n\n" + ex.Message, "Import Rules", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private static List<ActivityRuleSetting> MergeImportedRules(
+        IReadOnlyList<ActivityRuleSetting> currentRules,
+        IReadOnlyList<ActivityRuleSetting> importedRules)
+    {
+        var merged = currentRules.Select(rule => rule.Clone()).ToList();
+        var indexes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < merged.Count; i++)
+            indexes[GetRuleIdentity(merged[i])] = i;
+
+        foreach (var importedRule in importedRules)
+        {
+            var clone = importedRule.Clone();
+            var identity = GetRuleIdentity(clone);
+
+            if (indexes.TryGetValue(identity, out var existingIndex))
+            {
+                // Imported settings win for a matching rule, while its current list position is retained.
+                merged[existingIndex] = clone;
+            }
+            else
+            {
+                indexes[identity] = merged.Count;
+                merged.Add(clone);
+            }
+        }
+
+        return merged;
+    }
+
+    private static string GetRuleIdentity(ActivityRuleSetting rule)
+    {
+        var ruleType = (rule.RuleType ?? string.Empty).Trim().ToLowerInvariant();
+        var value = (rule.Value ?? string.Empty).Trim();
+
+        if (ruleType.Equals("folder", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            try
+            {
+                value = Path.GetFullPath(Environment.ExpandEnvironmentVariables(value))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                // Keep the normalized text when the path cannot be resolved on this computer.
+            }
+        }
+        else if (ruleType.Equals("process", StringComparison.OrdinalIgnoreCase))
+        {
+            value = Path.GetFileName(value);
+        }
+
+        return $"{ruleType}|{value}";
     }
 
     private void SaveButton_Click(object? sender, EventArgs e)
@@ -756,7 +911,6 @@ public partial class SettingsForm : Form
         SetButtonToolTip(_maintenanceMoveRuleDownButton, "Moves the selected logging rule down. Higher rules override lower rules. Does not delete data.");
         SetButtonToolTip(_maintenanceRemoveRuleButton, "Removes only the selected logging rule from the list. It does not delete past database records.");
         SetButtonToolTip(_maintenanceDuplicateRuleButton, "Copies the selected logging rule so it can be edited or reordered. Does not delete data.");
-        SetButtonToolTip(_maintenanceResetRulesButton, "Replaces the current rules shown in this form with the default logging rules. It does not delete past records; Save is still required.");
         SetButtonToolTip(_maintenanceRemovePastRecordsButton, "PERMANENTLY deletes past file/program records that match current Exclude rules. Does not delete the rules themselves or user/session records.");
         SetButtonToolTip(_maintenanceShowActiveExtensionsButton, "Shows the file extensions currently monitored by DeskPulse. Does not delete or change data.");
         SetButtonToolTip(_maintenanceShowStartupStatusButton, "Shows whether the current-user Windows startup registry entry exists. Does not delete or change data.");
@@ -789,7 +943,6 @@ public partial class SettingsForm : Form
     private void MaintenanceMoveRuleDownButton_Click(object? sender, EventArgs e) => MoveSelectedExclusionRuleRow(_loggingRulesGridView, 1);
     private void MaintenanceRemoveRuleButton_Click(object? sender, EventArgs e) => RemoveSelectedLoggingRuleRow();
     private void MaintenanceDuplicateRuleButton_Click(object? sender, EventArgs e) => DuplicateSelectedLoggingRuleRow();
-    private void MaintenanceResetRulesButton_Click(object? sender, EventArgs e) => LoadLoggingRulesGrid(AppSettings.GetDefaultLoggingRules());
     private void MaintenanceRemovePastRecordsButton_Click(object? sender, EventArgs e) => RemoveExcludedPastRecords(AppSettings.Load());
     private void MaintenanceShowActiveExtensionsButton_Click(object? sender, EventArgs e) => ShowActiveExtensions();
     private void MaintenanceShowStartupStatusButton_Click(object? sender, EventArgs e) => ShowStartupStatus();
@@ -2416,7 +2569,7 @@ public partial class SettingsForm : Form
         }
     }
 
-    private void SaveSettings()
+    private bool SaveSettings()
     {
         var dataFolder = _dataFolderTextBox.Text.Trim();
 
@@ -2430,7 +2583,7 @@ public partial class SettingsForm : Form
             );
 
             DialogResult = DialogResult.None;
-            return;
+            return false;
         }
 
         if (!Path.IsPathFullyQualified(dataFolder))
@@ -2443,7 +2596,7 @@ public partial class SettingsForm : Form
             );
 
             DialogResult = DialogResult.None;
-            return;
+            return false;
         }
 
         try
@@ -2460,7 +2613,7 @@ public partial class SettingsForm : Form
             );
 
             DialogResult = DialogResult.None;
-            return;
+            return false;
         }
 
         var exportSheets = GetSelectedExportSheetsFromList();
@@ -2475,7 +2628,7 @@ public partial class SettingsForm : Form
             );
 
             DialogResult = DialogResult.None;
-            return;
+            return false;
         }
 
         var startWithWindows = _startWithWindowsCheckBox.Checked;
@@ -2494,7 +2647,7 @@ public partial class SettingsForm : Form
             );
 
             DialogResult = DialogResult.None;
-            return;
+            return false;
         }
 
         var existingSettings = AppSettings.Load();
@@ -2526,6 +2679,11 @@ public partial class SettingsForm : Form
         };
 
         settings.Save();
+        _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS");
+        _isDirty = false;
+        DialogResult = DialogResult.None;
+        UpdateFooterForSelectedTab();
+        return true;
     }
 
     private static List<ActivityRuleSetting> RemoveFileRulesDuplicatedByAppRules(
@@ -2583,6 +2741,115 @@ public partial class SettingsForm : Form
             return "";
 
         return fileName[..^4].Trim();
+    }
+}
+
+internal enum RuleImportMode
+{
+    Merge,
+    Replace
+}
+
+internal sealed class RuleImportModeForm : Form
+{
+    private readonly RadioButton _mergeRadioButton;
+    private readonly RadioButton _replaceRadioButton;
+
+    public RuleImportMode ImportMode => _replaceRadioButton.Checked
+        ? RuleImportMode.Replace
+        : RuleImportMode.Merge;
+
+    public RuleImportModeForm()
+    {
+        Text = "Import Rules";
+        StartPosition = FormStartPosition.CenterParent;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ShowInTaskbar = false;
+        AutoScaleMode = AutoScaleMode.Font;
+        ClientSize = new Size(470, 245);
+
+        var heading = new Label
+        {
+            Left = 18,
+            Top = 16,
+            Width = 430,
+            Height = 25,
+            Text = "How should the imported rules be applied?",
+            Font = new Font(Font, FontStyle.Bold)
+        };
+
+        _mergeRadioButton = new RadioButton
+        {
+            Left = 22,
+            Top = 55,
+            Width = 420,
+            Height = 24,
+            Checked = true,
+            Text = "Merge with existing rules (recommended)"
+        };
+
+        var mergeDescription = new Label
+        {
+            Left = 46,
+            Top = 79,
+            Width = 390,
+            Height = 38,
+            Text = "Keeps existing rules, adds new rules, and updates matching rules without creating duplicates."
+        };
+
+        _replaceRadioButton = new RadioButton
+        {
+            Left = 22,
+            Top = 125,
+            Width = 420,
+            Height = 24,
+            Text = "Replace existing rules"
+        };
+
+        var replaceDescription = new Label
+        {
+            Left = 46,
+            Top = 149,
+            Width = 390,
+            Height = 32,
+            Text = "Replaces the complete File Activity and App Activity rule lists currently shown in Settings."
+        };
+
+        var importButton = new Button
+        {
+            Text = "Import",
+            DialogResult = DialogResult.OK,
+            Left = 286,
+            Top = 198,
+            Width = 78,
+            Height = 30
+        };
+
+        var cancelButton = new Button
+        {
+            Text = "Cancel",
+            DialogResult = DialogResult.Cancel,
+            Left = 372,
+            Top = 198,
+            Width = 78,
+            Height = 30
+        };
+
+        Controls.AddRange(new Control[]
+        {
+            heading,
+            _mergeRadioButton,
+            mergeDescription,
+            _replaceRadioButton,
+            replaceDescription,
+            importButton,
+            cancelButton
+        });
+
+        AcceptButton = importButton;
+        CancelButton = cancelButton;
     }
 }
 
@@ -2728,7 +2995,12 @@ internal sealed class ActivityRuleEditor : UserControl
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.MultiSelect = false;
         _grid.BackgroundColor = System.Drawing.SystemColors.Window;
-        _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", Width = 34 });
+        _grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "Enabled",
+            HeaderText = _category == ActivityRuleCategory.User ? "Log" : "On",
+            Width = _category == ActivityRuleCategory.User ? 42 : 34
+        });
         if (_category != ActivityRuleCategory.User)
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Source", HeaderText = "Source", Width = 108, ReadOnly = true });
 
@@ -2774,11 +3046,10 @@ internal sealed class ActivityRuleEditor : UserControl
         }
         else
         {
-            _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Include", HeaderText = "Include", Width = 58 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Value",
-                HeaderText = "Event type / description text",
+                HeaderText = "User / session event",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 300,
                 ReadOnly = true
@@ -2996,8 +3267,7 @@ internal sealed class ActivityRuleEditor : UserControl
                 continue;
             }
 
-            var isInclude = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
-            _grid.Rows.Add(setting.Enabled, isInclude, setting.Value);
+            _grid.Rows.Add(setting.Enabled, setting.Value);
         }
     }
 
@@ -3022,7 +3292,9 @@ internal sealed class ActivityRuleEditor : UserControl
             {
                 Enabled = Checked(row, "Enabled"),
                 RuleType = type,
-                Action = Checked(row, "Include") ? "Include" : "Exclude",
+                Action = _category == ActivityRuleCategory.User
+                    ? "Include"
+                    : (Checked(row, "Include") ? "Include" : "Exclude"),
                 Value = value,
                 IncludeSubfolders = false
             });

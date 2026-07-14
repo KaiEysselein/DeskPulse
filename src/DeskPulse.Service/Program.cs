@@ -92,8 +92,15 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 var command = (await reader.ReadLineAsync())?.Trim() ?? "";
-                var response = HandleCommand(command);
-                await writer.WriteLineAsync(response);
+                if (command.Equals("CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
+                {
+                    await RunDatabaseHousekeepingStreamingAsync(writer);
+                }
+                else
+                {
+                    var response = HandleCommand(command);
+                    await writer.WriteLineAsync(response);
+                }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "service-errors.log"), DateTime.Now + " " + ex + Environment.NewLine); } catch { } }
@@ -141,7 +148,6 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "PAUSE_LOGGING": _monitor.PauseLogging(); return "OK|PAUSED";
             case "RESUME_LOGGING": _monitor.ResumeLogging(); return "OK|ACTIVE";
             case "RELOAD_SETTINGS": _monitor.ReloadSettings(); return "OK";
-            case "CLEAN_DATABASE_CURRENT_RULES": return RunDatabaseHousekeeping();
             case "DELETE_RECORDS": return DeleteSelectedRecords(command);
             case "CLEAR_TABLE": return ClearTable(command);
             case "CLEAR_ALL_RECORDS": return ClearAllRecords();
@@ -226,36 +232,48 @@ public sealed class DeskPulseWindowsService : ServiceBase
     private static string SanitizePipeMessage(string message) =>
         (message ?? "Unknown error").Replace("|", "/").Replace("\r", " ").Replace("\n", " ");
 
-    private string RunDatabaseHousekeeping()
+    private async Task RunDatabaseHousekeepingStreamingAsync(StreamWriter writer)
     {
         if (_monitor == null)
-            return "ERROR|Service monitor is not running.";
+        {
+            await writer.WriteLineAsync("RESULT|ERROR|Service monitor is not running.");
+            return;
+        }
 
         var wasPaused = _monitor.IsLoggingPaused;
+        var writerLock = new object();
+
+        void SendProgress(ExportProgressInfo info)
+        {
+            var message = SanitizePipeMessage(info.Message);
+            lock (writerLock)
+            {
+                writer.WriteLine("PROGRESS|" + info.Percent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + message);
+            }
+        }
 
         try
         {
-            // The service is the sole owner of database writes. Pause monitoring
-            // while historical records are deleted and SQLite is compacted.
+            SendProgress(new ExportProgressInfo(15, "15%  Windows service accepted housekeeping request"));
+
             if (!wasPaused)
                 _monitor.PauseLogging();
 
             var settings = AppSettings.Load();
+            var progress = new InlineProgress<ExportProgressInfo>(SendProgress);
             var result = _monitor.ExecuteDatabaseOperation(database =>
-                database.CleanDatabaseWithCurrentRules(
-                    settings,
-                    progress: null,
-                    CancellationToken.None));
+                database.CleanDatabaseWithCurrentRules(settings, progress, CancellationToken.None));
 
-            return string.Join("|",
+            await writer.WriteLineAsync(string.Join("|",
+                "RESULT",
                 "OK",
                 result.ActivityRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 result.ProgramRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                result.UserRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                result.UserRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
         catch (Exception ex)
         {
-            return "ERROR|" + SanitizePipeMessage(ex.Message);
+            await writer.WriteLineAsync("RESULT|ERROR|" + SanitizePipeMessage(ex.Message));
         }
         finally
         {
@@ -263,6 +281,14 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 _monitor.ResumeLogging();
         }
     }
+
+    private sealed class InlineProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _report;
+        public InlineProgress(Action<T> report) => _report = report;
+        public void Report(T value) => _report(value);
+    }
+
 
     public void StartConsole() => OnStart(Array.Empty<string>());
     public void StopConsole() => OnStop();

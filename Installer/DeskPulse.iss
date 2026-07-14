@@ -1,5 +1,5 @@
-﻿#define MyAppName "DeskPulse"
-#define MyAppVersion "0.2.0.1"
+#define MyAppName "DeskPulse"
+#define MyAppVersion "0.2.1.2"
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -43,14 +43,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "starttray"; Description: "Start DeskPulse Tray when installation finishes"; GroupDescription: "After installation:"; Flags: checkedonce
 
 [Dirs]
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify
 
 [Files]
-Source: "..\publish\v0.2.0.1\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\v0.2.0.1\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.2.1.2\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.2.1.2\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; Remove startup shortcuts from older builds. Tray autostart is now stored in the current user HKCU Run key.
@@ -73,7 +72,7 @@ Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Se
 Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse background monitoring service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "failure {#ServiceName} reset= 86400 actions= restart/5000/restart/15000/restart/60000"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "start {#ServiceName}"; Flags: runhidden waituntilterminated
-Filename: "{app}\Tray\{#TrayExeName}"; Description: "Start DeskPulse Tray"; Tasks: starttray; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\Tray\{#TrayExeName}"; Description: "Start DeskPulse Tray"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 ; These run before Inno Setup removes installed files.
 [UninstallRun]

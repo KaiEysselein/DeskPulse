@@ -1,4 +1,4 @@
-﻿# DeskPulse 0.2.0.1
+# DeskPulse 0.2.1.2
 
 - Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
 
@@ -31,8 +31,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 Published self-contained x64 applications are created under:
 
-- `publish\v0.2.0.1\service\DeskPulse.Service.exe`
-- `publish\v0.2.0.1\tray\DeskPulse.Tray.exe`
+- `publish\v0.2.1.2\service\DeskPulse.Service.exe`
+- `publish\v0.2.1.2\tray\DeskPulse.Tray.exe`
 
 The target PC does not require .NET to be installed.
 
@@ -47,7 +47,7 @@ After publishing:
 The installer is created at:
 
 ```text
-Installer\Output\DeskPulse_Setup_0.2.0.1.exe
+Installer\Output\DeskPulse_Setup_0.2.1.2.exe
 ```
 
 The installer registers `DeskPulse.Service` for automatic startup. Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` using the value `DeskPulse.Tray`.
@@ -68,7 +68,7 @@ License: GNU GPL v3.
 
 ## Absolute data-path migration
 
-DeskPulse 0.2.0.1 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
+DeskPulse 0.2.1.2 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
 
 
 
@@ -88,3 +88,5 @@ All SQLite write operations initiated by the tray (selected-record deletion, rul
 - Rule import/export controls appear only on the Rules tab.
 - Maintenance uses **Close** because its operations execute immediately.
 - **Track Windows system activity** is saved immediately when toggled.
+
+- Rules Import offers **Merge with existing rules** (default) or **Replace existing rules**. Merge updates matching File/App rules and adds new ones without duplicates; User Activity rules are unchanged.

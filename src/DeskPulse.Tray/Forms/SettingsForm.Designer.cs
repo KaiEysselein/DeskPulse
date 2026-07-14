@@ -102,7 +102,6 @@ partial class SettingsForm
     private Button _maintenanceMoveRuleDownButton = null!;
     private Button _maintenanceRemoveRuleButton = null!;
     private Button _maintenanceDuplicateRuleButton = null!;
-    private Button _maintenanceResetRulesButton = null!;
     private Label _maintenanceRulesHintLabel = null!;
     private GroupBox _maintenancePastRecordsGroupBox = null!;
     private Button _maintenanceRemovePastRecordsButton = null!;
@@ -240,7 +239,6 @@ partial class SettingsForm
         _maintenanceMoveRuleDownButton = new Button();
         _maintenanceRemoveRuleButton = new Button();
         _maintenanceDuplicateRuleButton = new Button();
-        _maintenanceResetRulesButton = new Button();
         _maintenanceRulesHintLabel = new Label();
         _maintenancePastRecordsGroupBox = new GroupBox();
         _maintenanceRemovePastRecordsButton = new Button();
@@ -1157,7 +1155,6 @@ partial class SettingsForm
         _maintenanceRulesGroupBox.Controls.Add(_maintenanceMoveRuleDownButton);
         _maintenanceRulesGroupBox.Controls.Add(_maintenanceRemoveRuleButton);
         _maintenanceRulesGroupBox.Controls.Add(_maintenanceDuplicateRuleButton);
-        _maintenanceRulesGroupBox.Controls.Add(_maintenanceResetRulesButton);
         _maintenanceRulesGroupBox.Controls.Add(_maintenanceRulesHintLabel);
         _maintenanceRulesGroupBox.Location = new System.Drawing.Point(14, 158);
         _maintenanceRulesGroupBox.Name = "_maintenanceRulesGroupBox";
@@ -1211,14 +1208,6 @@ partial class SettingsForm
         _maintenanceDuplicateRuleButton.Text = "Duplicate";
         _maintenanceDuplicateRuleButton.UseVisualStyleBackColor = true;
         _maintenanceDuplicateRuleButton.Click += MaintenanceDuplicateRuleButton_Click;
-
-        _maintenanceResetRulesButton.FlatStyle = FlatStyle.System;
-        _maintenanceResetRulesButton.Location = new System.Drawing.Point(398, 230);
-        _maintenanceResetRulesButton.Name = "_maintenanceResetRulesButton";
-        _maintenanceResetRulesButton.Size = new System.Drawing.Size(112, 30);
-        _maintenanceResetRulesButton.Text = "Reset Defaults";
-        _maintenanceResetRulesButton.UseVisualStyleBackColor = true;
-        _maintenanceResetRulesButton.Click += MaintenanceResetRulesButton_Click;
 
         _maintenanceRulesHintLabel.ForeColor = System.Drawing.SystemColors.GrayText;
         _maintenanceRulesHintLabel.Location = new System.Drawing.Point(18, 268);

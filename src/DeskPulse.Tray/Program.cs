@@ -58,15 +58,22 @@ public sealed class TrayAppContext : ApplicationContext
     {
         _trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Text = AppInfo.AppName, Visible = true };
         _menu = new ContextMenuStrip();
-        _menu.Items.Add("View Log...", null, (_, _) => OpenViewLog());
-        _menu.Items.Add("Settings...", null, (_, _) => OpenSettings());
+        AddMenuCommand("View Log...", OpenViewLog);
+        AddMenuCommand("Settings...", OpenSettings);
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
         _pauseLoggingMenuItem.Click += async (_, _) => await ToggleLoggingAsync();
         _menu.Items.Add(_pauseLoggingMenuItem);
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add("Service status", null, async (_, _) => MessageBox.Show(await ServicePipeClient.GetStatusAsync(), "DeskPulse Service"));
-        _menu.Items.Add("About", null, (_, _) => OpenSingleForm(new AboutForm()));
-        _menu.Items.Add("Exit tray", null, (_, _) => ExitThread());
+        var serviceStatusItem = new ToolStripMenuItem("Service status");
+        serviceStatusItem.Click += async (_, _) =>
+        {
+            _menu.Close();
+            await Task.Yield();
+            MessageBox.Show(await ServicePipeClient.GetStatusAsync(), "DeskPulse Service");
+        };
+        _menu.Items.Add(serviceStatusItem);
+        AddMenuCommand("About", () => OpenSingleForm(new AboutForm()));
+        AddMenuCommand("Quit DeskPulse", ExitThread);
         _trayIcon.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) _menu.Show(Cursor.Position); };
         _ = ServicePipeClient.SendAsync("TRAY_STARTED");
 
@@ -78,6 +85,18 @@ public sealed class TrayAppContext : ApplicationContext
             await RefreshLoggingStateAsync();
         };
         stateTimer.Start();
+    }
+
+
+    private void AddMenuCommand(string text, Action action)
+    {
+        var item = new ToolStripMenuItem(text);
+        item.Click += (_, _) =>
+        {
+            _menu.Close();
+            _menu.BeginInvoke(new Action(action));
+        };
+        _menu.Items.Add(item);
     }
 
     private async Task ToggleLoggingAsync()
@@ -142,6 +161,13 @@ public sealed class TrayAppContext : ApplicationContext
 
     private void OpenSingleForm(Form form)
     {
+        if (_activeForm != null && !_activeForm.IsDisposed && _activeForm.GetType() == form.GetType())
+        {
+            form.Dispose();
+            RestoreAndActivate(_activeForm);
+            return;
+        }
+
         CloseActiveForm();
 
         _activeForm = form;
@@ -154,7 +180,23 @@ public sealed class TrayAppContext : ApplicationContext
 
         form.StartPosition = FormStartPosition.CenterScreen;
         form.Show();
+        RestoreAndActivate(form);
+    }
+
+    private static void RestoreAndActivate(Form form)
+    {
+        if (form.WindowState == FormWindowState.Minimized)
+            form.WindowState = FormWindowState.Normal;
+
+        if (!form.Visible)
+            form.Show();
+
+        form.ShowInTaskbar = true;
+        form.BringToFront();
         form.Activate();
+        form.TopMost = true;
+        form.TopMost = false;
+        form.Focus();
     }
 
     private void CloseActiveForm()
@@ -207,30 +249,67 @@ public static class ServicePipeClient
     }
     public static Task<string> GetStatusAsync() => SendAsync("STATUS");
 
-    public static async Task<MaintenanceExclusionCleanupResult> RunDatabaseHousekeepingAsync()
+    public static async Task<MaintenanceExclusionCleanupResult> RunDatabaseHousekeepingAsync(
+        IProgress<ExportProgressInfo>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        // Housekeeping may take several minutes on a large database. The service
-        // performs the write operation because the tray intentionally runs without elevation.
-        var response = await SendAsync("CLEAN_DATABASE_CURRENT_RULES", TimeSpan.FromMinutes(30));
-        var parts = response.Split('|');
-
-        if (parts.Length >= 4 && parts[0].Equals("OK", StringComparison.OrdinalIgnoreCase) &&
-            long.TryParse(parts[1], out var activityDeleted) &&
-            long.TryParse(parts[2], out var programDeleted) &&
-            long.TryParse(parts[3], out var userDeleted))
+        try
         {
-            return new MaintenanceExclusionCleanupResult
+            using var client = new NamedPipeClientStream(".", AppInfo.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromMinutes(30));
+            await client.ConnectAsync(timeout.Token);
+
+            using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+            using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+
+            progress?.Report(new ExportProgressInfo(10, "10%  Sending housekeeping request to Windows service"));
+            await writer.WriteLineAsync("CLEAN_DATABASE_CURRENT_RULES");
+
+            while (true)
             {
-                ActivityRecordsDeleted = activityDeleted,
-                ProgramRecordsDeleted = programDeleted,
-                UserRecordsDeleted = userDeleted
-            };
+                cancellationToken.ThrowIfCancellationRequested();
+                var response = await reader.ReadLineAsync(timeout.Token);
+                if (response == null)
+                    throw new InvalidOperationException("The DeskPulse service closed the housekeeping connection unexpectedly.");
+
+                var parts = response.Split('|');
+                if (parts.Length >= 3 && parts[0].Equals("PROGRESS", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(parts[1], out var percent))
+                {
+                    progress?.Report(new ExportProgressInfo(percent, string.Join("|", parts.Skip(2))));
+                    continue;
+                }
+
+                if (parts.Length >= 5 && parts[0].Equals("RESULT", StringComparison.OrdinalIgnoreCase) &&
+                    parts[1].Equals("OK", StringComparison.OrdinalIgnoreCase) &&
+                    long.TryParse(parts[2], out var activityDeleted) &&
+                    long.TryParse(parts[3], out var programDeleted) &&
+                    long.TryParse(parts[4], out var userDeleted))
+                {
+                    return new MaintenanceExclusionCleanupResult
+                    {
+                        ActivityRecordsDeleted = activityDeleted,
+                        ProgramRecordsDeleted = programDeleted,
+                        UserRecordsDeleted = userDeleted
+                    };
+                }
+
+                if (parts.Length >= 3 && parts[0].Equals("RESULT", StringComparison.OrdinalIgnoreCase) &&
+                    parts[1].Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(string.Join("|", parts.Skip(2)));
+
+                throw new InvalidOperationException(response);
+            }
         }
-
-        if (parts.Length >= 2 && parts[0].Equals("ERROR", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(string.Join("|", parts.Skip(1)));
-
-        throw new InvalidOperationException(response);
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("Database housekeeping timed out while waiting for the DeskPulse service.");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new InvalidOperationException("DeskPulse service is unavailable. " + ex.Message, ex);
+        }
     }
 
 
