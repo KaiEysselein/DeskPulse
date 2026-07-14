@@ -1,4 +1,46 @@
-﻿# Changelog
+﻿
+- Fixed selected-record deletion waiting indefinitely: service write commands now use the monitor-owned database instance and shared database lock instead of pausing ETW and opening a competing database instance.
+- View Log deletion now awaits the service asynchronously so the form remains responsive.
+# Changelog
+
+## [0.2.0.1] - 2026-07-14
+
+### Architecture and database ownership
+
+- Made `DeskPulse.Service` the sole SQLite writer for live inserts, migrations, selected-record deletion, Create Rule cleanup, Database Housekeeping, exclusion cleanup, clearing individual activity tables, clearing all activity, and `VACUUM`.
+- Restricted tray-side SQLite access to read-only views, counts, statistics, date discovery and exports.
+- Added and documented the database-write audit.
+- Fixed SQLite Error 8 (`attempt to write a readonly database`) across tray-initiated write workflows.
+
+### Windows activity protection
+
+- Added **Track Windows system activity** under Settings → Maintenance → Logging protection.
+- Excluded the complete `%WINDIR%` tree by default, together with selected ProgramData locations, the Recycle Bin and high-volume Windows processes.
+- Displayed built-in exclusions as grey, read-only **Windows default** rules.
+- Ensured built-in exclusions take precedence over user Include rules while system tracking is disabled.
+- Applied the same Windows-default policy during historical database housekeeping.
+
+### Startup and deployment
+
+- Replaced the obsolete elevated Task Scheduler tray startup mechanism with the per-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `DeskPulse.Tray`.
+- Added best-effort cleanup of legacy scheduled tasks and Startup-folder shortcuts.
+- Normalized legacy relative data paths to absolute paths under the interactive user's Documents folder.
+- Ensured installer initialization runs as the original Windows user before the LocalSystem service starts.
+- Versioned publish output under `publish\v0.2.0.1\service` and `publish\v0.2.0.1\tray`.
+- Updated application, assembly, installer, handover and GitHub release references to 0.2.0.1.
+
+
+### Settings interface
+
+- Show **Save** and **Cancel** only on tabs that contain staged settings: General, Rules and Export Options.
+- Show **Import Rules** and **Export Rules** only on the Rules tab.
+- Show a single **Close** button on Maintenance because maintenance actions execute immediately.
+- Save **Track Windows system activity** immediately when toggled, so Maintenance no longer depends on the global Save button.
+- Restore deterministic footer-button behaviour after database housekeeping and service-maintenance actions.
+
+### Baseline
+
+- Locked 0.2.0.1 as the authoritative stabilisation baseline pending local compilation, installation and acceptance testing.
 
 ## [0.2.0.0] - 2026-07-13
 
@@ -728,3 +770,8 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 
 ### 0.2.0.0 build correction
 - Fixed service restore failure by changing `System.IO.Pipes.AccessControl` from unavailable version `8.0.0` to stable version `5.0.0`.
+
+
+## Absolute data-path migration
+
+DeskPulse 0.2.0.1 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.

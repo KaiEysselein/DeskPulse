@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using System;
 using System.Collections.Generic;
@@ -244,7 +244,7 @@ public partial class ViewLogForm : Form
         return LogRuleCategory.File;
     }
 
-    private void DeleteButton_Click(object? sender, EventArgs e)
+    private async void DeleteButton_Click(object? sender, EventArgs e)
     {
         var grid = GetActiveGrid();
         if (grid == null)
@@ -280,13 +280,11 @@ public partial class ViewLogForm : Form
         {
             Cursor = Cursors.WaitCursor;
             statusLabel.Text = $"Deleting {entries.Count:N0} selected record(s)...";
-            Application.DoEvents();
-
             var ids = entries
                 .Select(entry => long.Parse(entry.Id, CultureInfo.InvariantCulture))
                 .ToArray();
 
-            var deleted = DeleteSelectedIds(tableName, ids);
+            var deleted = await ServicePipeClient.DeleteRecordsAsync(tableName, ids);
             var rulesCreated = createRules ? CreateExclusionRulesForEntries(entries) : 0;
             RefreshActiveTab();
             statusLabel.Text = rulesCreated > 0
@@ -372,55 +370,6 @@ public partial class ViewLogForm : Form
         return created;
     }
 
-    private int DeleteSelectedIds(string tableName, IReadOnlyList<long> ids)
-    {
-        var allowedTable = tableName switch
-        {
-            "ActivityEvents" => "ActivityEvents",
-            "ProgramEvents" => "ProgramEvents",
-            "UserEvents" => "UserEvents",
-            _ => throw new ArgumentOutOfRangeException(nameof(tableName))
-        };
-
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = _databaseFilePath,
-            Mode = SqliteOpenMode.ReadWrite,
-            Cache = SqliteCacheMode.Shared
-        }.ToString());
-        connection.Open();
-        using (var busy = connection.CreateCommand())
-        {
-            busy.CommandText = "PRAGMA busy_timeout=5000;";
-            busy.ExecuteNonQuery();
-        }
-
-        var deletedTotal = 0;
-        using var transaction = connection.BeginTransaction();
-        const int batchSize = 400;
-
-        for (var offset = 0; offset < ids.Count; offset += batchSize)
-        {
-            var batch = ids.Skip(offset).Take(batchSize).ToArray();
-            using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            var parameterNames = new List<string>(batch.Length);
-
-            for (var index = 0; index < batch.Length; index++)
-            {
-                var parameterName = "$id" + index;
-                parameterNames.Add(parameterName);
-                command.Parameters.AddWithValue(parameterName, batch[index]);
-            }
-
-            command.CommandText = $"DELETE FROM {allowedTable} WHERE Id IN ({string.Join(",", parameterNames)});";
-            deletedTotal += command.ExecuteNonQuery();
-        }
-
-        transaction.Commit();
-        return deletedTotal;
-    }
-
     private void CreateRuleButton_Click(object? sender, EventArgs e)
     {
         var grid = GetActiveGrid();
@@ -504,8 +453,10 @@ public partial class ViewLogForm : Form
                     progress.Report(new ExportProgressInfo(2, "2%   Saving the new rule"));
                     settings.Save();
 
-                    progress.Report(new ExportProgressInfo(5, "5%   Preparing database cleanup"));
-                    return DeleteRecordsAndCompact(conflictingIds, progress);
+                    progress.Report(new ExportProgressInfo(8, "8%   Sending cleanup request to DeskPulse service"));
+                    var result = ServicePipeClient.RunDatabaseHousekeepingAsync().GetAwaiter().GetResult();
+                    progress.Report(new ExportProgressInfo(98, "98%  Finalising cleaned database"));
+                    return result;
                 });
 
             if (progressForm.ShowDialog(this) != DialogResult.OK)
@@ -527,7 +478,7 @@ public partial class ViewLogForm : Form
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = _databaseFilePath,
-            Mode = SqliteOpenMode.ReadWrite,
+            Mode = SqliteOpenMode.ReadOnly,
             Cache = SqliteCacheMode.Shared
         }.ToString());
         connection.Open();
@@ -575,105 +526,6 @@ public partial class ViewLogForm : Form
         }
 
         return result;
-    }
-
-    private MaintenanceExclusionCleanupResult DeleteRecordsAndCompact(
-        ConflictingRecordIds ids,
-        IProgress<ExportProgressInfo> progress)
-    {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = _databaseFilePath,
-            Mode = SqliteOpenMode.ReadWrite,
-            Cache = SqliteCacheMode.Shared
-        }.ToString());
-        connection.Open();
-        using (var busy = connection.CreateCommand())
-        {
-            busy.CommandText = "PRAGMA busy_timeout=5000;";
-            busy.ExecuteNonQuery();
-        }
-
-        var totalToDelete = Math.Max(1, ids.TotalCount);
-        var deletedSoFar = 0;
-        var activityDeleted = 0;
-        var programDeleted = 0;
-
-        void ReportDeletionProgress(int deletedInBatch, string tableDescription)
-        {
-            deletedSoFar += Math.Max(0, deletedInBatch);
-            var ratio = Math.Min(1D, (double)deletedSoFar / totalToDelete);
-            var percent = 10 + (int)Math.Round(ratio * 65D, MidpointRounding.AwayFromZero);
-            progress.Report(new ExportProgressInfo(
-                percent,
-                $"{percent}%   Removing old {tableDescription} ({deletedSoFar:N0} of {ids.TotalCount:N0})"));
-        }
-
-        progress.Report(new ExportProgressInfo(8, $"8%   Removing {ids.TotalCount:N0} conflicting record(s)"));
-
-        using (var transaction = connection.BeginTransaction())
-        {
-            activityDeleted += DeleteIds(
-                connection, transaction, "ActivityEvents", ids.ActivityIds,
-                deleted => ReportDeletionProgress(deleted, "file activity records"));
-
-            programDeleted += DeleteIds(
-                connection, transaction, "ProgramEvents", ids.ProgramIds,
-                deleted => ReportDeletionProgress(deleted, "app activity records"));
-
-            DeleteIds(
-                connection, transaction, "UserEvents", ids.UserIds,
-                deleted => ReportDeletionProgress(deleted, "user activity records"));
-
-            progress.Report(new ExportProgressInfo(80, "80%  Committing database changes"));
-            transaction.Commit();
-        }
-
-        progress.Report(new ExportProgressInfo(86, "86%  Compacting the DeskPulse database"));
-        using (var vacuum = connection.CreateCommand())
-        {
-            vacuum.CommandText = "VACUUM;";
-            vacuum.ExecuteNonQuery();
-        }
-
-        progress.Report(new ExportProgressInfo(98, "98%  Finalising cleaned database"));
-
-        return new MaintenanceExclusionCleanupResult
-        {
-            ActivityRecordsDeleted = activityDeleted,
-            ProgramRecordsDeleted = programDeleted
-        };
-    }
-
-    private static int DeleteIds(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string table,
-        IReadOnlyList<long> ids,
-        Action<int> batchCompleted)
-    {
-        const int batchSize = 400;
-        var deletedTotal = 0;
-
-        for (var offset = 0; offset < ids.Count; offset += batchSize)
-        {
-            var batch = ids.Skip(offset).Take(batchSize).ToArray();
-            using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            var names = new List<string>();
-            for (var i = 0; i < batch.Length; i++)
-            {
-                var name = "$id" + i;
-                names.Add(name);
-                command.Parameters.AddWithValue(name, batch[i]);
-            }
-            command.CommandText = $"DELETE FROM {table} WHERE Id IN ({string.Join(",", names)});";
-            var deleted = command.ExecuteNonQuery();
-            deletedTotal += deleted;
-            batchCompleted(deleted);
-        }
-
-        return deletedTotal;
     }
 
     private static bool FilePatternMatches(string fullPath, string pattern)

@@ -1,13 +1,16 @@
-# DeskPulse Roadmap
+﻿# DeskPulse Roadmap
 
-## Current baseline: 0.2.0.0
+## Current baseline: 0.2.0.1
 
-The service/tray split, installer, pause/resume control, service restart control and core Log View improvements are implemented.
+The service/tray split, installer, pause/resume control, service restart control, Windows-system activity controls, and service-owned SQLite write architecture are implemented.
+
+## Baseline status
+
+Version 0.2.0.1 is locked for compilation, installation and acceptance testing. New feature work should use the next development version.
 
 ## 0.2.x priorities
 
 - Complete clean-PC installation, upgrade, restart and uninstall regression testing.
-- Move all tray-side database mutations behind service IPC so the service becomes the sole database writer.
 - Add structured and versioned named-pipe request/response contracts.
 - Add service health, reconnect and diagnostics views.
 - Add installer logging and clearer upgrade/recovery diagnostics.

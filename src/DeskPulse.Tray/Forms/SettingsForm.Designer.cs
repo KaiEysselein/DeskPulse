@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using System.ComponentModel;
 using System.Windows.Forms;
@@ -328,7 +328,7 @@ partial class SettingsForm
         _startWithWindowsCheckBox.Name = "_startWithWindowsCheckBox";
         _startWithWindowsCheckBox.Size = new System.Drawing.Size(520, 22);
         _startWithWindowsCheckBox.TabIndex = 0;
-        _startWithWindowsCheckBox.Text = "Start DeskPulse when I log in to Windows";
+        _startWithWindowsCheckBox.Text = "Start DeskPulse Tray when I log in to Windows";
         _startWithWindowsCheckBox.UseVisualStyleBackColor = true;
 
         // _startupHintLabel
@@ -337,7 +337,7 @@ partial class SettingsForm
         _startupHintLabel.Name = "_startupHintLabel";
         _startupHintLabel.Size = new System.Drawing.Size(740, 22);
         _startupHintLabel.TabIndex = 1;
-        _startupHintLabel.Text = "Creates a current-user Windows Task Scheduler entry and starts DeskPulse with highest privileges when you log in.";
+        _startupHintLabel.Text = "Starts the non-elevated DeskPulse Tray for your Windows account when you log in. The background service starts separately with Windows.";
 
         // _quietStartupLabel
         _quietStartupLabel.ForeColor = System.Drawing.SystemColors.GrayText;
@@ -345,7 +345,7 @@ partial class SettingsForm
         _quietStartupLabel.Name = "_quietStartupLabel";
         _quietStartupLabel.Size = new System.Drawing.Size(740, 22);
         _quietStartupLabel.TabIndex = 2;
-        _quietStartupLabel.Text = "DeskPulse starts quietly in the tray. Startup errors are still shown if monitoring cannot start.";
+        _quietStartupLabel.Text = "The tray starts quietly. The DeskPulse Windows service continues running independently in the background.";
 
         // _behaviourGroupBox
         _behaviourGroupBox.BackColor = System.Drawing.SystemColors.Window;

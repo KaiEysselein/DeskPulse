@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
@@ -12,9 +12,36 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        SQLitePCL.Batteries_V2.Init();
+
+        if (args.Any(a => a.Equals("--initialize-settings", StringComparison.OrdinalIgnoreCase)))
+        {
+            var settings = AppSettings.Load();
+            Directory.CreateDirectory(settings.DataFolderPath);
+            settings.Save();
+            return;
+        }
+
+        if (args.Any(a => a.Equals("--enable-startup", StringComparison.OrdinalIgnoreCase)))
+        {
+            StartupTaskManager.SetEnabled(true);
+            var settings = AppSettings.Load();
+            settings.StartWithWindows = true;
+            settings.Save();
+            return;
+        }
+
+        if (args.Any(a => a.Equals("--disable-startup", StringComparison.OrdinalIgnoreCase)))
+        {
+            StartupTaskManager.SetEnabled(false);
+            var settings = AppSettings.Load();
+            settings.StartWithWindows = false;
+            settings.Save();
+            return;
+        }
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        SQLitePCL.Batteries_V2.Init();
         Application.Run(new TrayAppContext());
     }
 }
@@ -179,4 +206,81 @@ public static class ServicePipeClient
         }
     }
     public static Task<string> GetStatusAsync() => SendAsync("STATUS");
+
+    public static async Task<MaintenanceExclusionCleanupResult> RunDatabaseHousekeepingAsync()
+    {
+        // Housekeeping may take several minutes on a large database. The service
+        // performs the write operation because the tray intentionally runs without elevation.
+        var response = await SendAsync("CLEAN_DATABASE_CURRENT_RULES", TimeSpan.FromMinutes(30));
+        var parts = response.Split('|');
+
+        if (parts.Length >= 4 && parts[0].Equals("OK", StringComparison.OrdinalIgnoreCase) &&
+            long.TryParse(parts[1], out var activityDeleted) &&
+            long.TryParse(parts[2], out var programDeleted) &&
+            long.TryParse(parts[3], out var userDeleted))
+        {
+            return new MaintenanceExclusionCleanupResult
+            {
+                ActivityRecordsDeleted = activityDeleted,
+                ProgramRecordsDeleted = programDeleted,
+                UserRecordsDeleted = userDeleted
+            };
+        }
+
+        if (parts.Length >= 2 && parts[0].Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(string.Join("|", parts.Skip(1)));
+
+        throw new InvalidOperationException(response);
+    }
+
+
+    public static async Task<long> DeleteRecordsAsync(string tableName, IReadOnlyList<long> ids)
+    {
+        if (ids == null || ids.Count == 0)
+            return 0;
+        var payload = string.Join(",", ids.Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        return ParseAffectedCount(await SendAsync("DELETE_RECORDS|" + tableName + "|" + payload, TimeSpan.FromMinutes(5)));
+    }
+
+    public static async Task<long> ClearTableAsync(string tableName)
+    {
+        return ParseAffectedCount(await SendAsync("CLEAR_TABLE|" + tableName, TimeSpan.FromMinutes(10)));
+    }
+
+    public static async Task<long> ClearAllRecordsAsync()
+    {
+        return ParseAffectedCount(await SendAsync("CLEAR_ALL_RECORDS", TimeSpan.FromMinutes(10)));
+    }
+
+    private static long ParseAffectedCount(string response)
+    {
+        var parts = response.Split('|');
+        if (parts.Length >= 2 && parts[0].Equals("OK", StringComparison.OrdinalIgnoreCase) &&
+            long.TryParse(parts[1], System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var affected))
+            return affected;
+
+        if (parts.Length >= 2 && parts[0].Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(string.Join("|", parts.Skip(1)));
+
+        throw new InvalidOperationException(response);
+    }
+
+    private static async Task<string> SendAsync(string command, TimeSpan operationTimeout)
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(".", AppInfo.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            using var timeout = new CancellationTokenSource(operationTimeout);
+            await client.ConnectAsync(timeout.Token);
+            using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+            using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+            await writer.WriteLineAsync(command);
+            return await reader.ReadLineAsync(timeout.Token) ?? "No response from service.";
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("DeskPulse service is unavailable. " + ex.Message, ex);
+        }
+    }
 }

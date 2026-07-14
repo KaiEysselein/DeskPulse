@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.IO.Pipes;
 using System.ServiceProcess;
@@ -91,7 +91,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 await pipe.WaitForConnectionAsync(token);
                 using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-                var command = (await reader.ReadLineAsync())?.Trim().ToUpperInvariant() ?? "";
+                var command = (await reader.ReadLineAsync())?.Trim() ?? "";
                 var response = HandleCommand(command);
                 await writer.WriteLineAsync(response);
             }
@@ -130,7 +130,9 @@ public sealed class DeskPulseWindowsService : ServiceBase
     private string HandleCommand(string command)
     {
         if (_monitor == null) return "Service monitor is not running.";
-        switch (command)
+
+        var commandName = command.Split('|', 2)[0].Trim().ToUpperInvariant();
+        switch (commandName)
         {
             case "STATUS": return _monitor.IsLoggingPaused
                 ? "DeskPulse service is running. Logging is paused."
@@ -139,9 +141,126 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "PAUSE_LOGGING": _monitor.PauseLogging(); return "OK|PAUSED";
             case "RESUME_LOGGING": _monitor.ResumeLogging(); return "OK|ACTIVE";
             case "RELOAD_SETTINGS": _monitor.ReloadSettings(); return "OK";
+            case "CLEAN_DATABASE_CURRENT_RULES": return RunDatabaseHousekeeping();
+            case "DELETE_RECORDS": return DeleteSelectedRecords(command);
+            case "CLEAR_TABLE": return ClearTable(command);
+            case "CLEAR_ALL_RECORDS": return ClearAllRecords();
             case "TRAY_STARTED": _monitor.WriteUserEvent("DeskPulseTrayStarted", "DeskPulse started (possible login)", "DeskPulse tray application started; this may coincide with a Windows user login"); return "OK";
             case "TRAY_STOPPED": _monitor.WriteUserEvent("DeskPulseTrayStopped", "DeskPulse tray stopped", "DeskPulse tray application closed"); return "OK";
             default: return "Unknown command.";
+        }
+    }
+
+    private string DeleteSelectedRecords(string command)
+    {
+        var parts = command.Split('|', 3);
+        if (parts.Length != 3)
+            return "ERROR|Invalid delete request.";
+
+        var tableName = NormalizeActivityTable(parts[1]);
+        if (tableName == null)
+            return "ERROR|Unknown activity table.";
+
+        var ids = parts[2].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => long.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+
+        if (ids.Length == 0)
+            return "OK|0";
+
+        return ExecuteDatabaseWrite(database => database.DeleteRecordsByIds(tableName, ids));
+    }
+
+    private string ClearTable(string command)
+    {
+        var parts = command.Split('|', 2);
+        if (parts.Length != 2)
+            return "ERROR|Invalid clear-table request.";
+
+        var tableName = NormalizeActivityTable(parts[1]);
+        if (tableName == null)
+            return "ERROR|Unknown activity table.";
+
+        return ExecuteDatabaseWrite(database => database.ClearTableRecords(tableName));
+    }
+
+    private string ClearAllRecords()
+    {
+        return ExecuteDatabaseWrite(database => database.ClearAllRecords());
+    }
+
+    private string ExecuteDatabaseWrite(Func<DeskPulseDatabase, long> action)
+    {
+        if (_monitor == null)
+            return "ERROR|Service monitor is not running.";
+
+        try
+        {
+            // Ordinary deletes and clears do not stop/restart ETW. They execute
+            // against the monitor-owned database instance and therefore share
+            // its database lock with live logging. This avoids the deadlock-like
+            // wait previously caused by PauseLogging plus a second DB instance.
+            var affected = _monitor.ExecuteDatabaseOperation(action);
+            return "OK|" + affected.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+        {
+            return "ERROR|" + SanitizePipeMessage(ex.Message);
+        }
+    }
+
+    private static string? NormalizeActivityTable(string tableName)
+    {
+        return tableName.Trim().ToUpperInvariant() switch
+        {
+            "ACTIVITYEVENTS" => "ActivityEvents",
+            "PROGRAMEVENTS" => "ProgramEvents",
+            "USEREVENTS" => "UserEvents",
+            _ => null
+        };
+    }
+
+    private static string SanitizePipeMessage(string message) =>
+        (message ?? "Unknown error").Replace("|", "/").Replace("\r", " ").Replace("\n", " ");
+
+    private string RunDatabaseHousekeeping()
+    {
+        if (_monitor == null)
+            return "ERROR|Service monitor is not running.";
+
+        var wasPaused = _monitor.IsLoggingPaused;
+
+        try
+        {
+            // The service is the sole owner of database writes. Pause monitoring
+            // while historical records are deleted and SQLite is compacted.
+            if (!wasPaused)
+                _monitor.PauseLogging();
+
+            var settings = AppSettings.Load();
+            var result = _monitor.ExecuteDatabaseOperation(database =>
+                database.CleanDatabaseWithCurrentRules(
+                    settings,
+                    progress: null,
+                    CancellationToken.None));
+
+            return string.Join("|",
+                "OK",
+                result.ActivityRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                result.ProgramRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                result.UserRecordsDeleted.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex)
+        {
+            return "ERROR|" + SanitizePipeMessage(ex.Message);
+        }
+        finally
+        {
+            if (!wasPaused)
+                _monitor.ResumeLogging();
         }
     }
 

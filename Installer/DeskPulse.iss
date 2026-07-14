@@ -1,5 +1,5 @@
 ﻿#define MyAppName "DeskPulse"
-#define MyAppVersion "0.2.0.0"
+#define MyAppVersion "0.2.0.1"
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -49,17 +49,26 @@ Name: "starttray"; Description: "Start DeskPulse Tray when installation finishes
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify
 
 [Files]
-Source: "..\publish\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.2.0.1\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.2.0.1\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; Remove startup shortcuts from older builds. Tray autostart is now stored in the current user HKCU Run key.
+Type: files; Name: "{userstartup}\DeskPulse.lnk"
+Type: files; Name: "{userstartup}\DeskPulse Tray.lnk"
+Type: files; Name: "{commonstartup}\DeskPulse.lnk"
+Type: files; Name: "{commonstartup}\DeskPulse Tray.lnk"
 
 [Icons]
 Name: "{group}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"
 Name: "{group}\Uninstall DeskPulse"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Tasks: desktopicon
-; Start the tray once for the interactive user at every Windows logon.
-Name: "{userstartup}\DeskPulse Tray"; Filename: "{app}\Tray\{#TrayExeName}"; WorkingDir: "{app}\Tray"
 
 [Run]
+; Normalize/migrate the shared settings as the original interactive user before
+; the LocalSystem service starts. This guarantees an absolute Documents path.
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--initialize-settings"; Flags: runhidden waituntilterminated runasoriginaluser
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
 Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Service\{#ServiceExeName}"" start= auto DisplayName= ""DeskPulse Service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse background monitoring service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "failure {#ServiceName} reset= 86400 actions= restart/5000/restart/15000/restart/60000"; Flags: runhidden waituntilterminated
@@ -68,6 +77,9 @@ Filename: "{app}\Tray\{#TrayExeName}"; Description: "Start DeskPulse Tray"; Task
 
 ; These run before Inno Setup removes installed files.
 [UninstallRun]
+; Remove the original interactive user's tray autostart registry entry before stopping the tray.
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--disable-startup"; Flags: runhidden waituntilterminated; RunOnceId: "DisableDeskPulseTrayStartup"
+
 ; Stop the tray first so its executable, database and settings are not locked.
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#TrayExeName} /T"; Flags: runhidden waituntilterminated; RunOnceId: "KillDeskPulseTray"
 

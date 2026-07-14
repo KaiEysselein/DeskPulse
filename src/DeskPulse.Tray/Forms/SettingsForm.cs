@@ -40,6 +40,8 @@ public partial class SettingsForm : Form
     private Button _cleanDatabaseWithRulesButton = null!;
     private Button _restartWindowsServiceButton = null!;
     private Label _windowsServiceStatusLabel = null!;
+    private CheckBox _trackWindowsSystemActivityCheckBox = null!;
+    private bool _initializingUi = true;
 
     public SettingsForm()
     {
@@ -56,10 +58,75 @@ public partial class SettingsForm : Form
         _settingsTabControl.TabPages.Add(_rulesTabPage);
         _settingsTabControl.TabPages.Add(_exportOptionsTabPage);
         _settingsTabControl.TabPages.Add(_maintenanceHousekeepingTabPage);
+        _settingsTabControl.SelectedIndexChanged += SettingsTabControl_SelectedIndexChanged;
+        _cancelButton.Click += CancelOrCloseButton_Click;
 
         var settings = AppSettings.Load();
         LoadDesignerSettings(settings);
         LoadRuleSettings(settings);
+
+        _initializingUi = false;
+        UpdateFooterForSelectedTab();
+    }
+
+    private void SettingsTabControl_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        UpdateFooterForSelectedTab();
+    }
+
+    private void UpdateFooterForSelectedTab()
+    {
+        var isRulesTab = ReferenceEquals(_settingsTabControl.SelectedTab, _rulesTabPage);
+        var isMaintenanceTab = ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage);
+
+        _importRulesButton.Visible = isRulesTab;
+        _exportRulesButton.Visible = isRulesTab;
+
+        _saveButton.Visible = !isMaintenanceTab;
+        _saveButton.Enabled = !isMaintenanceTab;
+
+        _cancelButton.Text = isMaintenanceTab ? "Close" : "Cancel";
+        _cancelButton.DialogResult = isMaintenanceTab ? DialogResult.None : DialogResult.Cancel;
+
+        AcceptButton = isMaintenanceTab ? null : _saveButton;
+        CancelButton = _cancelButton;
+    }
+
+    private void CancelOrCloseButton_Click(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage))
+            return;
+
+        DialogResult = DialogResult.None;
+        Close();
+    }
+
+    private void SaveWindowsSystemActivitySettingImmediately()
+    {
+        try
+        {
+            var settings = AppSettings.Load();
+            settings.TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked;
+            settings.Save();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "The Windows system activity setting could not be saved.\n\n" + ex.Message,
+                "DeskPulse Settings",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            _initializingUi = true;
+            try
+            {
+                _trackWindowsSystemActivityCheckBox.Checked = AppSettings.Load().TrackWindowsSystemActivity;
+            }
+            finally
+            {
+                _initializingUi = false;
+            }
+        }
     }
 
     private void ConfigureActivityRuleTabs()
@@ -121,11 +188,49 @@ public partial class SettingsForm : Form
             Padding = new Padding(16)
         };
 
+        var loggingProtectionGroup = new GroupBox
+        {
+            Text = "Logging protection",
+            Left = 16,
+            Top = 16,
+            Width = 820,
+            Height = 112,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+
+        _trackWindowsSystemActivityCheckBox = new CheckBox
+        {
+            Text = "Track Windows system activity",
+            Left = 16,
+            Top = 28,
+            Width = 300,
+            Height = 24,
+            Checked = AppSettings.Load().TrackWindowsSystemActivity
+        };
+        _trackWindowsSystemActivityCheckBox.CheckedChanged += (_, _) =>
+        {
+            var active = !_trackWindowsSystemActivityCheckBox.Checked;
+            _fileActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetFileRules(), active);
+            _appActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetProcessRules(), active);
+
+            if (!_initializingUi)
+                SaveWindowsSystemActivitySettingImmediately();
+        };
+        var protectionHelp = new Label
+        {
+            Left = 16, Top = 56, Width = 785, Height = 42,
+            Text = "When disabled, DeskPulse suppresses routine Windows files, folders, services and background processes. Enabling this option may significantly increase logging volume, database size and CPU usage.",
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+        loggingProtectionGroup.Controls.Add(_trackWindowsSystemActivityCheckBox);
+        loggingProtectionGroup.Controls.Add(protectionHelp);
+        _maintenanceHousekeepingTabPage.Controls.Add(loggingProtectionGroup);
+
         var housekeepingGroup = new GroupBox
         {
             Text = "Database housekeeping",
             Left = 16,
-            Top = 16,
+            Top = 140,
             Width = 820,
             Height = 150,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -161,7 +266,7 @@ public partial class SettingsForm : Form
         {
             Text = "Windows service",
             Left = 16,
-            Top = 182,
+            Top = 306,
             Width = 820,
             Height = 130,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -301,12 +406,13 @@ public partial class SettingsForm : Form
 
         using var progressForm = new RuleCleanupProgressForm(
             "DeskPulse Database Housekeeping",
-            "Applying current rules to database history",
-            (progress, cancellationToken) =>
+            "Applying current rules through the DeskPulse service",
+            progress =>
             {
-                using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
-                database.Initialize();
-                return database.CleanDatabaseWithCurrentRules(settings, progress, cancellationToken);
+                progress.Report(new ExportProgressInfo(10, "10%  Sending housekeeping request to Windows service"));
+                var result = ServicePipeClient.RunDatabaseHousekeepingAsync().GetAwaiter().GetResult();
+                progress.Report(new ExportProgressInfo(100, "100% Database housekeeping complete"));
+                return result;
             });
 
         if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
@@ -354,6 +460,7 @@ public partial class SettingsForm : Form
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = _startWithWindowsCheckBox.Checked,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
+            TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked,
             LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
             FileActivityRuleSettings = fileActivityRuleSettings,
             FolderActivityRuleSettings = new List<ActivityRuleSetting>(),
@@ -537,6 +644,9 @@ public partial class SettingsForm : Form
         _fileActivityRuleEditor.LoadRuleSettings(fileRuleSettings);
         _userActivityRuleEditor.LoadRuleSettings(settings.UserActivityRuleSettings);
         _appActivityRuleEditor.LoadRuleSettings(appRuleSettings);
+        _trackWindowsSystemActivityCheckBox.Checked = settings.TrackWindowsSystemActivity;
+        _fileActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetFileRules(), !settings.TrackWindowsSystemActivity);
+        _appActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetProcessRules(), !settings.TrackWindowsSystemActivity);
 
     }
 
@@ -649,7 +759,7 @@ public partial class SettingsForm : Form
         SetButtonToolTip(_maintenanceResetRulesButton, "Replaces the current rules shown in this form with the default logging rules. It does not delete past records; Save is still required.");
         SetButtonToolTip(_maintenanceRemovePastRecordsButton, "PERMANENTLY deletes past file/program records that match current Exclude rules. Does not delete the rules themselves or user/session records.");
         SetButtonToolTip(_maintenanceShowActiveExtensionsButton, "Shows the file extensions currently monitored by DeskPulse. Does not delete or change data.");
-        SetButtonToolTip(_maintenanceShowStartupStatusButton, "Shows whether the Windows Task Scheduler startup entry exists and appears valid. Does not delete or change data.");
+        SetButtonToolTip(_maintenanceShowStartupStatusButton, "Shows whether the current-user Windows startup registry entry exists. Does not delete or change data.");
         SetButtonToolTip(_maintenanceRemoveRegistrySettingsButton, "Deletes current-user DeskPulse registry settings, including preferences and logging rules. Does not delete the database, export, startup fallback log, or program files.");
     }
 
@@ -763,18 +873,18 @@ public partial class SettingsForm : Form
         _startWithWindowsCheckBox.Left = 18;
         _startWithWindowsCheckBox.Top = 32;
         _startWithWindowsCheckBox.Width = 520;
-        _startWithWindowsCheckBox.Text = "Start DeskPulse when I log in to Windows";
+        _startWithWindowsCheckBox.Text = "Start DeskPulse Tray when I log in to Windows";
         _startWithWindowsCheckBox.Checked = settings.StartWithWindows || StartupTaskManager.IsEnabled();
 
         var startupHintLabel = CreateHintLabel(
-            "Creates a current-user Windows Task Scheduler entry and starts DeskPulse with highest privileges when you log in.",
+            "Starts the non-elevated DeskPulse Tray for your Windows account when you log in. The background service starts separately with Windows.",
             40,
             62,
             740,
             22);
 
         var quietStartupLabel = CreateHintLabel(
-            "DeskPulse starts quietly in the tray. Startup errors are still shown if monitoring cannot start.",
+            "The tray starts quietly. The DeskPulse Windows service continues running independently in the background.",
             40,
             88,
             740,
@@ -930,8 +1040,7 @@ public partial class SettingsForm : Form
     {
         try
         {
-            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
-            database.Initialize();
+            using var database = new DeskPulseDatabase(settings.DatabaseFilePath, readOnly: true);
             var overview = database.GetMaintenanceOverview();
 
             return
@@ -959,8 +1068,7 @@ public partial class SettingsForm : Form
 
         try
         {
-            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
-            database.Initialize();
+            using var database = new DeskPulseDatabase(settings.DatabaseFilePath, readOnly: true);
 
             var view = _statisticsViewComboBox.SelectedItem?.ToString() ?? "Top 100 full paths";
             var rows = database.GetTopMaintenanceStatistics(view);
@@ -1617,9 +1725,8 @@ public partial class SettingsForm : Form
             "Removing excluded past records",
             progress =>
             {
-                using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
-                database.Initialize();
-                return database.RemoveRecordsMatchingExclusions(excludedFolders, excludedProcesses, excludedFiles, progress);
+                progress.Report(new ExportProgressInfo(8, "8%   Sending cleanup request to DeskPulse service"));
+                return ServicePipeClient.RunDatabaseHousekeepingAsync().GetAwaiter().GetResult();
             });
 
         if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
@@ -1652,9 +1759,7 @@ public partial class SettingsForm : Form
 
         try
         {
-            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
-            database.Initialize();
-            var deleted = database.ClearTableRecords(tableName);
+            var deleted = ServicePipeClient.ClearTableAsync(tableName).GetAwaiter().GetResult();
 
             MessageBox.Show(
                 deleted.ToString("N0", CultureInfo.InvariantCulture) + " " + description + " removed.",
@@ -1688,9 +1793,7 @@ public partial class SettingsForm : Form
 
         try
         {
-            using var database = new DeskPulseDatabase(settings.DatabaseFilePath);
-            database.Initialize();
-            var deleted = database.ClearAllRecords();
+            var deleted = ServicePipeClient.ClearAllRecordsAsync().GetAwaiter().GetResult();
 
             MessageBox.Show(
                 deleted.ToString("N0", CultureInfo.InvariantCulture) + " total records removed.",
@@ -1747,10 +1850,10 @@ public partial class SettingsForm : Form
         var enabled = StartupTaskManager.IsEnabled();
 
         MessageBox.Show(
-            "Task Scheduler startup task: " + (enabled ? "Enabled" : "Not detected") + Environment.NewLine +
-            "Task name: DeskPulse" + Environment.NewLine +
-            "Expected trigger: ONLOGON" + Environment.NewLine +
-            "Expected run level: highest available privileges",
+            "Current-user tray startup: " + (enabled ? "Enabled" : "Not detected") + Environment.NewLine +
+            "Registry location: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" + Environment.NewLine +
+            "Value name: DeskPulse.Tray" + Environment.NewLine +
+            "The DeskPulse Windows service starts independently as an automatic service.",
             "DeskPulse Startup Status",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -2410,6 +2513,7 @@ public partial class SettingsForm : Form
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = startWithWindows,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
+            TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked,
             LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
             FileActivityRuleSettings = fileActivityRuleSettings,
             FolderActivityRuleSettings = new List<ActivityRuleSetting>(),
@@ -2504,6 +2608,9 @@ internal sealed class ActivityRuleEditor : UserControl
     private readonly ActivityRuleCategory _category;
     private readonly DataGridView _grid = new();
     private readonly TextBox _valueText = new();
+    private List<ActivityRuleSetting> _userRules = new();
+    private IReadOnlyList<ActivityRuleSetting> _windowsDefaultRules = Array.Empty<ActivityRuleSetting>();
+    private bool _windowsDefaultsActive;
 
     public ActivityRuleEditor(ActivityRuleCategory category)
     {
@@ -2622,6 +2729,10 @@ internal sealed class ActivityRuleEditor : UserControl
         _grid.MultiSelect = false;
         _grid.BackgroundColor = System.Drawing.SystemColors.Window;
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", Width = 34 });
+        if (_category != ActivityRuleCategory.User)
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Source", HeaderText = "Source", Width = 108, ReadOnly = true });
+
+        _grid.CellBeginEdit += (_, e) => { if (e.RowIndex >= 0 && Equals(_grid.Rows[e.RowIndex].Tag, "WindowsDefault")) e.Cancel = true; };
 
         if (_category == ActivityRuleCategory.File)
         {
@@ -2732,7 +2843,7 @@ internal sealed class ActivityRuleEditor : UserControl
 
         var folder = dialog.SelectedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var pattern = folder + (recursive == DialogResult.Yes ? @"\**\*" : @"\*");
-        _grid.Rows.Add(true, false, true, pattern);
+        _grid.Rows.Add(true, "User", false, true, pattern);
     }
 
     private void BrowseForExactFile()
@@ -2796,7 +2907,7 @@ internal sealed class ActivityRuleEditor : UserControl
                 continue;
 
             // Installed applications are appended as enabled Include rules.
-            _grid.Rows.Add(true, false, true, value);
+            _grid.Rows.Add(true, "User", false, true, value);
         }
     }
 
@@ -2808,12 +2919,12 @@ internal sealed class ActivityRuleEditor : UserControl
         if (_category == ActivityRuleCategory.File)
         {
             // New File Activity rules are enabled Include rules and are appended at the bottom.
-            _grid.Rows.Add(true, false, true, value);
+            _grid.Rows.Add(true, "User", false, true, value);
         }
         else if (_category == ActivityRuleCategory.App)
         {
             // New App Activity rules are enabled Include rules and are appended at the bottom.
-            _grid.Rows.Add(true, false, true, value);
+            _grid.Rows.Add(true, "User", false, true, value);
         }
         else
         {
@@ -2826,8 +2937,37 @@ internal sealed class ActivityRuleEditor : UserControl
 
     public void LoadRuleSettings(IEnumerable<ActivityRuleSetting> rules)
     {
+        _userRules = (rules ?? Array.Empty<ActivityRuleSetting>()).Select(r => r.Clone()).ToList();
+        RenderRules();
+    }
+
+    public void SetWindowsDefaultRules(IEnumerable<ActivityRuleSetting> rules, bool active)
+    {
+        if (_grid.Rows.Count > 0) _userRules = GetRuleSettings();
+        _windowsDefaultRules = (rules ?? Array.Empty<ActivityRuleSetting>()).Select(r => r.Clone()).ToList();
+        _windowsDefaultsActive = active;
+        RenderRules();
+    }
+
+    private void RenderRules()
+    {
         _grid.Rows.Clear();
-        foreach (var setting in rules ?? Array.Empty<ActivityRuleSetting>())
+        if (_category != ActivityRuleCategory.User)
+        {
+            foreach (var setting in _windowsDefaultRules)
+            {
+                var include = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
+                var index = _grid.Rows.Add(_windowsDefaultsActive, "Windows default", !include, include, setting.Value);
+                var row = _grid.Rows[index];
+                row.Tag = "WindowsDefault";
+                row.ReadOnly = true;
+                row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.Control;
+                row.DefaultCellStyle.ForeColor = System.Drawing.SystemColors.GrayText;
+                row.Cells["Enabled"].ToolTipText = _windowsDefaultsActive ? "Active built-in exclusion. Controlled by Track Windows system activity." : "Inactive because Track Windows system activity is enabled.";
+            }
+        }
+
+        foreach (var setting in _userRules)
         {
             if (string.IsNullOrWhiteSpace(setting.Value))
                 continue;
@@ -2845,14 +2985,14 @@ internal sealed class ActivityRuleEditor : UserControl
             if (_category == ActivityRuleCategory.File)
             {
                 var fileIsInclude = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
-                _grid.Rows.Add(setting.Enabled, !fileIsInclude, fileIsInclude, setting.Value);
+                _grid.Rows.Add(setting.Enabled, "User", !fileIsInclude, fileIsInclude, setting.Value);
                 continue;
             }
 
             if (_category == ActivityRuleCategory.App)
             {
                 var appIsInclude = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
-                _grid.Rows.Add(setting.Enabled, !appIsInclude, appIsInclude, setting.Value);
+                _grid.Rows.Add(setting.Enabled, "User", !appIsInclude, appIsInclude, setting.Value);
                 continue;
             }
 
@@ -2866,6 +3006,7 @@ internal sealed class ActivityRuleEditor : UserControl
         var result = new List<ActivityRuleSetting>();
         foreach (DataGridViewRow row in _grid.Rows)
         {
+            if (Equals(row.Tag, "WindowsDefault")) continue;
             var value = row.Cells["Value"].Value?.ToString()?.Trim() ?? "";
             if (value.Length == 0)
                 continue;
@@ -2925,7 +3066,7 @@ internal sealed class ActivityRuleEditor : UserControl
             });
             return;
         }
-        if (row == null) return;
+        if (row == null || Equals(row.Tag, "WindowsDefault")) return;
         var index = row.Index;
         if (action == "Remove") { _grid.Rows.RemoveAt(index); return; }
         if (action == "Duplicate")

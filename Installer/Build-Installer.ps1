@@ -4,6 +4,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $issFile = Join-Path $PSScriptRoot 'DeskPulse.iss'
 
 $candidates = @(
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
 )
@@ -14,8 +15,8 @@ if (-not $iscc) {
     throw "Inno Setup 6 compiler (ISCC.exe) was not found."
 }
 
-$serviceExe = Join-Path $projectRoot 'publish\service\DeskPulse.Service.exe'
-$trayExe = Join-Path $projectRoot 'publish\tray\DeskPulse.Tray.exe'
+$serviceExe = Join-Path $projectRoot 'publish\v0.2.0.1\service\DeskPulse.Service.exe'
+$trayExe = Join-Path $projectRoot 'publish\v0.2.0.1\tray\DeskPulse.Tray.exe'
 
 if (-not (Test-Path $serviceExe)) {
     throw "Published service not found: $serviceExe"
@@ -37,4 +38,4 @@ finally {
 
 Write-Host ""
 Write-Host "Installer created at:" -ForegroundColor Green
-Write-Host (Join-Path $PSScriptRoot 'Output\DeskPulse_Setup_0.2.0.0.exe')
+Write-Host (Join-Path $PSScriptRoot 'Output\DeskPulse_Setup_0.2.0.1.exe')

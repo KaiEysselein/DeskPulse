@@ -20,7 +20,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.2.0.0";
+    public const string Version = "0.2.0.1";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -336,6 +336,20 @@ public sealed class FileIoMonitor : IDisposable
         lock (_settingsLock)
         {
             return _database;
+        }
+    }
+
+    public T ExecuteDatabaseOperation<T>(Func<DeskPulseDatabase, T> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        // Use the monitor-owned database instance so every service-side write
+        // shares the same in-process database lock as live ETW and program events.
+        // Creating a second DeskPulseDatabase instance gives it a different lock
+        // and can leave the named-pipe request waiting behind competing writers.
+        lock (_settingsLock)
+        {
+            return operation(_database);
         }
     }
 
@@ -661,6 +675,9 @@ public sealed class FileIoMonitor : IDisposable
                 return false;
             }
 
+            if (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsFileOrProcessExcluded(fullPath, processName))
+                return false;
+
             // Explicit App Activity rules take precedence for executable files. This allows a
             // specifically included app (for example abc.exe) to remain monitored even when
             // the general *.exe pattern is not included in File Activity rules.
@@ -954,13 +971,15 @@ public sealed class ProgramActivityMonitor : IDisposable
 
             foreach (var process in startedProcesses)
             {
-                if (LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
+                if ((settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
+                    LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
                     WriteProgramEvent("ProgramStarted", "Program started", process, process.StartTime ?? DateTime.Now, "Detected in the current interactive Windows session");
             }
 
             foreach (var process in stoppedProcesses)
             {
-                if (LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
+                if ((settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
+                    LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
                     WriteProgramEvent("ProgramStopped", "Program closed", process, DateTime.Now, "Process no longer detected in the current interactive Windows session");
             }
         }
@@ -1141,10 +1160,12 @@ public sealed class ExcelExportProgressTracker
 public sealed class DeskPulseDatabase : IDisposable
 {
     private readonly object _dbLock = new();
+    private readonly bool _readOnly;
 
-    public DeskPulseDatabase(string databaseFilePath)
+    public DeskPulseDatabase(string databaseFilePath, bool readOnly = false)
     {
         DatabaseFilePath = databaseFilePath;
+        _readOnly = readOnly;
     }
 
     public string DatabaseFilePath { get; }
@@ -1156,7 +1177,7 @@ public sealed class DeskPulseDatabase : IDisposable
             var builder = new SqliteConnectionStringBuilder
             {
                 DataSource = DatabaseFilePath,
-                Mode = SqliteOpenMode.ReadWriteCreate,
+                Mode = _readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
                 Cache = SqliteCacheMode.Shared
             };
 
@@ -1637,6 +1658,51 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
+    public long DeleteRecordsByIds(string tableName, IReadOnlyList<long> ids)
+    {
+        if (!IsKnownActivityTable(tableName))
+            throw new InvalidOperationException("Unknown DeskPulse table: " + tableName);
+        if (ids == null || ids.Count == 0)
+            return 0;
+
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var deletedTotal = 0L;
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                const int batchSize = 400;
+                for (var offset = 0; offset < ids.Count; offset += batchSize)
+                {
+                    var batch = ids.Skip(offset).Take(batchSize).Distinct().ToArray();
+                    using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    var names = new List<string>(batch.Length);
+                    for (var index = 0; index < batch.Length; index++)
+                    {
+                        var name = "$id" + index.ToString(CultureInfo.InvariantCulture);
+                        names.Add(name);
+                        command.Parameters.AddWithValue(name, batch[index]);
+                    }
+                    command.CommandText = "DELETE FROM " + tableName + " WHERE Id IN (" + string.Join(",", names) + ");";
+                    deletedTotal += command.ExecuteNonQuery();
+                }
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+
+            return deletedTotal;
+        }
+    }
+
     public long ClearTableRecords(string tableName)
     {
         if (!IsKnownActivityTable(tableName))
@@ -1758,7 +1824,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     var id = reader.GetInt64(0);
                     var filePath = reader.GetString(1);
                     var programName = reader.GetString(2);
-                    if (!settings.LogProgramActivity || !LoggingRulesEngine.IsProgramActivityMonitored(filePath, programName, settings.AppActivityRules))
+                    if (!settings.LogProgramActivity ||
+                        (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsProcessExcluded(programName)) ||
+                        !LoggingRulesEngine.IsProgramActivityMonitored(filePath, programName, settings.AppActivityRules))
                         programIdsToDelete.Add(id);
                     ReportScanProgress();
                 }
@@ -1822,6 +1890,9 @@ public sealed class DeskPulseDatabase : IDisposable
             return false;
 
         if (settings.IgnoreTempFolders && PathExclusions.IsInTempFolder(fullPath))
+            return false;
+
+        if (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsFileOrProcessExcluded(fullPath, processName))
             return false;
 
         if (string.IsNullOrWhiteSpace(extension))
@@ -3995,6 +4066,70 @@ public static class ProcessExclusions
 
 }
 
+public static class WindowsDefaultExclusions
+{
+    private static readonly string WindowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd(Path.DirectorySeparatorChar);
+    private static readonly string ProgramDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData).TrimEnd(Path.DirectorySeparatorChar);
+
+    private static readonly string[] RelativeProgramDataFolders =
+    {
+        @"Microsoft\Windows\WER", @"Microsoft\Windows Defender", @"Microsoft\Search"
+    };
+
+    private static readonly HashSet<string> Processes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SearchIndexer", "SearchProtocolHost", "SearchFilterHost", "MsMpEng", "CompatTelRunner",
+        "svchost", "RuntimeBroker", "TiWorker", "TrustedInstaller", "MoUsoCoreWorker", "UsoClient",
+        "WerFault", "System"
+    };
+
+    public static IReadOnlyList<ActivityRuleSetting> GetFileRules() => GetFolderPaths()
+        .Select(path => new ActivityRuleSetting { Enabled = true, RuleType = "file", Action = "Exclude", Value = path.TrimEnd(Path.DirectorySeparatorChar) + @"\**\*" })
+        .ToList();
+
+    public static IReadOnlyList<ActivityRuleSetting> GetProcessRules() => Processes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+        .Select(name => new ActivityRuleSetting { Enabled = true, RuleType = "process", Action = "Exclude", Value = name })
+        .ToList();
+
+    public static bool IsFileOrProcessExcluded(string fullPath, string processName) =>
+        IsProcessExcluded(processName) || IsPathExcluded(fullPath);
+
+    public static bool IsProcessExcluded(string processName)
+    {
+        var name = Path.GetFileNameWithoutExtension((processName ?? "").Trim());
+        return name.Length > 0 && Processes.Contains(name);
+    }
+
+    public static bool IsPathExcluded(string fullPath)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath)) return false;
+        string normalized;
+        try { normalized = Path.GetFullPath(Environment.ExpandEnvironmentVariables(fullPath)).TrimEnd(Path.DirectorySeparatorChar); }
+        catch { return false; }
+
+        if (normalized.StartsWith(Path.GetPathRoot(normalized) + "$Recycle.Bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return GetFolderPaths().Any(folder => normalized.Equals(folder, StringComparison.OrdinalIgnoreCase) || normalized.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<string> GetFolderPaths()
+    {
+        // When Windows system activity tracking is disabled, exclude the complete
+        // Windows installation tree. This is intentionally broader than maintaining
+        // a fragile list of noisy subfolders and is evaluated before user include rules.
+        if (!string.IsNullOrWhiteSpace(WindowsFolder))
+            yield return WindowsFolder;
+
+        foreach (var relative in RelativeProgramDataFolders)
+            yield return Path.Combine(ProgramDataFolder, relative).TrimEnd(Path.DirectorySeparatorChar);
+
+        var root = Path.GetPathRoot(WindowsFolder);
+        if (!string.IsNullOrWhiteSpace(root))
+            yield return Path.Combine(root, "$Recycle.Bin").TrimEnd(Path.DirectorySeparatorChar);
+    }
+}
+
 public static class LoggingRulesEngine
 {
     public static bool IsFileActivityMonitored(string fullPath, IEnumerable<string> fileRules)
@@ -4333,15 +4468,17 @@ public static class FileExclusions
 
 public static class StartupTaskManager
 {
-    private const string TaskName = "DeskPulse";
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "DeskPulse.Tray";
+    private const string LegacyTaskName = "DeskPulse";
 
     public static bool IsEnabled()
     {
         try
         {
-            using var process = StartHiddenProcess("schtasks.exe", $"/Query /TN \"{TaskName}\"");
-            process.WaitForExit(5000);
-            return process.ExitCode == 0;
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+            var value = key?.GetValue(RunValueName) as string;
+            return !string.IsNullOrWhiteSpace(value);
         }
         catch
         {
@@ -4351,61 +4488,72 @@ public static class StartupTaskManager
 
     public static void SetEnabled(bool enabled)
     {
-        if (enabled)
-            CreateTask();
-        else
-            DeleteTask();
-    }
+        RemoveLegacyCurrentUserStartupEntries();
 
-    private static void CreateTask()
-    {
-        var executablePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "DeskPulse.Service.exe");
+        using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
+            ?? throw new InvalidOperationException("DeskPulse could not open the current-user Windows startup registry key.");
 
-        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
-            throw new InvalidOperationException("DeskPulse could not determine the executable path for Windows startup.");
-
-        var taskCommand = $"\\\"{executablePath}\\\"";
-        var arguments = $"/Create /TN \"{TaskName}\" /TR \"{taskCommand}\" /SC ONLOGON /RL HIGHEST /F";
-
-        RunSchtasks(arguments, "create the Windows startup task");
-    }
-
-    private static void DeleteTask()
-    {
-        if (!IsEnabled())
-            return;
-
-        RunSchtasks($"/Delete /TN \"{TaskName}\" /F", "remove the Windows startup task");
-    }
-
-    private static void RunSchtasks(string arguments, string actionDescription)
-    {
-        using var process = StartHiddenProcess("schtasks.exe", arguments);
-        process.WaitForExit(15000);
-
-        if (process.ExitCode != 0)
+        if (!enabled)
         {
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-            var details = string.Join(Environment.NewLine, new[] { output, error }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            key.DeleteValue(RunValueName, throwOnMissingValue: false);
+            key.DeleteValue("DeskPulse", throwOnMissingValue: false);
+            return;
+        }
 
-            throw new InvalidOperationException(
-                $"DeskPulse could not {actionDescription}." +
-                (string.IsNullOrWhiteSpace(details) ? "" : Environment.NewLine + Environment.NewLine + details.Trim()));
+        var executablePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+            executablePath = Path.Combine(AppContext.BaseDirectory, "DeskPulse.Tray.exe");
+
+        if (!File.Exists(executablePath))
+            throw new InvalidOperationException("DeskPulse could not determine the tray executable path for Windows startup.");
+
+        key.SetValue(RunValueName, $"\"{executablePath}\"", RegistryValueKind.String);
+        key.DeleteValue("DeskPulse", throwOnMissingValue: false);
+    }
+
+    private static void RemoveLegacyCurrentUserStartupEntries()
+    {
+        TryDeleteLegacyTask();
+        TryDeleteStartupShortcut(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "DeskPulse.lnk");
+        TryDeleteStartupShortcut(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "DeskPulse Tray.lnk");
+    }
+
+    private static void TryDeleteLegacyTask()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Delete /TN \"{LegacyTaskName}\" /F",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+            process?.WaitForExit(5000);
+        }
+        catch
+        {
+            // Migration cleanup is best effort. Startup is now controlled by HKCU Run.
         }
     }
 
-    private static Process StartHiddenProcess(string fileName, string arguments)
+    private static void TryDeleteStartupShortcut(string folder, string fileName)
     {
-        return Process.Start(new ProcessStartInfo
+        try
         {
-            FileName = fileName,
-            Arguments = arguments,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        }) ?? throw new InvalidOperationException("Could not start schtasks.exe.");
+            if (string.IsNullOrWhiteSpace(folder))
+                return;
+
+            var path = Path.Combine(folder, fileName);
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // Best effort only; the installer also removes historical shortcuts.
+        }
     }
 }
 
@@ -4461,6 +4609,9 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
 
     public bool LogProgramActivity { get; set; } = true;
+
+    /// <summary>When false, routine Windows system files, folders and processes are suppressed before user rules are evaluated.</summary>
+    public bool TrackWindowsSystemActivity { get; set; } = false;
 
     // Legacy combined list retained for migration compatibility.
     public List<string> LoggingRules { get; set; } = GetDefaultLoggingRules();
@@ -4527,6 +4678,7 @@ public sealed class AppSettings
             IgnoreTempFolders = IgnoreTempFolders,
             StartWithWindows = StartWithWindows,
             LogProgramActivity = LogProgramActivity,
+            TrackWindowsSystemActivity = TrackWindowsSystemActivity,
             LoggingRules = new List<string>(LoggingRules),
             FileActivityRuleSettings = FileActivityRuleSettings.Select(rule => rule.Clone()).ToList(),
             FolderActivityRuleSettings = FolderActivityRuleSettings.Select(rule => rule.Clone()).ToList(),
@@ -4559,7 +4711,17 @@ public sealed class AppSettings
                     });
                     if (loaded != null)
                     {
+                        var originalDataFolderPath = loaded.DataFolderPath;
                         NormalizeSharedSettings(loaded);
+
+                        // Persist path normalization immediately. This migrates older settings
+                        // such as "DeskPulse" or "DeskPulse\\DeskPulse.db" to an absolute
+                        // path under the interactive user's Documents folder. The Windows
+                        // service must never resolve a relative SQLite path against its own
+                        // system working directory.
+                        if (!string.Equals(originalDataFolderPath, loaded.DataFolderPath, StringComparison.OrdinalIgnoreCase))
+                            loaded.Save();
+
                         return loaded;
                     }
                 }
@@ -4578,8 +4740,7 @@ public sealed class AppSettings
 
     private static void NormalizeSharedSettings(AppSettings settings)
     {
-        if (string.IsNullOrWhiteSpace(settings.DataFolderPath))
-            settings.DataFolderPath = GetDefaultDataFolderPath();
+        settings.DataFolderPath = ResolveDataFolderPath(settings.DataFolderPath);
         settings.LoggingRules ??= GetDefaultLoggingRules();
         settings.FileActivityRuleSettings ??= ToRuleSettings(GetDefaultFileActivityRules());
         settings.FolderActivityRuleSettings ??= new List<ActivityRuleSetting>();
@@ -5242,10 +5403,32 @@ public sealed class AppSettings
 
     public static string GetDefaultDataFolderPath()
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "DeskPulse"
-        );
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+        if (string.IsNullOrWhiteSpace(documents))
+            documents = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
+
+        return Path.GetFullPath(Path.Combine(documents, "DeskPulse"));
+    }
+
+    private static string ResolveDataFolderPath(string? configuredPath)
+    {
+        var value = Environment.ExpandEnvironmentVariables(configuredPath?.Trim() ?? string.Empty);
+
+        if (string.IsNullOrWhiteSpace(value))
+            return GetDefaultDataFolderPath();
+
+        if (Path.IsPathRooted(value))
+            return Path.GetFullPath(value);
+
+        // Legacy 0.1.x/early 0.2.x settings sometimes stored only "DeskPulse".
+        // Resolve all relative data paths against the current interactive user's
+        // Documents folder, never against Program Files or the service working directory.
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (string.IsNullOrWhiteSpace(documents))
+            documents = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
+
+        return Path.GetFullPath(Path.Combine(documents, value));
     }
 
     private static string ReadString(RegistryKey key, string name, string fallback)
