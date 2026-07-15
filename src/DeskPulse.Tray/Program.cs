@@ -313,6 +313,60 @@ public static class ServicePipeClient
     }
 
 
+
+    public static async Task<MaintenanceExclusionCleanupResult> RepairHistoricalDataAsync(
+        IProgress<ExportProgressInfo>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(".", AppInfo.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromMinutes(30));
+            await client.ConnectAsync(timeout.Token);
+
+            using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+            using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+            await writer.WriteLineAsync("REPAIR_HISTORICAL_DATA");
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var response = await reader.ReadLineAsync(timeout.Token);
+                if (response == null)
+                    throw new InvalidOperationException("The DeskPulse service closed the repair connection unexpectedly.");
+
+                var parts = response.Split('|');
+                if (parts.Length >= 3 && parts[0].Equals("PROGRESS", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(parts[1], out var percent))
+                {
+                    progress?.Report(new ExportProgressInfo(percent, string.Join("|", parts.Skip(2))));
+                    continue;
+                }
+
+                if (parts.Length >= 3 && parts[0].Equals("RESULT", StringComparison.OrdinalIgnoreCase) &&
+                    parts[1].Equals("OK", StringComparison.OrdinalIgnoreCase) &&
+                    long.TryParse(parts[2], out var repaired))
+                    return new MaintenanceExclusionCleanupResult { ActivityRecordsRepaired = repaired };
+
+                if (parts.Length >= 3 && parts[0].Equals("RESULT", StringComparison.OrdinalIgnoreCase) &&
+                    parts[1].Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(string.Join("|", parts.Skip(2)));
+
+                throw new InvalidOperationException(response);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("Historical data repair timed out while waiting for the DeskPulse service.");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new InvalidOperationException("DeskPulse service is unavailable. " + ex.Message, ex);
+        }
+    }
+
+
     public static async Task<long> DeleteRecordsAsync(string tableName, IReadOnlyList<long> ids)
     {
         if (ids == null || ids.Count == 0)

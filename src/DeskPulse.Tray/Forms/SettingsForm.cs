@@ -41,6 +41,9 @@ public partial class SettingsForm : Form
     private Button _restartWindowsServiceButton = null!;
     private Label _windowsServiceStatusLabel = null!;
     private CheckBox _trackWindowsSystemActivityCheckBox = null!;
+    private Button _configureFilteredFileActivityProcessesButton = null!;
+    private Label _filteredFileActivityProcessesSummaryLabel = null!;
+    private HashSet<string> _filteredFileActivityProcesses = new(StringComparer.OrdinalIgnoreCase);
     private bool _initializingUi = true;
     private readonly Button _saveAndCloseButton = new();
     private bool _isDirty;
@@ -51,6 +54,7 @@ public partial class SettingsForm : Form
         InitializeComponent();
         AppIcon.Apply(this);
         ConfigureActivityRuleTabs();
+        ConfigureGeneralActivityLogging();
         ConfigureRuleImportExportButtons();
         ConfigureMaintenanceTab();
 
@@ -59,7 +63,6 @@ public partial class SettingsForm : Form
         _settingsTabControl.TabPages.Clear();
         _settingsTabControl.TabPages.Add(_generalTabPage);
         _settingsTabControl.TabPages.Add(_rulesTabPage);
-        _settingsTabControl.TabPages.Add(_exportOptionsTabPage);
         _settingsTabControl.TabPages.Add(_maintenanceHousekeepingTabPage);
         _settingsTabControl.SelectedIndexChanged += SettingsTabControl_SelectedIndexChanged;
 
@@ -196,32 +199,109 @@ public partial class SettingsForm : Form
         CancelButton = _cancelButton;
     }
 
-    private void SaveWindowsSystemActivitySettingImmediately()
+    private void ConfigureGeneralActivityLogging()
     {
+        _behaviourGroupBox.Text = "Activity logging";
+        _behaviourGroupBox.Height = 230;
+        _storageGroupBox.Top = 448;
+
+        _logProgramActivityCheckBox.Location = new System.Drawing.Point(18, 30);
+        _programActivityHintLabel.Location = new System.Drawing.Point(40, 54);
+        _programActivityHintLabel.Height = 32;
+
+        _configureFilteredFileActivityProcessesButton = new Button
+        {
+            Text = "Configure filtered file applications...",
+            Left = 18,
+            Top = 94,
+            Width = 270,
+            Height = 30,
+            FlatStyle = FlatStyle.System
+        };
+        _configureFilteredFileActivityProcessesButton.Click += ConfigureFilteredFileActivityProcessesButton_Click;
+
+        _filteredFileActivityProcessesSummaryLabel = new Label
+        {
+            Left = 304,
+            Top = 101,
+            Width = 480,
+            Height = 22,
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+
+        var processHint = new Label
+        {
+            Left = 40,
+            Top = 130,
+            Width = 740,
+            Height = 34,
+            ForeColor = System.Drawing.SystemColors.GrayText,
+            Text = "Applications moved to the filtered list do not create new File Activity records. Database housekeeping also removes their existing File Activity records."
+        };
+
+        _trackWindowsSystemActivityCheckBox = new CheckBox
+        {
+            Text = "Track Windows system activity",
+            Left = 18,
+            Top = 170,
+            Width = 360,
+            Height = 22
+        };
+        var windowsHint = new Label
+        {
+            Left = 40,
+            Top = 194,
+            Width = 740,
+            Height = 30,
+            ForeColor = System.Drawing.SystemColors.GrayText,
+            Text = "When disabled, DeskPulse suppresses routine Windows files, folders, services, and background processes."
+        };
+        _trackWindowsSystemActivityCheckBox.CheckedChanged += (_, _) =>
+        {
+            var active = !_trackWindowsSystemActivityCheckBox.Checked;
+            _fileActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetFileRules(), active);
+            _appActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetProcessRules(), active);
+        };
+
+        _behaviourHintLabel.Visible = false;
+        _behaviourGroupBox.Controls.Add(_configureFilteredFileActivityProcessesButton);
+        _behaviourGroupBox.Controls.Add(_filteredFileActivityProcessesSummaryLabel);
+        _behaviourGroupBox.Controls.Add(processHint);
+        _behaviourGroupBox.Controls.Add(_trackWindowsSystemActivityCheckBox);
+        _behaviourGroupBox.Controls.Add(windowsHint);
+    }
+
+    private void ConfigureFilteredFileActivityProcessesButton_Click(object? sender, EventArgs e)
+    {
+        var databasePath = Path.Combine(_dataFolderTextBox.Text.Trim(), "DeskPulse.db");
+        IReadOnlyList<FileActivityProcessSummary> summaries;
         try
         {
-            var settings = AppSettings.Load();
-            settings.TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked;
-            settings.Save();
+            using var database = new DeskPulseDatabase(databasePath, readOnly: true);
+            summaries = database.GetFileActivityProcessSummaries();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
-                "The Windows system activity setting could not be saved.\n\n" + ex.Message,
-                "DeskPulse Settings",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-
-            _initializingUi = true;
-            try
-            {
-                _trackWindowsSystemActivityCheckBox.Checked = AppSettings.Load().TrackWindowsSystemActivity;
-            }
-            finally
-            {
-                _initializingUi = false;
-            }
+            MessageBox.Show("The existing File Activity applications could not be read. You can still add process names manually.\n\n" + ex.Message,
+                "Filtered File Applications", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            summaries = Array.Empty<FileActivityProcessSummary>();
         }
+
+        using var dialog = new FilteredFileActivityProcessesForm(summaries, _filteredFileActivityProcesses);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        _filteredFileActivityProcesses = new HashSet<string>(dialog.FilteredProcesses, StringComparer.OrdinalIgnoreCase);
+        UpdateFilteredProcessSummary();
+        MarkDirty();
+    }
+
+    private void UpdateFilteredProcessSummary()
+    {
+        var count = _filteredFileActivityProcesses.Count;
+        _filteredFileActivityProcessesSummaryLabel.Text = count == 0
+            ? "No applications filtered"
+            : count.ToString("N0", CultureInfo.InvariantCulture) + (count == 1 ? " application filtered" : " applications filtered");
     }
 
     private void ConfigureActivityRuleTabs()
@@ -280,52 +360,15 @@ public partial class SettingsForm : Form
         {
             Text = "Maintenance",
             BackColor = System.Drawing.SystemColors.Window,
-            Padding = new Padding(16)
+            Padding = new Padding(16),
+            AutoScroll = true
         };
-
-        var loggingProtectionGroup = new GroupBox
-        {
-            Text = "Logging protection",
-            Left = 16,
-            Top = 16,
-            Width = 820,
-            Height = 112,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-
-        _trackWindowsSystemActivityCheckBox = new CheckBox
-        {
-            Text = "Track Windows system activity",
-            Left = 16,
-            Top = 28,
-            Width = 300,
-            Height = 24,
-            Checked = AppSettings.Load().TrackWindowsSystemActivity
-        };
-        _trackWindowsSystemActivityCheckBox.CheckedChanged += (_, _) =>
-        {
-            var active = !_trackWindowsSystemActivityCheckBox.Checked;
-            _fileActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetFileRules(), active);
-            _appActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetProcessRules(), active);
-
-            if (!_initializingUi)
-                SaveWindowsSystemActivitySettingImmediately();
-        };
-        var protectionHelp = new Label
-        {
-            Left = 16, Top = 56, Width = 785, Height = 42,
-            Text = "When disabled, DeskPulse suppresses routine Windows files, folders, services and background processes. Enabling this option may significantly increase logging volume, database size and CPU usage.",
-            ForeColor = System.Drawing.SystemColors.GrayText
-        };
-        loggingProtectionGroup.Controls.Add(_trackWindowsSystemActivityCheckBox);
-        loggingProtectionGroup.Controls.Add(protectionHelp);
-        _maintenanceHousekeepingTabPage.Controls.Add(loggingProtectionGroup);
 
         var housekeepingGroup = new GroupBox
         {
             Text = "Database housekeeping",
             Left = 16,
-            Top = 140,
+            Top = 16,
             Width = 820,
             Height = 150,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -338,8 +381,8 @@ public partial class SettingsForm : Form
             Top = 28,
             Width = 785,
             Height = 54,
-            Text = "Apply the current File, App, and User Activity rules to the entire database history. " +
-                   "Records that would not be logged under the current rules are permanently removed, after which the database is compacted."
+            Text = "Apply the current File, App, and User Activity rules and active logging filters to the entire database history. " +
+                   "Records that would not be logged under the current settings are permanently removed, after which the database is compacted."
         };
 
         _cleanDatabaseWithRulesButton = new Button
@@ -361,7 +404,7 @@ public partial class SettingsForm : Form
         {
             Text = "Windows service",
             Left = 16,
-            Top = 306,
+            Top = 182,
             Width = 820,
             Height = 130,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -484,7 +527,7 @@ public partial class SettingsForm : Form
     {
         var confirm = MessageBox.Show(
             "This will permanently remove every historical DeskPulse record that conflicts with the rules currently displayed in Settings.\n\n" +
-            "The cleanup applies to File, App, and User Activity rules, and then compacts the SQLite database.\n\n" +
+            "The cleanup applies the current File and App Activity rules, Windows-system setting, and filtered File Activity applications, and then compacts the SQLite database.\n\n" +
             "The current rules will also be saved before cleanup begins. Deleted records cannot be recovered unless you have a database backup.\n\nContinue?",
             "Clean Database With Current Rules",
             MessageBoxButtons.YesNo,
@@ -528,14 +571,10 @@ public partial class SettingsForm : Form
             return null;
         }
 
-        var exportSheets = GetSelectedExportSheetsFromList();
-        if (exportSheets.Count == 0)
-        {
-            MessageBox.Show("Please select at least one Excel export worksheet before running maintenance.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return null;
-        }
-
         var existingSettings = AppSettings.Load();
+        var exportSheets = existingSettings.ExportSheets.Count > 0
+            ? existingSettings.ExportSheets
+            : ExportSheetOption.GetDefaultOptions();
         var appActivityRuleSettings = _appActivityRuleEditor.GetRuleSettings();
         var fileActivityRuleSettings = RemoveFileRulesDuplicatedByAppRules(_fileActivityRuleEditor.GetRuleSettings(), appActivityRuleSettings);
         var userActivityRuleSettings = _userActivityRuleEditor.GetRuleSettings();
@@ -549,6 +588,8 @@ public partial class SettingsForm : Form
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = _startWithWindowsCheckBox.Checked,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
+            LogExplorerFileActivity = true,
+            FilteredFileActivityProcesses = new HashSet<string>(_filteredFileActivityProcesses, StringComparer.OrdinalIgnoreCase),
             TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked,
             LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
             FileActivityRuleSettings = fileActivityRuleSettings,
@@ -782,11 +823,15 @@ public partial class SettingsForm : Form
     {
         _startWithWindowsCheckBox.Checked = settings.StartWithWindows || StartupTaskManager.IsEnabled();
         _logProgramActivityCheckBox.Checked = settings.LogProgramActivity;
+        _filteredFileActivityProcesses = new HashSet<string>(settings.FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
+        if (!settings.LogExplorerFileActivity)
+            _filteredFileActivityProcesses.Add("explorer.exe");
+        UpdateFilteredProcessSummary();
+        _trackWindowsSystemActivityCheckBox.Checked = settings.TrackWindowsSystemActivity;
         _dataFolderTextBox.Text = settings.DataFolderPath;
         _ignoreTempFoldersCheckBox.Checked = settings.IgnoreTempFolders;
 
         LoadExtensionLists(settings);
-        LoadExportOptions(settings);
     }
 
 
@@ -904,7 +949,7 @@ public partial class SettingsForm : Form
         SetButtonToolTip(_maintenanceDeleteFileActivityButton, "Deletes ALL file open/write/close records from ActivityEvents. Keeps user/session records, program records, settings, logging rules, and the database file.");
         SetButtonToolTip(_maintenanceDeleteUserActivityButton, "Deletes ALL user/session records such as DeskPulse start/stop, PC lock/unlock, logon/logoff, and session connect/disconnect events. Keeps file/program records, settings, and logging rules.");
         SetButtonToolTip(_maintenanceDeleteProgramActivityButton, "Deletes ALL program start/close records from ProgramEvents. Keeps file activity, user/session records, settings, and logging rules.");
-        SetButtonToolTip(_maintenanceDeleteAllActivityButton, "Deletes EVERYTHING recorded in DeskPulse activity tables: file activity, user/session activity, and program activity. Keeps settings, logging rules, export options, and database structure.");
+        SetButtonToolTip(_maintenanceDeleteAllActivityButton, "Deletes EVERYTHING recorded in DeskPulse activity tables: file activity, user/session activity, and program activity. Keeps settings, logging rules, and database structure.");
         SetButtonToolTip(_maintenanceBrowseRuleButton, "Browses for the folder, exact file, or program executable used for a new logging rule. Does not add or delete anything by itself.");
         SetButtonToolTip(_maintenanceAddRuleButton, "Adds the newly entered Include or Exclude rule to the rules list. It affects future logging after Save; it does not delete past records.");
         SetButtonToolTip(_maintenanceMoveRuleUpButton, "Moves the selected logging rule up. Higher rules override lower rules. Does not delete data.");
@@ -927,6 +972,7 @@ public partial class SettingsForm : Form
     private void MaintenanceAddProcessExclusionButton_Click(object? sender, EventArgs e) => AddSelectedStatisticValueToExclusion("process");
     private void MaintenanceDeleteExportButton_Click(object? sender, EventArgs e) => DeleteGeneratedFile(AppSettings.Load().ExcelExportFilePath, "Excel export file");
     private void MaintenanceDeleteStartupLogButton_Click(object? sender, EventArgs e) => DeleteGeneratedFile(Path.Combine(Path.GetTempPath(), "DeskPulse-startup.log"), "startup fallback log");
+    private void MaintenanceRepairHistoricalDataButton_Click(object? sender, EventArgs e) => RepairHistoricalData();
     private void MaintenanceRemoveUnwantedDataButton_Click(object? sender, EventArgs e) => RemoveExcludedPastRecords(AppSettings.Load());
     private void MaintenanceDeleteFileActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable(AppSettings.Load(), "ActivityEvents", "all file open/write/close activity records");
     private void MaintenanceDeleteUserActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable(AppSettings.Load(), "UserEvents", "all user/session records");
@@ -1057,6 +1103,11 @@ public partial class SettingsForm : Form
         _logProgramActivityCheckBox.Width = 520;
         _logProgramActivityCheckBox.Text = "Log program start and close activity";
         _logProgramActivityCheckBox.Checked = settings.LogProgramActivity;
+        _filteredFileActivityProcesses = new HashSet<string>(settings.FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
+        if (!settings.LogExplorerFileActivity)
+            _filteredFileActivityProcesses.Add("explorer.exe");
+        UpdateFilteredProcessSummary();
+        _trackWindowsSystemActivityCheckBox.Checked = settings.TrackWindowsSystemActivity;
 
         var programActivityHintLabel = CreateHintLabel(
             "Records programs that start and close in the current interactive Windows session. This is not a full system-service audit log.",
@@ -1185,7 +1236,6 @@ public partial class SettingsForm : Form
             fieldsGroup
         });
 
-        LoadExportOptions(settings);
     }
 
 
@@ -1895,6 +1945,38 @@ public partial class SettingsForm : Form
             "DeskPulse Maintenance",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
+    }
+
+    private void RepairHistoricalData()
+    {
+        var confirm = MessageBox.Show(
+            "DeskPulse will scan existing File Activity records and repair only recognized, recoverable data-format problems.\n\n" +
+            "The current repair corrects mapped-drive LanmanRedirector paths and refreshes the related folder, file name, extension, and legacy item fields. Unrecognized or uncertain values are left unchanged.\n\n" +
+            "A database backup is recommended before any maintenance operation.\n\nContinue?",
+            "Repair Historical Data",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Information);
+
+        if (confirm != DialogResult.Yes)
+            return;
+
+        using var progressForm = new RuleCleanupProgressForm(
+            "Repair Historical Data",
+            "Scanning and repairing historical records",
+            (progress, cancellationToken) =>
+                ServicePipeClient.RepairHistoricalDataAsync(progress, cancellationToken).GetAwaiter().GetResult());
+
+        if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
+            return;
+
+        MessageBox.Show(
+            progressForm.Result.ActivityRecordsRepaired.ToString("N0", CultureInfo.InvariantCulture) +
+            " File Activity record(s) repaired.\n\nRecords without a recognized safe correction were not changed.",
+            "DeskPulse Maintenance",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+
+        _maintenanceDatabaseInfoTextBox.Text = GetDatabaseOverviewForMaintenance(AppSettings.Load());
     }
 
     private static void ClearDatabaseTable(AppSettings settings, string tableName, string description)
@@ -2616,20 +2698,10 @@ public partial class SettingsForm : Form
             return false;
         }
 
-        var exportSheets = GetSelectedExportSheetsFromList();
-
-        if (exportSheets.Count == 0)
-        {
-            MessageBox.Show(
-                "Please select at least one Excel export worksheet.",
-                "Settings",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning
-            );
-
-            DialogResult = DialogResult.None;
-            return false;
-        }
+        var existingSettings = AppSettings.Load();
+        var exportSheets = existingSettings.ExportSheets.Count > 0
+            ? existingSettings.ExportSheets
+            : ExportSheetOption.GetDefaultOptions();
 
         var startWithWindows = _startWithWindowsCheckBox.Checked;
 
@@ -2650,7 +2722,6 @@ public partial class SettingsForm : Form
             return false;
         }
 
-        var existingSettings = AppSettings.Load();
         var appActivityRuleSettings = _appActivityRuleEditor.GetRuleSettings();
         var fileActivityRuleSettings = RemoveFileRulesDuplicatedByAppRules(
             _fileActivityRuleEditor.GetRuleSettings(),
@@ -2666,6 +2737,8 @@ public partial class SettingsForm : Form
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = startWithWindows,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
+            LogExplorerFileActivity = true,
+            FilteredFileActivityProcesses = new HashSet<string>(_filteredFileActivityProcesses, StringComparer.OrdinalIgnoreCase),
             TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked,
             LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
             FileActivityRuleSettings = fileActivityRuleSettings,

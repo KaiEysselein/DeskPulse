@@ -1,12 +1,18 @@
-# DeskPulse Roadmap
+﻿# DeskPulse Roadmap
 
-## Current baseline: 0.2.1.2
+## Current baseline: 0.2.2.0
 
-The service/tray split, installer, pause/resume control, service restart control, Windows-system activity controls, and service-owned SQLite write architecture are implemented.
+Completed in 0.2.2.0:
+
+- Visible File Activity **Activity** column and Activity grouping.
+- Whole-second time display in log tables.
+- Removal of the user-facing Export Options tab while retaining standard export.
+- Configurable File Activity process filtering with historical cleanup support.
+- Automatic mapped-drive normalization for newly logged records.
 
 ## Baseline status
 
-Version 0.2.1.2 is locked for compilation, installation and acceptance testing. New feature work should use the next development version.
+Version 0.2.2.0 is locked for local compilation, installation and acceptance testing. New feature work should use the next development version.
 
 ## 0.2.x priorities
 

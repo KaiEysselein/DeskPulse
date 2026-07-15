@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 namespace DeskPulse;
 
@@ -19,6 +19,11 @@ partial class ViewLogForm
     private System.Windows.Forms.Button nextPageButton = null!;
     private System.Windows.Forms.Button lastPageButton = null!;
     private System.Windows.Forms.Label pageLabel = null!;
+    private System.Windows.Forms.Label pageSizeLabel = null!;
+    private System.Windows.Forms.NumericUpDown pageSizeInput = null!;
+    private System.Windows.Forms.Button applyPageSizeButton = null!;
+    private System.Windows.Forms.Label groupByLabel = null!;
+    private System.Windows.Forms.ComboBox groupByCombo = null!;
     private System.Windows.Forms.TabControl tabs = null!;
     private System.Windows.Forms.DataGridView gridApp = null!;
     private System.Windows.Forms.DataGridView gridFile = null!;
@@ -53,6 +58,11 @@ partial class ViewLogForm
         nextPageButton = new System.Windows.Forms.Button();
         lastPageButton = new System.Windows.Forms.Button();
         pageLabel = new System.Windows.Forms.Label();
+        pageSizeLabel = new System.Windows.Forms.Label();
+        pageSizeInput = new System.Windows.Forms.NumericUpDown();
+        applyPageSizeButton = new System.Windows.Forms.Button();
+        groupByLabel = new System.Windows.Forms.Label();
+        groupByCombo = new System.Windows.Forms.ComboBox();
         tabs = new System.Windows.Forms.TabControl();
         gridApp = new System.Windows.Forms.DataGridView();
         gridFile = new System.Windows.Forms.DataGridView();
@@ -66,6 +76,7 @@ partial class ViewLogForm
         ((System.ComponentModel.ISupportInitialize)gridApp).BeginInit();
         ((System.ComponentModel.ISupportInitialize)gridFile).BeginInit();
         ((System.ComponentModel.ISupportInitialize)gridUser).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)pageSizeInput).BeginInit();
         SuspendLayout();
         topPanel.Controls.Add(startLabel);
         topPanel.Controls.Add(dateStart);
@@ -75,6 +86,8 @@ partial class ViewLogForm
         topPanel.Controls.Add(refreshButton);
         topPanel.Controls.Add(createRuleButton);
         topPanel.Controls.Add(deleteButton);
+        topPanel.Controls.Add(groupByLabel);
+        topPanel.Controls.Add(groupByCombo);
         topPanel.Dock = System.Windows.Forms.DockStyle.Top;
         topPanel.Height = 52;
         startLabel.AutoSize = true;
@@ -111,6 +124,15 @@ partial class ViewLogForm
         deleteButton.Text = "Delete";
         deleteButton.UseVisualStyleBackColor = true;
         deleteButton.Click += DeleteButton_Click;
+        groupByLabel.AutoSize = true;
+        groupByLabel.Location = new System.Drawing.Point(835, 18);
+        groupByLabel.Text = "Group by:";
+        groupByCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+        groupByCombo.Location = new System.Drawing.Point(900, 14);
+        groupByCombo.Size = new System.Drawing.Size(190, 23);
+        groupByCombo.Items.AddRange(new object[] { "None", "Date", "File name", "Extension", "Folder", "Application", "Activity" });
+        groupByCombo.SelectedIndex = 0;
+        groupByCombo.SelectedIndexChanged += GroupByCombo_SelectedIndexChanged;
         tabs.Controls.Add(fileTab);
         tabs.Controls.Add(appTab);
         tabs.Controls.Add(userTab);
@@ -130,6 +152,9 @@ partial class ViewLogForm
         pagingPanel.Controls.Add(lastPageButton);
         pagingPanel.Controls.Add(exportButton);
         pagingPanel.Controls.Add(pageLabel);
+        pagingPanel.Controls.Add(pageSizeLabel);
+        pagingPanel.Controls.Add(pageSizeInput);
+        pagingPanel.Controls.Add(applyPageSizeButton);
         pagingPanel.Dock = System.Windows.Forms.DockStyle.Bottom;
         pagingPanel.Height = 42;
         firstPageButton.Location = new System.Drawing.Point(12, 7);
@@ -157,9 +182,22 @@ partial class ViewLogForm
         exportButton.Text = "Export";
         exportButton.UseVisualStyleBackColor = true;
         exportButton.Click += ExportButton_Click;
+        pageSizeLabel.AutoSize = true;
+        pageSizeLabel.Location = new System.Drawing.Point(590, 13);
+        pageSizeLabel.Text = "Records per page:";
+        pageSizeInput.Location = new System.Drawing.Point(700, 9);
+        pageSizeInput.Minimum = 1;
+        pageSizeInput.Maximum = 10000;
+        pageSizeInput.Value = 500;
+        pageSizeInput.Size = new System.Drawing.Size(75, 23);
+        applyPageSizeButton.Location = new System.Drawing.Point(781, 7);
+        applyPageSizeButton.Size = new System.Drawing.Size(58, 28);
+        applyPageSizeButton.Text = "Apply";
+        applyPageSizeButton.UseVisualStyleBackColor = true;
+        applyPageSizeButton.Click += ApplyPageSizeButton_Click;
         pageLabel.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-        pageLabel.Location = new System.Drawing.Point(760, 12);
-        pageLabel.Size = new System.Drawing.Size(348, 20);
+        pageLabel.Location = new System.Drawing.Point(845, 12);
+        pageLabel.Size = new System.Drawing.Size(263, 20);
         pageLabel.Text = "Page 1 of 1";
         pageLabel.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
         statusLabel.Dock = System.Windows.Forms.DockStyle.Bottom;
@@ -186,6 +224,7 @@ partial class ViewLogForm
         ((System.ComponentModel.ISupportInitialize)gridApp).EndInit();
         ((System.ComponentModel.ISupportInitialize)gridFile).EndInit();
         ((System.ComponentModel.ISupportInitialize)gridUser).EndInit();
+        ((System.ComponentModel.ISupportInitialize)pageSizeInput).EndInit();
         ResumeLayout(false);
     }
 }

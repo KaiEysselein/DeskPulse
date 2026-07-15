@@ -1,4 +1,71 @@
+﻿# Changelog
+
+## 0.2.2.0 — 2026-07-15
+
+- Promoted the complete audited 0.2.1.8 feature set to the GitHub-ready 0.2.2.0 release baseline.
+- Updated all active application, assembly, installer, publish, documentation, handover, release, audit, and verification references to 0.2.2.0.
+- Preserved all earlier changelog entries and historical build-verification documents under their original version numbers.
+
 # Changelog
+
+## 0.2.1.8
+
+- Added a visible **Activity** column to the File Activity log, using the inferred user-facing action when available and falling back to the recorded activity type.
+- Added **Activity** to the File Activity **Group by** selector.
+- Removed the **Export Options** Settings tab and its configurable worksheet/column interface. Export continues with the existing/default export layout.
+- Changed visible log time formatting to whole-second precision while retaining stored timestamp precision.
+- Hardened build and publish scripts so failed native commands stop the workflow and cannot report a false successful publish.
+- Updated active application, project, installer, publish, handover, roadmap, audit, release and verification references to 0.2.1.8.
+
+# DeskPulse Changelog
+
+## 0.2.1.7 — 2026-07-15
+
+- Replaced the Explorer-only File Activity switch with a configurable dual-list application filter.
+- Available applications are gathered from distinct process names in existing File Activity data and show historical record counts.
+- Added search, multi-select transfer, double-click transfer, manual process entry, and clear-all controls.
+- Filtered process names are matched case-insensitively for new File Activity logging.
+- Database housekeeping removes historical File Activity records attributed to currently filtered applications.
+- Updated all active application, project, installer, publish, documentation, handover, release, audit, and verification references to 0.2.1.7.
+
+# Changelog
+
+## 0.2.1.6 — 2026-07-15
+
+- Added **Log file activity caused by Windows File Explorer** under Settings → General → Activity logging. It is enabled by default; when disabled, new file events attributed to `explorer.exe` are suppressed.
+- Moved **Track Windows system activity** from Maintenance to Settings → General → Activity logging.
+- Database housekeeping now applies the Explorer logging filter to historical File Activity records.
+- Removed the user-facing **Repair Historical Data...** maintenance feature while retaining automatic mapped-drive normalization for newly logged records.
+- Updated all active application, project, installer, publish, documentation, handover, release, audit, and verification references to 0.2.1.6.
+
+﻿# Changelog
+
+## 0.2.1.5
+
+- Added a persistent, user-editable Records per page control to all log tabs, defaulting to 500 and supporting 1 to 10,000 records per page.
+- Added database-backed File Activity grouping by Date, File name, Extension, Folder, or Application.
+- Added expandable and collapsible group rows; double-click a group row to reveal or hide its matching records.
+- Kept ordinary record double-click behavior for opening Details.
+- Updated active application, project, installer, publish, release, audit, handover, roadmap, and verification references to 0.2.1.5.
+
+## [0.2.1.4] - 2026-07-15
+
+- Corrected ETW mapped-drive path normalization so `LanmanRedirector` device paths remove both the server and mapped share root, producing user-facing drive-letter paths such as `W:\Projects - PNP\...`.
+- Added **Maintenance > Cleanup > Repair Historical Data** with progress reporting through the DeskPulse Windows service.
+- Historical repair safely updates recognized File Activity path defects and refreshes `Item`, `FullPath`, `FolderPath`, `FileName`, and `Extension`; uncertain records remain unchanged.
+- Updated active application, project, publish, installer, documentation, handover, audit, verification, and release references to 0.2.1.4.
+
+## [0.2.1.3] - 2026-07-15
+
+### Fixed
+
+- Separated File Activity exclusion evaluation from App Activity inclusion so matching file exclusions also apply during live monitoring and historical database housekeeping.
+
+### Changed
+
+- Added an **Extension** column to the File Activity tab in View Log.
+- Renamed the per-row **More...** button to **Details** on File Activity, App Activity, and User Activity.
+- Updated all active application, project, publish, installer, documentation, handover, audit, verification, and release references to 0.2.1.3.
 
 ## [0.2.1.2] - 2026-07-14
 

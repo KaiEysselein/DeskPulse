@@ -1,9 +1,9 @@
-# Manual test installation. Run from elevated PowerShell after Publish.ps1.
+﻿# Manual test installation. Run from elevated PowerShell after Publish.ps1.
 # Do not use this script over an installer-managed installation without uninstalling first.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$serviceSource = Join-Path $root 'publish\v0.2.1.2\service'
-$traySource = Join-Path $root 'publish\v0.2.1.2\tray'
+$serviceSource = Join-Path $root 'publish\v0.2.2.0\service'
+$traySource = Join-Path $root 'publish\v0.2.2.0\tray'
 $installRoot = Join-Path $env:ProgramFiles 'DeskPulse'
 $serviceInstall = Join-Path $installRoot 'Service'
 $trayInstall = Join-Path $installRoot 'Tray'

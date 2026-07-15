@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $issFile = Join-Path $PSScriptRoot 'DeskPulse.iss'
@@ -15,8 +15,10 @@ if (-not $iscc) {
     throw "Inno Setup 6 compiler (ISCC.exe) was not found."
 }
 
-$serviceExe = Join-Path $projectRoot 'publish\v0.2.1.2\service\DeskPulse.Service.exe'
-$trayExe = Join-Path $projectRoot 'publish\v0.2.1.2\tray\DeskPulse.Tray.exe'
+$serviceExe = Join-Path $projectRoot 'publish\v0.2.2.0\service\DeskPulse.Service.exe'
+$trayExe = Join-Path $projectRoot 'publish\v0.2.2.0\tray\DeskPulse.Tray.exe'
+$installerDir = Join-Path $projectRoot 'publish\v0.2.2.0\installer'
+$installerExe = Join-Path $installerDir 'DeskPulse_Setup_0.2.2.0.exe'
 
 if (-not (Test-Path $serviceExe)) {
     throw "Published service not found: $serviceExe"
@@ -24,6 +26,8 @@ if (-not (Test-Path $serviceExe)) {
 if (-not (Test-Path $trayExe)) {
     throw "Published tray app not found: $trayExe"
 }
+
+New-Item -ItemType Directory -Path $installerDir -Force | Out-Null
 
 Push-Location $PSScriptRoot
 try {
@@ -38,4 +42,4 @@ finally {
 
 Write-Host ""
 Write-Host "Installer created at:" -ForegroundColor Green
-Write-Host (Join-Path $PSScriptRoot 'Output\DeskPulse_Setup_0.2.1.2.exe')
+Write-Host $installerExe

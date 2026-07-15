@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -20,7 +20,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.2.1.2";
+    public const string Version = "0.2.2.0";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -675,26 +675,15 @@ public sealed class FileIoMonitor : IDisposable
                 return false;
             }
 
+            if (settings.IsFileActivityProcessFiltered(processName))
+                return false;
+
             if (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsFileOrProcessExcluded(fullPath, processName))
                 return false;
 
-            // Explicit App Activity rules take precedence for executable files. This allows a
-            // specifically included app (for example abc.exe) to remain monitored even when
-            // the general *.exe pattern is not included in File Activity rules.
-            var appRuleDecision = string.Equals(ext, ".exe", StringComparison.OrdinalIgnoreCase)
-                ? LoggingRulesEngine.GetProgramActivityRuleDecision(
-                    fullPath,
-                    Path.GetFileName(fullPath),
-                    settings.AppActivityRules)
-                : null;
-
-            if (appRuleDecision == false)
-                return false;
-
-            var appIncludeOverridesFileRules = appRuleDecision == true;
-
-            if (!appIncludeOverridesFileRules &&
-                !LoggingRulesEngine.IsFileActivityMonitored(fullPath, settings.FileActivityRules))
+            // File Activity and App Activity are independent streams. App rules must not
+            // override a matching File Activity exclusion, including for executable files.
+            if (!LoggingRulesEngine.IsFileActivityMonitored(fullPath, settings.FileActivityRules))
                 return false;
 
             var dbPath = Path.GetFullPath(settings.DatabaseFilePath);
@@ -715,6 +704,12 @@ public sealed class FileIoMonitor : IDisposable
         {
             return false;
         }
+    }
+
+    private static bool IsWindowsExplorerProcess(string? processName)
+    {
+        var normalized = Path.GetFileNameWithoutExtension(processName ?? string.Empty);
+        return normalized.Equals("explorer", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildOpenFileKey(string fullPath, int processId, string processName)
@@ -1316,6 +1311,39 @@ public sealed class DeskPulseDatabase : IDisposable
         }
     }
 
+    public IReadOnlyList<FileActivityProcessSummary> GetFileActivityProcessSummaries()
+    {
+        lock (_dbLock)
+        {
+            if (!File.Exists(DatabaseFilePath))
+                return Array.Empty<FileActivityProcessSummary>();
+
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT COALESCE(ProcessName, ''), COUNT(*) FROM ActivityEvents " +
+                "WHERE TRIM(COALESCE(ProcessName, '')) <> '' GROUP BY ProcessName ORDER BY ProcessName COLLATE NOCASE;";
+
+            var results = new List<FileActivityProcessSummary>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var processName = AppSettings.NormalizeProcessName(reader.GetString(0));
+                if (!string.IsNullOrWhiteSpace(processName))
+                    results.Add(new FileActivityProcessSummary(processName, reader.GetInt64(1)));
+            }
+
+            return results
+                .GroupBy(item => item.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new FileActivityProcessSummary(group.First().ProcessName, group.Sum(item => item.RecordCount)))
+                .OrderBy(item => item.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
     public void InsertActivityEvent(ActivityEventRecord record)
     {
         lock (_dbLock)
@@ -1744,6 +1772,117 @@ public sealed class DeskPulseDatabase : IDisposable
     }
 
 
+    public MaintenanceExclusionCleanupResult RepairHistoricalData(
+        IProgress<ExportProgressInfo>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var total = CountTableRows(connection, "ActivityEvents");
+            var repairs = new List<(long Id, string FullPath, string FolderPath, string FileName, string Extension)>();
+            long scanned = 0;
+
+            progress?.Report(new ExportProgressInfo(10, "10%  Scanning historical File Activity records"));
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT Id, COALESCE(FullPath, ''), COALESCE(Item, '') FROM ActivityEvents;";
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var id = reader.GetInt64(0);
+                    var originalFullPath = reader.GetString(1);
+                    var legacyItem = reader.GetString(2);
+                    var sourcePath = string.IsNullOrWhiteSpace(originalFullPath) ? legacyItem : originalFullPath;
+                    var normalized = PathUtilities.NormalizeEtwPath(sourcePath);
+
+                    if (!string.IsNullOrWhiteSpace(normalized) &&
+                        !string.Equals(sourcePath, normalized, StringComparison.Ordinal))
+                    {
+                        repairs.Add((
+                            id,
+                            normalized,
+                            PathUtilities.GetFolderPath(normalized),
+                            PathUtilities.GetFileNameOnly(normalized),
+                            PathUtilities.GetExtension(normalized)));
+                    }
+
+                    scanned++;
+                    if (scanned % 250 == 0 || scanned == total)
+                    {
+                        var percent = total == 0 ? 65 : 10 + (int)Math.Round((double)scanned / total * 55D);
+                        progress?.Report(new ExportProgressInfo(Math.Min(65, percent),
+                            Math.Min(65, percent).ToString(CultureInfo.InvariantCulture) + "%  Scanned " +
+                            scanned.ToString("N0", CultureInfo.InvariantCulture) + " of " +
+                            total.ToString("N0", CultureInfo.InvariantCulture) + "; repairs found: " +
+                            repairs.Count.ToString("N0", CultureInfo.InvariantCulture)));
+                    }
+                }
+            }
+
+            if (repairs.Count == 0)
+            {
+                progress?.Report(new ExportProgressInfo(100, "100% No repairable historical data found"));
+                return new MaintenanceExclusionCleanupResult();
+            }
+
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText =
+                    "UPDATE ActivityEvents SET Item=$Item, FullPath=$FullPath, FolderPath=$FolderPath, " +
+                    "FileName=$FileName, Extension=$Extension WHERE Id=$Id;";
+
+                var idParameter = update.Parameters.Add("$Id", SqliteType.Integer);
+                var itemParameter = update.Parameters.Add("$Item", SqliteType.Text);
+                var fullPathParameter = update.Parameters.Add("$FullPath", SqliteType.Text);
+                var folderParameter = update.Parameters.Add("$FolderPath", SqliteType.Text);
+                var fileParameter = update.Parameters.Add("$FileName", SqliteType.Text);
+                var extensionParameter = update.Parameters.Add("$Extension", SqliteType.Text);
+
+                for (var index = 0; index < repairs.Count; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var repair = repairs[index];
+                    idParameter.Value = repair.Id;
+                    itemParameter.Value = repair.FullPath;
+                    fullPathParameter.Value = repair.FullPath;
+                    folderParameter.Value = string.IsNullOrWhiteSpace(repair.FolderPath) ? DBNull.Value : repair.FolderPath;
+                    fileParameter.Value = string.IsNullOrWhiteSpace(repair.FileName) ? DBNull.Value : repair.FileName;
+                    extensionParameter.Value = string.IsNullOrWhiteSpace(repair.Extension) ? DBNull.Value : repair.Extension;
+                    update.ExecuteNonQuery();
+
+                    if ((index + 1) % 100 == 0 || index + 1 == repairs.Count)
+                    {
+                        var percent = 65 + (int)Math.Round((double)(index + 1) / repairs.Count * 33D);
+                        progress?.Report(new ExportProgressInfo(Math.Min(98, percent),
+                            Math.Min(98, percent).ToString(CultureInfo.InvariantCulture) + "%  Repairing records: " +
+                            (index + 1).ToString("N0", CultureInfo.InvariantCulture) + " of " +
+                            repairs.Count.ToString("N0", CultureInfo.InvariantCulture)));
+                    }
+                }
+
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+
+            progress?.Report(new ExportProgressInfo(100, "100% Historical data repair complete"));
+            return new MaintenanceExclusionCleanupResult { ActivityRecordsRepaired = repairs.Count };
+        }
+    }
+
+
     public MaintenanceExclusionCleanupResult CleanDatabaseWithCurrentRules(
         AppSettings settings,
         IProgress<ExportProgressInfo>? progress = null,
@@ -1900,21 +2039,18 @@ public sealed class DeskPulseDatabase : IDisposable
         if (settings.IgnoreTempFolders && PathExclusions.IsInTempFolder(fullPath))
             return false;
 
+        if (settings.IsFileActivityProcessFiltered(processName))
+            return false;
+
         if (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsFileOrProcessExcluded(fullPath, processName))
             return false;
 
         if (string.IsNullOrWhiteSpace(extension))
             extension = PathUtilities.GetExtension(fullPath);
 
-        var appDecision = string.Equals(extension, ".exe", StringComparison.OrdinalIgnoreCase)
-            ? LoggingRulesEngine.GetProgramActivityRuleDecision(fullPath, Path.GetFileName(fullPath), settings.AppActivityRules)
-            : null;
-
-        if (appDecision == false)
-            return false;
-
-        var appIncludeOverrides = appDecision == true;
-        if (!appIncludeOverrides && !LoggingRulesEngine.IsFileActivityMonitored(fullPath, settings.FileActivityRules))
+        // Historical File Activity cleanup uses only File Activity rules. App Activity
+        // includes/excludes are evaluated separately against ProgramEvents.
+        if (!LoggingRulesEngine.IsFileActivityMonitored(fullPath, settings.FileActivityRules))
             return false;
 
 
@@ -3107,11 +3243,14 @@ public sealed class MaintenanceDatabaseOverview
     public long TotalRecordCount => ActivityEventCount + UserEventCount + ProgramEventCount;
 }
 
+public sealed record FileActivityProcessSummary(string ProcessName, long RecordCount);
+
 public sealed class MaintenanceExclusionCleanupResult
 {
     public long ActivityRecordsDeleted { get; set; }
     public long ProgramRecordsDeleted { get; set; }
     public long UserRecordsDeleted { get; set; }
+    public long ActivityRecordsRepaired { get; set; }
     public long TotalRecordsDeleted => ActivityRecordsDeleted + ProgramRecordsDeleted + UserRecordsDeleted;
 }
 
@@ -3580,33 +3719,29 @@ public static class PathUtilities
 
         var trimmed = filePath.Trim();
 
-        var lanmanPrefix = @"\;LanmanRedirector\;";
+        // ETW can expose mapped drives using the redirector device path, for example:
+        // \;LanmanRedirector\;W:000000000020b1a0\server\share\folder\file.ext
+        // The mapped drive root is \server\share, so both server and share must be removed.
+        var lanmanMarker = @";LanmanRedirector\;";
+        var markerIndex = trimmed.IndexOf(lanmanMarker, StringComparison.OrdinalIgnoreCase);
 
-        if (trimmed.StartsWith(lanmanPrefix, StringComparison.OrdinalIgnoreCase))
+        if (markerIndex >= 0 && trimmed.Take(markerIndex).All(character => character == '\\'))
         {
-            var rest = trimmed.Substring(lanmanPrefix.Length);
+            var rest = trimmed.Substring(markerIndex + lanmanMarker.Length);
+            var parts = rest.Split('\\', StringSplitOptions.RemoveEmptyEntries);
 
-            var firstSlash = rest.IndexOf('\\');
-
-            if (firstSlash > 0)
+            if (parts.Length >= 3)
             {
-                var driveToken = rest.Substring(0, firstSlash);
+                var driveToken = parts[0];
                 var colonIndex = driveToken.IndexOf(':');
 
-                if (colonIndex > 0)
+                if (colonIndex == 1 && char.IsLetter(driveToken[0]))
                 {
-                    var driveLetter = driveToken.Substring(0, colonIndex);
-                    var afterDriveToken = rest.Substring(firstSlash + 1);
-
-                    var secondSlash = afterDriveToken.IndexOf('\\');
-
-                    if (secondSlash >= 0)
-                    {
-                        var pathAfterServer = afterDriveToken.Substring(secondSlash + 1);
-
-                        if (!string.IsNullOrWhiteSpace(pathAfterServer))
-                            return driveLetter + @":\" + pathAfterServer;
-                    }
+                    var drive = char.ToUpperInvariant(driveToken[0]) + ":";
+                    var relativeParts = parts.Skip(3).ToArray();
+                    return relativeParts.Length == 0
+                        ? drive + @"\"
+                        : drive + @"\" + string.Join(@"\", relativeParts);
                 }
             }
         }
@@ -4618,6 +4753,12 @@ public sealed class AppSettings
 
     public bool LogProgramActivity { get; set; } = true;
 
+    /// <summary>When false, file-system events attributed to Windows File Explorer are suppressed.</summary>
+    public bool LogExplorerFileActivity { get; set; } = true;
+
+    /// <summary>Process names whose File Activity events are excluded from new logging and rule-based housekeeping.</summary>
+    public HashSet<string> FilteredFileActivityProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>When false, routine Windows system files, folders and processes are suppressed before user rules are evaluated.</summary>
     public bool TrackWindowsSystemActivity { get; set; } = false;
 
@@ -4678,6 +4819,22 @@ public sealed class AppSettings
     public string ExtensionsAsText =>
         string.Join(", ", ExtensionsToMonitor.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
 
+    public bool IsFileActivityProcessFiltered(string? processName)
+    {
+        var normalized = NormalizeProcessName(processName);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        return (FilteredFileActivityProcesses ?? new HashSet<string>())
+            .Any(value => string.Equals(NormalizeProcessName(value), normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static string NormalizeProcessName(string? processName)
+    {
+        var value = Path.GetFileName(processName ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value;
+    }
+
     public AppSettings Clone()
     {
         return new AppSettings
@@ -4686,6 +4843,8 @@ public sealed class AppSettings
             IgnoreTempFolders = IgnoreTempFolders,
             StartWithWindows = StartWithWindows,
             LogProgramActivity = LogProgramActivity,
+            LogExplorerFileActivity = LogExplorerFileActivity,
+            FilteredFileActivityProcesses = new HashSet<string>(FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase),
             TrackWindowsSystemActivity = TrackWindowsSystemActivity,
             LoggingRules = new List<string>(LoggingRules),
             FileActivityRuleSettings = FileActivityRuleSettings.Select(rule => rule.Clone()).ToList(),

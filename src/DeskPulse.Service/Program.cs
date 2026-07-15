@@ -96,6 +96,10 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 {
                     await RunDatabaseHousekeepingStreamingAsync(writer);
                 }
+                else if (command.Equals("REPAIR_HISTORICAL_DATA", StringComparison.OrdinalIgnoreCase))
+                {
+                    await RunHistoricalDataRepairStreamingAsync(writer);
+                }
                 else
                 {
                     var response = HandleCommand(command);
@@ -231,6 +235,50 @@ public sealed class DeskPulseWindowsService : ServiceBase
 
     private static string SanitizePipeMessage(string message) =>
         (message ?? "Unknown error").Replace("|", "/").Replace("\r", " ").Replace("\n", " ");
+
+
+    private async Task RunHistoricalDataRepairStreamingAsync(StreamWriter writer)
+    {
+        if (_monitor == null)
+        {
+            await writer.WriteLineAsync("RESULT|ERROR|Service monitor is not running.");
+            return;
+        }
+
+        var wasPaused = _monitor.IsLoggingPaused;
+        var writerLock = new object();
+
+        void SendProgress(ExportProgressInfo info)
+        {
+            var message = SanitizePipeMessage(info.Message);
+            lock (writerLock)
+                writer.WriteLine("PROGRESS|" + info.Percent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + message);
+        }
+
+        try
+        {
+            SendProgress(new ExportProgressInfo(5, "5%   Windows service accepted historical data repair request"));
+            if (!wasPaused)
+                _monitor.PauseLogging();
+
+            var progress = new InlineProgress<ExportProgressInfo>(SendProgress);
+            var result = _monitor.ExecuteDatabaseOperation(database =>
+                database.RepairHistoricalData(progress, CancellationToken.None));
+
+            await writer.WriteLineAsync("RESULT|OK|" +
+                result.ActivityRecordsRepaired.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex)
+        {
+            await writer.WriteLineAsync("RESULT|ERROR|" + SanitizePipeMessage(ex.Message));
+        }
+        finally
+        {
+            if (!wasPaused)
+                _monitor.ResumeLogging();
+        }
+    }
+
 
     private async Task RunDatabaseHousekeepingStreamingAsync(StreamWriter writer)
     {

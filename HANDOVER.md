@@ -1,10 +1,14 @@
-# DeskPulse 0.2.1.2 Handover
+﻿# DeskPulse 0.2.2.0 Handover
+
+## 0.2.2.0 File Activity and log-view update
+
+Mapped-drive ETW paths are normalized automatically for newly logged records to their user-facing drive-letter form by removing the redirector token, server, and mapped share root. The temporary user-facing historical repair control has been removed in 0.2.2.0.
 
 - Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
 
 ## Authoritative baseline
 
-This package is the complete DeskPulse 0.2.1.2 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.1.2.
+This package is the complete DeskPulse 0.2.2.0 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.2.0.
 
 Repository: https://github.com/KaiEysselein/DeskPulse
 
@@ -37,9 +41,16 @@ User Activity includes Windows startup, logon/logoff, lock/unlock, `DeskPulse se
 
 Legacy registry settings are migrated into the shared settings file. The uninstaller intentionally preserves `Documents\DeskPulse`, including the activity database and exports, while removing program files, service registration, shared settings and startup registrations.
 
-## Completed 0.2.1.2 functionality
+## Completed 0.2.2.0 functionality
 
-### 0.2.1.2 corrective changes
+### 0.2.2.0 corrective changes
+
+### File Activity log presentation
+
+- File Activity includes a visible **Activity** column based on `InferredAction`, with `ActivityType` as fallback.
+- **Activity** is available in the Group by selector.
+- File, App and User log tables display times without fractional seconds. Stored database timestamps retain full precision.
+- The user-facing **Export Options** tab has been removed; standard export remains available using the retained/default layout.
 
 - Settings uses **Save**, **Save and Close**, and **Close** consistently on editable tabs; Close/X/Esc prompt before discarding unsaved changes.
 - Tray menu commands activate on the first click, restore an already-open window, and avoid duplicate top-level forms.
@@ -50,7 +61,7 @@ Legacy registry settings are migrated into the shared settings file. The uninsta
 - Installer startup choice appears only on the final completion page.
 - Rule-based database housekeeping processes file and app activity only; user/session history is preserved.
 - User Activity uses one Log checkbox per supported predefined event, and unchecked events persist.
-- Reset Defaults remains available on File Activity, App Activity, User Activity, and Export Options.
+- Reset Defaults remains available on File Activity, App Activity, and User Activity.
 
 
 - Service/tray/shared-library architecture.
@@ -100,13 +111,15 @@ Use either the installer or the manual service scripts for a test installation, 
 
 ## Absolute data-path migration
 
-DeskPulse 0.2.1.2 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
+DeskPulse 0.2.2.0 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
 
 
 
 ## Windows system activity control
 
-Version 0.2.1.2 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
+Version 0.2.2.0 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
+
+Version 0.2.2.0 retains the configurable `FilteredFileActivityProcesses` list introduced in 0.2.1.7. Matching is case-insensitive; selected processes are excluded from new File Activity logging and are also applied during rule-based historical cleanup. The legacy `LogExplorerFileActivity` setting remains only for migration compatibility and is not exposed as a separate user-facing option.
 
 ## Latest correction
 
@@ -119,7 +132,7 @@ All SQLite write operations initiated by the tray (selected-record deletion, rul
 
 ## Baseline lock
 
-Version **0.2.1.2** is locked as the authoritative stabilisation baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.1.2 corrective rebuild is required during compilation or acceptance testing.
+Version **0.2.2.0** is locked as the authoritative stabilisation baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.2.0 corrective rebuild is required during compilation or acceptance testing.
 
 ## Selected-record deletion stability
 

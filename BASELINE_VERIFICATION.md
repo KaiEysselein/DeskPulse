@@ -1,14 +1,14 @@
-# DeskPulse 0.2.1.2 Baseline Verification
+﻿# DeskPulse 0.2.2.0 Baseline Verification
 
-This package is locked as the authoritative DeskPulse 0.2.1.2 source and handover baseline, subject to the user's final local compilation and acceptance testing.
+This package is locked as the authoritative DeskPulse 0.2.2.0 source and handover baseline, subject to the user's final local compilation and acceptance testing.
 
 Verified in the source package:
 
-- Active application version constant: 0.2.1.2
-- Shared, Service and Tray project versions: 0.2.1.2
-- Installer version and output filename: 0.2.1.2
-- Publish folders: `publish\v0.2.1.2\service` and `publish\v0.2.1.2\tray`
-- README, HANDOVER, ROADMAP, VERSION_CHECK, GITHUB_RELEASE and current CHANGELOG release: 0.2.1.2
+- Active application version constant: 0.2.2.0
+- Shared, Service and Tray project versions: 0.2.2.0
+- Installer version and output filename: 0.2.2.0
+- Publish folders: `publish\v0.2.2.0\service` and `publish\v0.2.2.0\tray`
+- README, HANDOVER, ROADMAP, VERSION_CHECK, GITHUB_RELEASE and current CHANGELOG release: 0.2.2.0
 - GitHub repository: `https://github.com/KaiEysselein/DeskPulse`
 - Historical version references are confined to release history and backward-compatibility comments.
 - Tray source contains no direct SQLite write mode or SQL INSERT, UPDATE, DELETE or VACUUM statements.

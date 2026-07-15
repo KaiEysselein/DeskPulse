@@ -10,12 +10,18 @@ using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
+using Microsoft.Win32;
 
 namespace DeskPulse;
 
 public partial class ViewLogForm : Form
 {
-    private const int PageSize = 500;
+    private const int DefaultPageSize = 500;
+    private const int MaximumPageSize = 10000;
+    private const string ViewSettingsRegistryPath = @"Software\DeskPulse";
+    private int _pageSize = DefaultPageSize;
+    private string _fileGroupBy = "None";
+    private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
 
     private int _appPage;
     private int _filePage;
@@ -48,6 +54,8 @@ public partial class ViewLogForm : Form
             Cache = SqliteCacheMode.Shared
         }.ToString();
 
+        _pageSize = LoadPageSize();
+        pageSizeInput.Value = Math.Clamp(_pageSize, (int)pageSizeInput.Minimum, (int)pageSizeInput.Maximum);
         dateStart.Value = DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
         dateEnd.Value = DateTime.Today;
         ConfigureGrids();
@@ -55,9 +63,14 @@ public partial class ViewLogForm : Form
         {
             UpdateSelectionButtons();
             UpdatePagingControls();
+            groupByLabel.Visible = groupByCombo.Visible = tabs.SelectedTab?.Text == "File Activity";
             UpdatePageStatus();
         };
-        Load += (_, _) => RefreshLog();
+        Load += (_, _) =>
+        {
+            groupByLabel.Visible = groupByCombo.Visible = tabs.SelectedTab?.Text == "File Activity";
+            RefreshLog();
+        };
     }
 
     private void TodayOnlyButton_Click(object? sender, EventArgs e)
@@ -72,7 +85,7 @@ public partial class ViewLogForm : Form
     private void ConfigureGrids()
     {
         ConfigureGrid(gridApp, new[] { "ID", "Date", "Time", "App", "Process ID", "Path" });
-        ConfigureGrid(gridFile, new[] { "ID", "Date", "Time", "File", "Folder", "App" });
+        ConfigureGrid(gridFile, new[] { "ID", "Date", "Time", "File", "Extension", "Activity", "Folder", "App" });
         ConfigureGrid(gridUser, new[] { "ID", "Date", "Time", "Event", "User", "Computer" });
     }
 
@@ -95,15 +108,15 @@ public partial class ViewLogForm : Form
                 Name = columnName.Replace(" ", ""),
                 HeaderText = columnName,
                 SortMode = DataGridViewColumnSortMode.Programmatic,
-                FillWeight = columnName is "Folder" or "Path" ? 180 : columnName is "File" or "App" or "Event" ? 130 : columnName == "ID" ? 55 : 80
+                FillWeight = columnName is "Folder" or "Path" ? 180 : columnName is "File" or "App" or "Event" ? 130 : columnName == "Extension" ? 65 : columnName == "ID" ? 55 : 80
             });
         }
 
         grid.Columns.Add(new DataGridViewButtonColumn
         {
-            Name = "More",
+            Name = "Details",
             HeaderText = "",
-            Text = "More...",
+            Text = "Details",
             UseColumnTextForButtonValue = true,
             Width = 72,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
@@ -196,6 +209,8 @@ public partial class ViewLogForm : Form
             "Date" => "COALESCE(NULLIF(DateClosed, ''), NULLIF(LastWriteDate, ''), NULLIF(FirstWriteDate, ''), NULLIF(DateOpened, ''), substr(CreatedAt, 1, 10))",
             "Time" => "COALESCE(NULLIF(TimeClosed, ''), NULLIF(LastWriteTime, ''), NULLIF(FirstWriteTime, ''), NULLIF(TimeOpened, ''), substr(CreatedAt, 12))",
             "File" => "FileName",
+            "Extension" => "Extension",
+            "Activity" => "COALESCE(NULLIF(InferredAction, ''), NULLIF(ActivityType, ''), '(unknown)')",
             "Folder" => "FolderPath",
             "App" => "ProcessName",
             _ => null
@@ -707,6 +722,42 @@ public partial class ViewLogForm : Form
         }
     }
 
+    private void ApplyPageSizeButton_Click(object? sender, EventArgs e)
+    {
+        _pageSize = Math.Clamp((int)pageSizeInput.Value, 1, MaximumPageSize);
+        SavePageSize(_pageSize);
+        ResetPages();
+        RefreshLog();
+    }
+
+    private void GroupByCombo_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        _fileGroupBy = groupByCombo.SelectedItem?.ToString() ?? "None";
+        _expandedFileGroups.Clear();
+        _filePage = 0;
+        if (IsHandleCreated) RefreshActiveTab();
+    }
+
+    private static int LoadPageSize()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(ViewSettingsRegistryPath);
+            return key?.GetValue("ViewLogPageSize") is int value ? Math.Clamp(value, 1, MaximumPageSize) : DefaultPageSize;
+        }
+        catch { return DefaultPageSize; }
+    }
+
+    private static void SavePageSize(int value)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(ViewSettingsRegistryPath);
+            key?.SetValue("ViewLogPageSize", value, RegistryValueKind.DWord);
+        }
+        catch { }
+    }
+
     private void RefreshButton_Click(object? sender, EventArgs e)
     {
         ResetPages();
@@ -732,7 +783,7 @@ public partial class ViewLogForm : Form
     {
         var page = GetActivePage();
         var total = GetActiveTotal();
-        if ((page + 1) * PageSize >= total) return;
+        if ((page + 1) * _pageSize >= total) return;
         SetActivePage(page + 1);
         RefreshActiveTab();
     }
@@ -740,7 +791,7 @@ public partial class ViewLogForm : Form
     private void LastPageButton_Click(object? sender, EventArgs e)
     {
         var total = GetActiveTotal();
-        var lastPage = Math.Max(0, (int)Math.Ceiling(total / (double)PageSize) - 1);
+        var lastPage = Math.Max(0, (int)Math.Ceiling(total / (double)_pageSize) - 1);
         if (GetActivePage() == lastPage) return;
         SetActivePage(lastPage);
         RefreshActiveTab();
@@ -778,9 +829,9 @@ public partial class ViewLogForm : Form
         }
     }
 
-    private static int ClampPage(int page, int total)
+    private int ClampPage(int page, int total)
     {
-        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)PageSize));
+        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)_pageSize));
         return Math.Clamp(page, 0, totalPages - 1);
     }
 
@@ -795,7 +846,7 @@ public partial class ViewLogForm : Form
     {
         var total = GetActiveTotal();
         var page = GetActivePage();
-        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)PageSize));
+        var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)_pageSize));
         if (page >= totalPages)
         {
             page = totalPages - 1;
@@ -804,10 +855,12 @@ public partial class ViewLogForm : Form
 
         firstPageButton.Enabled = page > 0;
         previousPageButton.Enabled = page > 0;
-        nextPageButton.Enabled = (page + 1) * PageSize < total;
-        lastPageButton.Enabled = (page + 1) * PageSize < total;
+        nextPageButton.Enabled = (page + 1) * _pageSize < total;
+        lastPageButton.Enabled = (page + 1) * _pageSize < total;
         exportButton.Enabled = total > 0 && GetActiveGrid()?.Rows.Count > 0;
-        pageLabel.Text = $"Page {page + 1:N0} of {totalPages:N0}   ({total:N0} record(s))";
+        pageLabel.Text = tabs.SelectedTab?.Text == "File Activity" && _fileGroupBy != "None"
+            ? $"Page {page + 1:N0} of {totalPages:N0} ({total:N0} groups)"
+            : $"Page {page + 1:N0} of {totalPages:N0} ({total:N0} records)";
     }
 
     private void UpdatePageStatus()
@@ -822,9 +875,11 @@ public partial class ViewLogForm : Form
             return;
         }
 
-        var firstRecord = (page * PageSize) + 1;
+        var firstRecord = (page * _pageSize) + 1;
         var lastRecord = Math.Min(firstRecord + visibleRows - 1, total);
-        statusLabel.Text = $"Showing {firstRecord:N0} to {lastRecord:N0} of {total:N0} records.";
+        statusLabel.Text = tabs.SelectedTab?.Text == "File Activity" && _fileGroupBy != "None"
+            ? $"Showing groups {firstRecord:N0} to {lastRecord:N0} of {total:N0}. Double-click a group to expand or collapse it."
+            : $"Showing {firstRecord:N0} to {lastRecord:N0} of {total:N0} records.";
     }
 
     private void RefreshActiveTab()
@@ -855,9 +910,18 @@ public partial class ViewLogForm : Form
                     gridUser.ClearSelection();
                     break;
                 default:
-                    _fileTotal = CountEntries("ActivityEvents", start, endExclusive);
-                    _filePage = ClampPage(_filePage, _fileTotal);
-                    PopulateFileGrid(ReadFileEntries(start, endExclusive, _filePage));
+                    if (_fileGroupBy == "None")
+                    {
+                        _fileTotal = CountEntries("ActivityEvents", start, endExclusive);
+                        _filePage = ClampPage(_filePage, _fileTotal);
+                        PopulateFileGrid(ReadFileEntries(start, endExclusive, _filePage));
+                    }
+                    else
+                    {
+                        _fileTotal = CountFileGroups(start, endExclusive);
+                        _filePage = ClampPage(_filePage, _fileTotal);
+                        PopulateFileGroups(ReadFileGroups(start, endExclusive, _filePage), start, endExclusive);
+                    }
                     gridFile.ClearSelection();
                     break;
             }
@@ -895,16 +959,17 @@ public partial class ViewLogForm : Form
             Application.DoEvents();
 
             var endExclusive = end.AddDays(1);
-            _fileTotal = CountEntries("ActivityEvents", start, endExclusive);
+            _fileTotal = _fileGroupBy == "None" ? CountEntries("ActivityEvents", start, endExclusive) : CountFileGroups(start, endExclusive);
             _appTotal = CountEntries("ProgramEvents", start, endExclusive);
             _userTotal = CountEntries("UserEvents", start, endExclusive);
             ClampAllPages();
 
-            var fileEntries = ReadFileEntries(start, endExclusive, _filePage);
+            var fileEntries = _fileGroupBy == "None" ? ReadFileEntries(start, endExclusive, _filePage) : new List<LogViewEntry>();
+            var fileGroups = _fileGroupBy == "None" ? new List<FileLogGroup>() : ReadFileGroups(start, endExclusive, _filePage);
             var appEntries = ReadAppEntries(start, endExclusive, _appPage);
             var userEntries = ReadUserEntries(start, endExclusive, _userPage);
 
-            PopulateFileGrid(fileEntries);
+            if (_fileGroupBy == "None") PopulateFileGrid(fileEntries); else PopulateFileGroups(fileGroups, start, endExclusive);
             PopulateAppGrid(appEntries);
             PopulateUserGrid(userEntries);
 
@@ -987,7 +1052,7 @@ public partial class ViewLogForm : Form
                 ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
                 ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12)
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), ReadText(reader, 3), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), WholeSecondTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
         });
     }
 
@@ -1010,11 +1075,11 @@ public partial class ViewLogForm : Form
                 ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
                 ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10)
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), ReadText(reader, 3), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), WholeSecondTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
         });
     }
 
-    private List<LogViewEntry> ReadEntries(string sql, DateTime start, DateTime endExclusive, int page, Func<SqliteDataReader, LogViewEntry> factory)
+    private List<LogViewEntry> ReadEntries(string sql, DateTime start, DateTime endExclusive, int page, Func<SqliteDataReader, LogViewEntry> factory, bool usePaging = true, string? groupKey = null)
     {
         var result = new List<LogViewEntry>();
         using var connection = new SqliteConnection(_connectionString);
@@ -1023,8 +1088,12 @@ public partial class ViewLogForm : Form
         command.CommandText = sql;
         command.Parameters.AddWithValue("$start", start.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$end", endExclusive.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
-        command.Parameters.AddWithValue("$limit", PageSize);
-        command.Parameters.AddWithValue("$offset", Math.Max(0, page) * PageSize);
+        if (usePaging)
+        {
+            command.Parameters.AddWithValue("$limit", _pageSize);
+            command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
+        }
+        if (groupKey != null) command.Parameters.AddWithValue("$groupKey", groupKey);
         using var reader = command.ExecuteReader();
         while (reader.Read()) result.Add(factory(reader));
         return result;
@@ -1059,14 +1128,139 @@ public partial class ViewLogForm : Form
 
     private static string EventTime(string createdAt, params string[] candidates)
     {
-        foreach (var candidate in candidates) if (!string.IsNullOrWhiteSpace(candidate)) return candidate;
-        return createdAt.Length >= 19 ? createdAt.Substring(11, Math.Min(12, createdAt.Length - 11)) : "";
+        foreach (var candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate)) return WholeSecondTime(candidate);
+        }
+
+        return createdAt.Length >= 19 ? WholeSecondTime(createdAt.Substring(11)) : "";
+    }
+
+    private static string WholeSecondTime(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+
+        var trimmed = value.Trim();
+        var separatorIndex = trimmed.IndexOfAny(new[] { '.', ',' });
+        return separatorIndex >= 0 ? trimmed[..separatorIndex] : trimmed;
+    }
+
+    private string FileGroupExpression() => _fileGroupBy switch
+    {
+        "Date" => "COALESCE(NULLIF(DateClosed, ''), NULLIF(LastWriteDate, ''), NULLIF(FirstWriteDate, ''), NULLIF(DateOpened, ''), substr(CreatedAt, 1, 10))",
+        "File name" => "COALESCE(NULLIF(FileName, ''), FullPath, '(unknown)')",
+        "Extension" => "COALESCE(NULLIF(Extension, ''), '(no extension)')",
+        "Folder" => "COALESCE(NULLIF(FolderPath, ''), '(unknown folder)')",
+        "Application" => "COALESCE(NULLIF(ProcessName, ''), '(unknown application)')",
+        "Activity" => "COALESCE(NULLIF(InferredAction, ''), NULLIF(ActivityType, ''), '(unknown activity)')",
+        _ => "''"
+    };
+
+    private int CountFileGroups(DateTime start, DateTime endExclusive)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM (SELECT {FileGroupExpression()} AS GroupKey FROM ActivityEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey);";
+        AddDateParameters(command, start, endExclusive);
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private List<FileLogGroup> ReadFileGroups(DateTime start, DateTime endExclusive, int page)
+    {
+        var result = new List<FileLogGroup>();
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT {FileGroupExpression()} AS GroupKey, COUNT(*) AS RecordCount, MAX(CreatedAt) AS Latest FROM ActivityEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey ORDER BY Latest DESC, GroupKey ASC LIMIT $limit OFFSET $offset;";
+        AddDateParameters(command, start, endExclusive);
+        command.Parameters.AddWithValue("$limit", _pageSize);
+        command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) result.Add(new FileLogGroup(ReadText(reader, 0), Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture)));
+        return result;
+    }
+
+    private List<LogViewEntry> ReadFileGroupEntries(DateTime start, DateTime endExclusive, string key)
+    {
+        var sql = $"""
+            SELECT Id, CreatedAt, ActivityType, FullPath, FolderPath, FileName, Extension,
+                   DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
+                   LastWriteDate, LastWriteTime, WriteCount, SizeAtLastWrite, DateClosed,
+                   TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note
+            FROM ActivityEvents
+            WHERE CreatedAt >= $start AND CreatedAt < $end AND {FileGroupExpression()} = $groupKey
+            {BuildOrderBy(_fileSortColumn, _fileSortAscending)};
+            """;
+        return ReadEntries(sql, start, endExclusive, 0, reader => CreateFileEntry(reader), false, key);
+    }
+
+    private LogViewEntry CreateFileEntry(SqliteDataReader reader)
+    {
+        var createdAt = ReadText(reader, 1);
+        var fullPath = ReadText(reader, 3);
+        var folder = ReadText(reader, 4);
+        var file = ReadText(reader, 5);
+        if (string.IsNullOrWhiteSpace(folder)) folder = Path.GetDirectoryName(fullPath) ?? "";
+        if (string.IsNullOrWhiteSpace(file)) file = Path.GetFileName(fullPath);
+        var fields = new Dictionary<string, string>
+        {
+            ["ID"] = ReadText(reader, 0), ["Created At"] = createdAt, ["Activity Type"] = ReadText(reader, 2),
+            ["Full Path"] = fullPath, ["Folder"] = folder, ["File"] = file, ["Extension"] = ReadText(reader, 6),
+            ["Date Opened"] = ReadText(reader, 7), ["Time Opened"] = ReadText(reader, 8), ["Size At Opening"] = ReadText(reader, 9),
+            ["First Write Date"] = ReadText(reader, 10), ["First Write Time"] = ReadText(reader, 11),
+            ["Last Write Date"] = ReadText(reader, 12), ["Last Write Time"] = ReadText(reader, 13),
+            ["Write Count"] = ReadText(reader, 14), ["Size At Last Write"] = ReadText(reader, 15),
+            ["Date Closed"] = ReadText(reader, 16), ["Time Closed"] = ReadText(reader, 17), ["Size At Closing"] = ReadText(reader, 18),
+            ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22)
+        };
+        return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
+            EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)), file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);
+    }
+
+    private static void AddDateParameters(SqliteCommand command, DateTime start, DateTime endExclusive)
+    {
+        command.Parameters.AddWithValue("$start", start.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$end", endExclusive.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+    }
+
+    private void PopulateFileGroups(IEnumerable<FileLogGroup> groups, DateTime start, DateTime endExclusive)
+    {
+        gridFile.Rows.Clear();
+        foreach (var group in groups)
+        {
+            var expanded = _expandedFileGroups.Contains(group.Key);
+            var rowIndex = gridFile.Rows.Add("", "", "", $"{(expanded ? "▼" : "▶")} {group.Key}", $"{group.Count:N0} records", "", "", "", "");
+            var row = gridFile.Rows[rowIndex];
+            row.Tag = group;
+            row.DefaultCellStyle.Font = new System.Drawing.Font(gridFile.Font, System.Drawing.FontStyle.Bold);
+            row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
+            if (!expanded) continue;
+            foreach (var entry in ReadFileGroupEntries(start, endExclusive, group.Key))
+            {
+                var childIndex = gridFile.Rows.Add(entry.Id, entry.Date, entry.Time, "    " + entry.Subject,
+                    entry.Fields.TryGetValue("Extension", out var ext) ? ext : "",
+                    GetFileActivity(entry), entry.Folder, entry.App, "Details");
+                gridFile.Rows[childIndex].Tag = entry;
+            }
+        }
     }
 
     private void PopulateFileGrid(IEnumerable<LogViewEntry> entries)
     {
         gridFile.Rows.Clear();
-        foreach (var e in entries) AddRow(gridFile, e, e.Id, e.Date, e.Time, e.Subject, e.Folder, e.App);
+        foreach (var e in entries) AddRow(gridFile, e, e.Id, e.Date, e.Time, e.Subject,
+            e.Fields.TryGetValue("Extension", out var extension) ? extension : "",
+            GetFileActivity(e), e.Folder, e.App);
+    }
+
+    private static string GetFileActivity(LogViewEntry entry)
+    {
+        if (entry.Fields.TryGetValue("Inferred Action", out var inferred) && !string.IsNullOrWhiteSpace(inferred))
+            return inferred;
+        if (entry.Fields.TryGetValue("Activity Type", out var activityType) && !string.IsNullOrWhiteSpace(activityType))
+            return activityType;
+        return "Unknown";
     }
 
     private void PopulateAppGrid(IEnumerable<LogViewEntry> entries)
@@ -1089,13 +1283,21 @@ public partial class ViewLogForm : Form
 
     private static void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
     {
-        if (sender is not DataGridView grid || e.RowIndex < 0 || e.ColumnIndex < 0 || grid.Columns[e.ColumnIndex].Name != "More") return;
+        if (sender is not DataGridView grid || e.RowIndex < 0 || e.ColumnIndex < 0 || grid.Columns[e.ColumnIndex].Name != "Details") return;
         ShowDetails(grid.Rows[e.RowIndex]);
     }
 
-    private static void Grid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+    private void Grid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
     {
-        if (sender is DataGridView grid && e.RowIndex >= 0) ShowDetails(grid.Rows[e.RowIndex]);
+        if (sender is not DataGridView grid || e.RowIndex < 0) return;
+        var row = grid.Rows[e.RowIndex];
+        if (grid == gridFile && row.Tag is FileLogGroup group)
+        {
+            if (!_expandedFileGroups.Add(group.Key)) _expandedFileGroups.Remove(group.Key);
+            RefreshActiveTab();
+            return;
+        }
+        ShowDetails(row);
     }
 
     private static void ShowDetails(DataGridViewRow row)
@@ -1105,6 +1307,8 @@ public partial class ViewLogForm : Form
         details.ShowDialog(row.DataGridView?.FindForm());
     }
 }
+
+public sealed record FileLogGroup(string Key, int Count);
 
 public sealed record LogViewEntry(
     string Id,

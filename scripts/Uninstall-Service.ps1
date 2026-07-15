@@ -1,4 +1,4 @@
-# Manual test uninstall. Run from elevated PowerShell.
+﻿# Manual test uninstall. Run from elevated PowerShell.
 # Preserves %USERPROFILE%\Documents\DeskPulse and its database.
 $ErrorActionPreference = 'Continue'
 Stop-Process -Name 'DeskPulse.Tray' -Force -ErrorAction SilentlyContinue

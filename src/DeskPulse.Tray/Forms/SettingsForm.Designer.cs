@@ -84,6 +84,9 @@ partial class SettingsForm
     private Button _maintenanceDeleteExportButton = null!;
     private Button _maintenanceDeleteStartupLogButton = null!;
     private Label _maintenanceGeneratedFilesHintLabel = null!;
+    private GroupBox _maintenanceRepairDataGroupBox = null!;
+    private Button _maintenanceRepairHistoricalDataButton = null!;
+    private Label _maintenanceRepairDataHintLabel = null!;
     private GroupBox _maintenanceUnwantedDataGroupBox = null!;
     private Button _maintenanceRemoveUnwantedDataButton = null!;
     private Label _maintenanceUnwantedDataHintLabel = null!;
@@ -213,6 +216,9 @@ partial class SettingsForm
         _maintenanceDeleteExportButton = new Button();
         _maintenanceDeleteStartupLogButton = new Button();
         _maintenanceGeneratedFilesHintLabel = new Label();
+        _maintenanceRepairDataGroupBox = new GroupBox();
+        _maintenanceRepairHistoricalDataButton = new Button();
+        _maintenanceRepairDataHintLabel = new Label();
         _maintenanceUnwantedDataGroupBox = new GroupBox();
         _maintenanceRemoveUnwantedDataButton = new Button();
         _maintenanceUnwantedDataHintLabel = new Label();
@@ -919,6 +925,7 @@ partial class SettingsForm
         _maintenanceCleanupTabPage.AutoScroll = true;
         _maintenanceCleanupTabPage.BackColor = System.Drawing.SystemColors.Window;
         _maintenanceCleanupTabPage.Controls.Add(_maintenanceGeneratedFilesGroupBox);
+        _maintenanceCleanupTabPage.Controls.Add(_maintenanceRepairDataGroupBox);
         _maintenanceCleanupTabPage.Controls.Add(_maintenanceUnwantedDataGroupBox);
         _maintenanceCleanupTabPage.Controls.Add(_maintenanceDatabaseCleanupGroupBox);
         _maintenanceCleanupTabPage.Location = new System.Drawing.Point(4, 24);
@@ -965,13 +972,40 @@ partial class SettingsForm
         _maintenanceGeneratedFilesHintLabel.TabIndex = 3;
         _maintenanceGeneratedFilesHintLabel.Text = "Generated-file cleanup is safe housekeeping for reports/log files only. It does not delete the database or activity records.";
 
+
+        _maintenanceRepairDataGroupBox.BackColor = System.Drawing.SystemColors.Window;
+        _maintenanceRepairDataGroupBox.Controls.Add(_maintenanceRepairHistoricalDataButton);
+        _maintenanceRepairDataGroupBox.Controls.Add(_maintenanceRepairDataHintLabel);
+        _maintenanceRepairDataGroupBox.Location = new System.Drawing.Point(18, 180);
+        _maintenanceRepairDataGroupBox.Name = "_maintenanceRepairDataGroupBox";
+        _maintenanceRepairDataGroupBox.Size = new System.Drawing.Size(820, 126);
+        _maintenanceRepairDataGroupBox.TabIndex = 1;
+        _maintenanceRepairDataGroupBox.TabStop = false;
+        _maintenanceRepairDataGroupBox.Text = "Repair historical data";
+
+        _maintenanceRepairHistoricalDataButton.FlatStyle = FlatStyle.System;
+        _maintenanceRepairHistoricalDataButton.Location = new System.Drawing.Point(18, 34);
+        _maintenanceRepairHistoricalDataButton.Name = "_maintenanceRepairHistoricalDataButton";
+        _maintenanceRepairHistoricalDataButton.Size = new System.Drawing.Size(190, 30);
+        _maintenanceRepairHistoricalDataButton.TabIndex = 0;
+        _maintenanceRepairHistoricalDataButton.Text = "Repair Historical Data...";
+        _maintenanceRepairHistoricalDataButton.UseVisualStyleBackColor = true;
+        _maintenanceRepairHistoricalDataButton.Click += MaintenanceRepairHistoricalDataButton_Click;
+
+        _maintenanceRepairDataHintLabel.ForeColor = System.Drawing.SystemColors.GrayText;
+        _maintenanceRepairDataHintLabel.Location = new System.Drawing.Point(224, 30);
+        _maintenanceRepairDataHintLabel.Name = "_maintenanceRepairDataHintLabel";
+        _maintenanceRepairDataHintLabel.Size = new System.Drawing.Size(570, 66);
+        _maintenanceRepairDataHintLabel.TabIndex = 1;
+        _maintenanceRepairDataHintLabel.Text = "Scans past File Activity records and safely corrects recognized path-format problems. This includes mapped-drive LanmanRedirector paths and refreshes their folder, file name, and extension fields.";
+
         _maintenanceUnwantedDataGroupBox.BackColor = System.Drawing.SystemColors.Window;
         _maintenanceUnwantedDataGroupBox.Controls.Add(_maintenanceRemoveUnwantedDataButton);
         _maintenanceUnwantedDataGroupBox.Controls.Add(_maintenanceUnwantedDataHintLabel);
-        _maintenanceUnwantedDataGroupBox.Location = new System.Drawing.Point(18, 180);
+        _maintenanceUnwantedDataGroupBox.Location = new System.Drawing.Point(18, 322);
         _maintenanceUnwantedDataGroupBox.Name = "_maintenanceUnwantedDataGroupBox";
         _maintenanceUnwantedDataGroupBox.Size = new System.Drawing.Size(820, 126);
-        _maintenanceUnwantedDataGroupBox.TabIndex = 1;
+        _maintenanceUnwantedDataGroupBox.TabIndex = 2;
         _maintenanceUnwantedDataGroupBox.TabStop = false;
         _maintenanceUnwantedDataGroupBox.Text = "Remove unwanted data using Logging Rules";
 
@@ -997,10 +1031,10 @@ partial class SettingsForm
         _maintenanceDatabaseCleanupGroupBox.Controls.Add(_maintenanceDeleteProgramActivityButton);
         _maintenanceDatabaseCleanupGroupBox.Controls.Add(_maintenanceDeleteAllActivityButton);
         _maintenanceDatabaseCleanupGroupBox.Controls.Add(_maintenanceDatabaseCleanupHintLabel);
-        _maintenanceDatabaseCleanupGroupBox.Location = new System.Drawing.Point(18, 322);
+        _maintenanceDatabaseCleanupGroupBox.Location = new System.Drawing.Point(18, 464);
         _maintenanceDatabaseCleanupGroupBox.Name = "_maintenanceDatabaseCleanupGroupBox";
         _maintenanceDatabaseCleanupGroupBox.Size = new System.Drawing.Size(820, 190);
-        _maintenanceDatabaseCleanupGroupBox.TabIndex = 2;
+        _maintenanceDatabaseCleanupGroupBox.TabIndex = 3;
         _maintenanceDatabaseCleanupGroupBox.TabStop = false;
         _maintenanceDatabaseCleanupGroupBox.Text = "Delete all records by activity type";
 
@@ -1045,7 +1079,7 @@ partial class SettingsForm
         _maintenanceDatabaseCleanupHintLabel.Name = "_maintenanceDatabaseCleanupHintLabel";
         _maintenanceDatabaseCleanupHintLabel.Size = new System.Drawing.Size(780, 84);
         _maintenanceDatabaseCleanupHintLabel.TabIndex = 4;
-        _maintenanceDatabaseCleanupHintLabel.Text = "These buttons permanently delete complete categories of stored activity records. They do not delete the SQLite database file, table structure, indexes, settings, logging rules, monitored extensions, or export options.";
+        _maintenanceDatabaseCleanupHintLabel.Text = "These buttons permanently delete complete categories of stored activity records. They do not delete the SQLite database file, table structure, indexes, settings, logging rules, or monitored extensions.";
 
         // _maintenanceLoggingRulesTabPage
         _maintenanceLoggingRulesTabPage.AutoScroll = true;
