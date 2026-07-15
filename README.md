@@ -1,6 +1,8 @@
-﻿# DeskPulse 0.2.2.0
+# DeskPulse 0.2.2.1
 
-Version 0.2.2.0 adds a visible File Activity action column and Activity grouping, and removes the configurable Export Options interface while retaining standard export functionality.
+
+Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
+Version 0.2.2.1 adds a visible File Activity action column and Activity grouping, and removes the configurable Export Options interface while retaining standard export functionality.
 
 - Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
 
@@ -37,8 +39,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 Published self-contained x64 applications are created under:
 
-- `publish\v0.2.2.0\service\DeskPulse.Service.exe`
-- `publish\v0.2.2.0\tray\DeskPulse.Tray.exe`
+- `publish\v0.2.2.1\service\DeskPulse.Service.exe`
+- `publish\v0.2.2.1\tray\DeskPulse.Tray.exe`
 
 The target PC does not require .NET to be installed.
 
@@ -53,7 +55,7 @@ After publishing:
 The installer is created at:
 
 ```text
-publish\v0.2.2.0\installer\DeskPulse_Setup_0.2.2.0.exe
+publish\v0.2.2.1\installer\DeskPulse_Setup_0.2.2.1.exe
 ```
 
 The installer registers `DeskPulse.Service` for automatic startup. Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` using the value `DeskPulse.Tray`.
@@ -74,7 +76,7 @@ License: GNU GPL v3.
 
 ## Absolute data-path migration
 
-DeskPulse 0.2.2.0 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
+DeskPulse 0.2.2.1 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
 
 
 

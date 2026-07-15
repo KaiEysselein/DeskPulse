@@ -1,8 +1,10 @@
-﻿# DeskPulse Roadmap
+# DeskPulse Roadmap
 
-## Current baseline: 0.2.2.0
 
-Completed in 0.2.2.0:
+Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
+## Current baseline: 0.2.2.1
+
+Completed in 0.2.2.1:
 
 - Visible File Activity **Activity** column and Activity grouping.
 - Whole-second time display in log tables.
@@ -12,7 +14,7 @@ Completed in 0.2.2.0:
 
 ## Baseline status
 
-Version 0.2.2.0 is locked for local compilation, installation and acceptance testing. New feature work should use the next development version.
+Version 0.2.2.1 is locked for local compilation, installation and acceptance testing. New feature work should use the next development version.
 
 ## 0.2.x priorities
 

@@ -1,23 +1,25 @@
-﻿# GitHub update — DeskPulse 0.2.2.0
+# GitHub update — DeskPulse 0.2.2.1
 
+
+Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
 Repository: https://github.com/KaiEysselein/DeskPulse
 
 ## Commit
 
 ```text
-Release DeskPulse 0.2.2.0 stabilisation baseline
+Release DeskPulse 0.2.2.1 stabilisation baseline
 ```
 
 ## Release
 
 ```text
-Tag: v0.2.2.0
-Title: DeskPulse 0.2.2.0 — File Activity improvements
+Tag: v0.2.2.1
+Title: DeskPulse 0.2.2.1 — File Activity improvements
 ```
 
 ## Release notes
 
-DeskPulse 0.2.2.0 improves File Activity review and completes the configurable application-filter workflow introduced in 0.2.1.7.
+DeskPulse 0.2.2.1 improves File Activity review and completes the configurable application-filter workflow introduced in 0.2.1.7.
 
 Highlights:
 
@@ -28,13 +30,13 @@ Highlights:
 - Retained configurable filtered File Activity applications and historical cleanup support.
 - Retained automatic mapped-drive normalization for newly logged `LanmanRedirector` paths.
 - Build and publish scripts now fail immediately when a native `dotnet` command fails and verify that expected executables exist before reporting success.
-- Publish output is versioned under `publish\v0.2.2.0\service` and `publish\v0.2.2.0\tray`.
+- Publish output is versioned under `publish\v0.2.2.1\service` and `publish\v0.2.2.1\tray`.
 - The installer is self-contained for x64 Windows.
 
 ## Release assets
 
-- `DeskPulse_Setup_0.2.2.0.exe`
-- `DeskPulse_0.2.2.0_Source_Handover.zip`
+- `DeskPulse_Setup_0.2.2.1.exe`
+- `DeskPulse_0.2.2.1_Source_Handover.zip`
 
 Generated binaries, publish folders, databases, ZIP packages and installer executables should remain excluded from the Git repository and be attached to the GitHub Release where applicable.
 
@@ -44,4 +46,4 @@ Generated binaries, publish folders, databases, ZIP packages and installer execu
 2. Review all changed source and documentation files in GitHub Desktop.
 3. Confirm `publish`, `bin`, `obj`, databases, ZIPs and EXEs are not staged.
 4. Commit with the message above and push to `main`.
-5. Create tag `v0.2.2.0`, attach the installer and handover ZIP, and publish the release.
+5. Create tag `v0.2.2.1`, attach the installer and handover ZIP, and publish the release.

@@ -1,24 +1,26 @@
-﻿# Version Check — 0.2.2.0
+# Version Check — 0.2.2.1
 
-Version **0.2.2.0** is the locked active baseline. Historical version numbers in `CHANGELOG.md` are intentionally preserved.
+
+Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
+Version **0.2.2.1** is the locked active baseline. Historical version numbers in `CHANGELOG.md` are intentionally preserved.
 
 ## Verified active references
 
-- `DeskPulse.Shared` AppInfo: `0.2.2.0`
-- `DeskPulse.Shared.csproj`: `0.2.2.0`
-- `DeskPulse.Service.csproj`: `0.2.2.0`
-- `DeskPulse.Tray.csproj`: `0.2.2.0`
-- Inno Setup installer and output filename: `0.2.2.0`
-- Publish folders: `publish\v0.2.2.0\service` and `publish\v0.2.2.0\tray`
-- README, HANDOVER, ROADMAP, GITHUB_RELEASE and current CHANGELOG entry: `0.2.2.0`
+- `DeskPulse.Shared` AppInfo: `0.2.2.1`
+- `DeskPulse.Shared.csproj`: `0.2.2.1`
+- `DeskPulse.Service.csproj`: `0.2.2.1`
+- `DeskPulse.Tray.csproj`: `0.2.2.1`
+- Inno Setup installer and output filename: `0.2.2.1`
+- Publish folders: `publish\v0.2.2.1\service` and `publish\v0.2.2.1\tray`
+- README, HANDOVER, ROADMAP, GITHUB_RELEASE and current CHANGELOG entry: `0.2.2.1`
 - GitHub repository: `https://github.com/KaiEysselein/DeskPulse`
 - Pipe ACL package: `System.IO.Pipes.AccessControl` `5.0.0`
 
 ## Deployment checks
 
 - [ ] `Build.ps1` completes with zero errors.
-- [ ] `Publish.ps1` creates both self-contained executables under `publish\v0.2.2.0`.
-- [ ] `Build-Installer.ps1` creates `publish\v0.2.2.0\installer\DeskPulse_Setup_0.2.2.0.exe`.
+- [ ] `Publish.ps1` creates both self-contained executables under `publish\v0.2.2.1`.
+- [ ] `Build-Installer.ps1` creates `publish\v0.2.2.1\installer\DeskPulse_Setup_0.2.2.1.exe`.
 - [ ] `DeskPulse.Service` starts automatically after reboot.
 - [ ] One `DeskPulse.Tray` process starts through the per-user `DeskPulse.Tray` HKCU Run value.
 - [ ] Legacy scheduled tasks and Startup-folder shortcuts do not create duplicate trays.

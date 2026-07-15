@@ -53,10 +53,13 @@ public sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _pauseLoggingMenuItem;
     private bool _loggingPaused;
     private Form? _activeForm;
+    private readonly System.Windows.Forms.Timer _focusLossTimer;
 
     public TrayAppContext()
     {
         _trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Text = AppInfo.AppName, Visible = true };
+        _focusLossTimer = new System.Windows.Forms.Timer { Interval = 180 };
+        _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
         AddMenuCommand("View Log...", OpenViewLog);
         AddMenuCommand("Settings...", OpenSettings);
@@ -179,8 +182,46 @@ public sealed class TrayAppContext : ApplicationContext
         };
 
         form.StartPosition = FormStartPosition.CenterScreen;
+        form.Deactivate += ActiveForm_Deactivate;
+        form.FormClosed += (_, _) => _focusLossTimer.Stop();
         form.Show();
         RestoreAndActivate(form);
+    }
+
+
+    private void ActiveForm_Deactivate(object? sender, EventArgs e)
+    {
+        _focusLossTimer.Stop();
+        _focusLossTimer.Start();
+    }
+
+    private void CloseActiveFormIfFocusWasLost()
+    {
+        _focusLossTimer.Stop();
+
+        var form = _activeForm;
+        if (form is null || form.IsDisposed || !form.Visible || form.ContainsFocus)
+            return;
+
+        // Keep the tray-opened form alive while one of its child dialogs is active.
+        foreach (Form openForm in Application.OpenForms)
+        {
+            if (openForm.IsDisposed || !openForm.Visible || ReferenceEquals(openForm, form))
+                continue;
+
+            for (Form? owner = openForm.Owner; owner != null; owner = owner.Owner)
+            {
+                if (ReferenceEquals(owner, form))
+                    return;
+            }
+        }
+
+        // A different DeskPulse window may temporarily have focus while an action completes.
+        var active = Form.ActiveForm;
+        if (active != null && active.GetType().Namespace == typeof(TrayAppContext).Namespace)
+            return;
+
+        CloseActiveForm();
     }
 
     private static void RestoreAndActivate(Form form)
@@ -216,6 +257,7 @@ public sealed class TrayAppContext : ApplicationContext
     {
         try { ServicePipeClient.SendAsync("TRAY_STOPPED").GetAwaiter().GetResult(); } catch { }
         CloseActiveForm();
+        _focusLossTimer.Stop(); _focusLossTimer.Dispose();
         _trayIcon.Visible = false; _trayIcon.Dispose(); _menu.Dispose();
         base.ExitThreadCore();
     }

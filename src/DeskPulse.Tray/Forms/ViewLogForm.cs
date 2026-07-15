@@ -21,6 +21,7 @@ public partial class ViewLogForm : Form
     private const string ViewSettingsRegistryPath = @"Software\DeskPulse";
     private int _pageSize = DefaultPageSize;
     private string _fileGroupBy = "None";
+    private bool _use12HourTime;
     private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
 
     private int _appPage;
@@ -55,6 +56,8 @@ public partial class ViewLogForm : Form
         }.ToString();
 
         _pageSize = LoadPageSize();
+        _use12HourTime = LoadUse12HourTime();
+        timeFormatCombo.SelectedItem = _use12HourTime ? "12-hour" : "24-hour";
         pageSizeInput.Value = Math.Clamp(_pageSize, (int)pageSizeInput.Minimum, (int)pageSizeInput.Maximum);
         dateStart.Value = DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
         dateEnd.Value = DateTime.Today;
@@ -738,6 +741,33 @@ public partial class ViewLogForm : Form
         if (IsHandleCreated) RefreshActiveTab();
     }
 
+    private void TimeFormatCombo_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        _use12HourTime = string.Equals(timeFormatCombo.SelectedItem?.ToString(), "12-hour", StringComparison.Ordinal);
+        SaveUse12HourTime(_use12HourTime);
+        if (IsHandleCreated) RefreshActiveTab();
+    }
+
+    private static bool LoadUse12HourTime()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(ViewSettingsRegistryPath);
+            return key?.GetValue("ViewLogUse12HourTime") is int value && value != 0;
+        }
+        catch { return false; }
+    }
+
+    private static void SaveUse12HourTime(bool value)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(ViewSettingsRegistryPath);
+            key?.SetValue("ViewLogUse12HourTime", value ? 1 : 0, RegistryValueKind.DWord);
+        }
+        catch { }
+    }
+
     private static int LoadPageSize()
     {
         try
@@ -1052,7 +1082,7 @@ public partial class ViewLogForm : Form
                 ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
                 ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12)
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), WholeSecondTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
         });
     }
 
@@ -1075,7 +1105,7 @@ public partial class ViewLogForm : Form
                 ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
                 ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10)
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), WholeSecondTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
         });
     }
 
@@ -1126,23 +1156,29 @@ public partial class ViewLogForm : Form
         return createdAt.Length >= 10 ? createdAt[..10] : createdAt;
     }
 
-    private static string EventTime(string createdAt, params string[] candidates)
+    private string EventTime(string createdAt, params string[] candidates)
     {
         foreach (var candidate in candidates)
         {
-            if (!string.IsNullOrWhiteSpace(candidate)) return WholeSecondTime(candidate);
+            if (!string.IsNullOrWhiteSpace(candidate)) return FormatDisplayTime(candidate);
         }
 
-        return createdAt.Length >= 19 ? WholeSecondTime(createdAt.Substring(11)) : "";
+        return createdAt.Length >= 19 ? FormatDisplayTime(createdAt.Substring(11)) : "";
     }
 
-    private static string WholeSecondTime(string value)
+    private string FormatDisplayTime(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return "";
 
         var trimmed = value.Trim();
         var separatorIndex = trimmed.IndexOfAny(new[] { '.', ',' });
-        return separatorIndex >= 0 ? trimmed[..separatorIndex] : trimmed;
+        if (separatorIndex >= 0) trimmed = trimmed[..separatorIndex];
+
+        if (!TimeSpan.TryParse(trimmed, CultureInfo.InvariantCulture, out var time))
+            return trimmed;
+
+        var dateTime = DateTime.Today.Add(time);
+        return dateTime.ToString(_use12HourTime ? "h:mm:ss tt" : "HH:mm:ss", CultureInfo.InvariantCulture);
     }
 
     private string FileGroupExpression() => _fileGroupBy switch

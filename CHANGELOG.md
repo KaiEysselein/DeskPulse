@@ -1,4 +1,10 @@
-﻿# Changelog
+# Changelog
+
+## 0.2.2.1 - 2026-07-15
+- Tray-opened forms now close automatically after focus moves outside DeskPulse, while remaining open for owned child dialogs.
+- Added a persisted log time-format selector with 24-hour and 12-hour (AM/PM) display options.
+- Log timestamps continue to display whole seconds only; stored database values are unchanged.
+- Updated active project, installer, publish, release, verification, audit and handover references to 0.2.2.1.
 
 ## 0.2.2.0 — 2026-07-15
 
@@ -6,7 +12,6 @@
 - Updated all active application, assembly, installer, publish, documentation, handover, release, audit, and verification references to 0.2.2.0.
 - Preserved all earlier changelog entries and historical build-verification documents under their original version numbers.
 
-# Changelog
 
 ## 0.2.1.8
 
@@ -17,7 +22,6 @@
 - Hardened build and publish scripts so failed native commands stop the workflow and cannot report a false successful publish.
 - Updated active application, project, installer, publish, handover, roadmap, audit, release and verification references to 0.2.1.8.
 
-# DeskPulse Changelog
 
 ## 0.2.1.7 — 2026-07-15
 
@@ -28,7 +32,6 @@
 - Database housekeeping removes historical File Activity records attributed to currently filtered applications.
 - Updated all active application, project, installer, publish, documentation, handover, release, audit, and verification references to 0.2.1.7.
 
-# Changelog
 
 ## 0.2.1.6 — 2026-07-15
 
