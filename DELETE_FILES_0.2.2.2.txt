@@ -1,0 +1,33 @@
+DeskPulse 0.2.2.2 — Files/Folders to Remove
+================================================
+
+Delete these obsolete root-level items after copying the changed files:
+
+- AppIcon.cs
+- BASELINE_VERIFICATION.md
+- BUILD_VERIFICATION_0.2.1.0.md
+- BUILD_VERIFICATION_0.2.1.1.md
+- BUILD_VERIFICATION_0.2.1.2.md
+- BUILD_VERIFICATION_0.2.1.3.md
+- BUILD_VERIFICATION_0.2.1.4.md
+- BUILD_VERIFICATION_0.2.1.5.md
+- BUILD_VERIFICATION_0.2.1.6.md
+- BUILD_VERIFICATION_0.2.1.7.md
+- BUILD_VERIFICATION_0.2.1.8.md
+- BUILD_VERIFICATION_0.2.2.0.md
+- BUILD_VERIFICATION_0.2.2.1.md
+- DELETE_OBSOLETE_FILES.txt
+- DatabaseDateRange.cs
+- DeskPulse.csproj
+- FINAL_RELEASE_AUDIT_0.2.1.8.md
+- FINAL_RELEASE_AUDIT_0.2.2.0.md
+- FINAL_RELEASE_AUDIT_0.2.2.1.md
+- Program.cs
+- app.manifest
+- file-logger.ico
+- Forms/
+
+Notes:
+- Do not delete any similarly named files under src\DeskPulse.Service or src\DeskPulse.Tray.
+- The root Forms\ folder is obsolete; the active forms are under src\DeskPulse.Tray.
+- Historical verification files are preserved in docs\archive or docs\verification.
