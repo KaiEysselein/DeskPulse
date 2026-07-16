@@ -1,4 +1,4 @@
-﻿# Build output
+# Build output
 bin/
 obj/
 
@@ -53,3 +53,9 @@ Desktop.ini
 *.zip
 *.msi
 *.exe
+
+# Local cleanup and folder scans
+_cleanup_quarantine/
+_DeskPulseFolderScan_*/
+_DeskPulseFolderScan_*.zip
+DeskPulse_PreCleanup_*.zip

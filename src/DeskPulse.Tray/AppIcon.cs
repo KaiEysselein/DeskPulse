@@ -13,8 +13,8 @@ internal static class AppIcon
         {
             var candidates = new[]
             {
-                Path.Combine(AppContext.BaseDirectory, "file-logger.ico"),
-                Path.Combine(Application.StartupPath, "file-logger.ico")
+                Path.Combine(AppContext.BaseDirectory, "DeskPulse.ico"),
+                Path.Combine(Application.StartupPath, "DeskPulse.ico")
             };
 
             foreach (var candidate in candidates)

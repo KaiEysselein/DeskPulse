@@ -1,16 +1,16 @@
-# DeskPulse 0.2.2.1 Handover
+# DeskPulse 0.2.2.2 Handover
 
 
 Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
-## 0.2.2.1 File Activity and log-view update
+## 0.2.2.2 cleanup and housekeeping update
 
-Mapped-drive ETW paths are normalized automatically for newly logged records to their user-facing drive-letter form by removing the redirector token, server, and mapped share root. The temporary user-facing historical repair control has been removed in 0.2.2.1.
+Mapped-drive ETW paths are normalized automatically for newly logged records to their user-facing drive-letter form by removing the redirector token, server, and mapped share root. The temporary user-facing historical repair control has been removed in 0.2.2.2.
 
 - Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
 
 ## Authoritative baseline
 
-This package is the complete DeskPulse 0.2.2.1 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.2.1.
+This package is the complete DeskPulse 0.2.2.2 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.2.2.
 
 Repository: https://github.com/KaiEysselein/DeskPulse
 
@@ -43,9 +43,9 @@ User Activity includes Windows startup, logon/logoff, lock/unlock, `DeskPulse se
 
 Legacy registry settings are migrated into the shared settings file. The uninstaller intentionally preserves `Documents\DeskPulse`, including the activity database and exports, while removing program files, service registration, shared settings and startup registrations.
 
-## Completed 0.2.2.1 functionality
+## Completed 0.2.2.2 housekeeping
 
-### 0.2.2.1 corrective changes
+### 0.2.2.2 cleanup changes
 
 ### File Activity log presentation
 
@@ -113,15 +113,15 @@ Use either the installer or the manual service scripts for a test installation, 
 
 ## Absolute data-path migration
 
-DeskPulse 0.2.2.1 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
+DeskPulse 0.2.2.2 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
 
 
 
 ## Windows system activity control
 
-Version 0.2.2.1 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
+Version 0.2.2.2 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
 
-Version 0.2.2.1 retains the configurable `FilteredFileActivityProcesses` list introduced in 0.2.1.7. Matching is case-insensitive; selected processes are excluded from new File Activity logging and are also applied during rule-based historical cleanup. The legacy `LogExplorerFileActivity` setting remains only for migration compatibility and is not exposed as a separate user-facing option.
+Version 0.2.2.2 retains the configurable `FilteredFileActivityProcesses` list introduced in 0.2.1.7. Matching is case-insensitive; selected processes are excluded from new File Activity logging and are also applied during rule-based historical cleanup. The legacy `LogExplorerFileActivity` setting remains only for migration compatibility and is not exposed as a separate user-facing option.
 
 ## Latest correction
 
@@ -134,7 +134,7 @@ All SQLite write operations initiated by the tray (selected-record deletion, rul
 
 ## Baseline lock
 
-Version **0.2.2.1** is locked as the authoritative stabilisation baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.2.1 corrective rebuild is required during compilation or acceptance testing.
+Version **0.2.2.2** is the cleanup and housekeeping baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.2.2 corrective rebuild is required during compilation or acceptance testing.
 
 ## Selected-record deletion stability
 
@@ -152,6 +152,6 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\scripts\Build.ps1
 .\scripts\Publish.ps1
 .\Installer\Build-Installer.ps1
-Start-Process ".\publish\v0.2.2.1\installer\DeskPulse_Setup_0.2.2.1.exe"
+Start-Process ".\publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe"
 ```
 

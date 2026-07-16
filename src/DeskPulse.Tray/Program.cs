@@ -264,7 +264,7 @@ public sealed class TrayAppContext : ApplicationContext
 
     private static Icon LoadTrayIcon()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "file-logger.ico");
+        var path = Path.Combine(AppContext.BaseDirectory, "DeskPulse.ico");
         if (File.Exists(path)) return new Icon(path);
         return Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? "") ?? SystemIcons.Application;
     }

@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$publishRoot = Join-Path $root 'publish\v0.2.2.1'
+$publishRoot = Join-Path $root 'publish\v0.2.2.2'
 $serviceOutput = Join-Path $publishRoot 'service'
 $trayOutput = Join-Path $publishRoot 'tray'
 $serviceExe = Join-Path $serviceOutput 'DeskPulse.Service.exe'
@@ -16,4 +16,4 @@ dotnet publish (Join-Path $root 'src\DeskPulse.Tray\DeskPulse.Tray.csproj') -c R
 if ($LASTEXITCODE -ne 0) { throw "Tray publish failed with exit code $LASTEXITCODE." }
 if (-not (Test-Path $trayExe)) { throw "Published tray executable not found: $trayExe" }
 
-Write-Host 'Published to publish\v0.2.2.1\service and publish\v0.2.2.1\tray' -ForegroundColor Green
+Write-Host 'Published to publish\v0.2.2.2\service and publish\v0.2.2.2\tray' -ForegroundColor Green

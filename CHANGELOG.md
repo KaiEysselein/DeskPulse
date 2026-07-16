@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2.2 - 2026-07-16
+- Renamed the application icon asset from `file-logger.ico` to `DeskPulse.ico` in the Service and Tray projects and updated all active code and project references.
+- Removed obsolete root-level remnants of the former single-project application layout from the active source package.
+- Reorganized build verification and release audit records under `docs\verification` and `docs\archive`.
+- Added a read-only repository folder scan utility under `scripts`.
+- Added future feature backlog items for distinct session-only and persistent pause modes, each with a distinct tray icon state.
+- Updated active project, installer, publish, release, verification, audit and handover references to 0.2.2.2.
+- No logging, database, rule-processing or export behaviour was intentionally changed.
+
 ## 0.2.2.1 - 2026-07-15
 - Tray-opened forms now close automatically after focus moves outside DeskPulse, while remaining open for owned child dialogs.
 - Added a persisted log time-format selector with 24-hour and 12-hour (AM/PM) display options.
@@ -789,7 +798,7 @@ Version 0.0.2 implements the SQLite storage solution and changes Excel from a li
 - Added/confirmed application manifest:
   - `app.manifest`
 - Added/confirmed application icon:
-  - `file-logger.ico`
+  - `DeskPulse.ico`
 - Added/confirmed documentation files:
   - `README.md`
   - `CHANGELOG.md`

@@ -15,10 +15,10 @@ if (-not $iscc) {
     throw "Inno Setup 6 compiler (ISCC.exe) was not found."
 }
 
-$serviceExe = Join-Path $projectRoot 'publish\v0.2.2.1\service\DeskPulse.Service.exe'
-$trayExe = Join-Path $projectRoot 'publish\v0.2.2.1\tray\DeskPulse.Tray.exe'
-$installerDir = Join-Path $projectRoot 'publish\v0.2.2.1\installer'
-$installerExe = Join-Path $installerDir 'DeskPulse_Setup_0.2.2.1.exe'
+$serviceExe = Join-Path $projectRoot 'publish\v0.2.2.2\service\DeskPulse.Service.exe'
+$trayExe = Join-Path $projectRoot 'publish\v0.2.2.2\tray\DeskPulse.Tray.exe'
+$installerDir = Join-Path $projectRoot 'publish\v0.2.2.2\installer'
+$installerExe = Join-Path $installerDir 'DeskPulse_Setup_0.2.2.2.exe'
 
 if (-not (Test-Path $serviceExe)) {
     throw "Published service not found: $serviceExe"

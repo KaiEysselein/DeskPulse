@@ -1,20 +1,8 @@
 # DeskPulse Roadmap
 
+## Current baseline: 0.2.2.2
 
-Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
-## Current baseline: 0.2.2.1
-
-Completed in 0.2.2.1:
-
-- Visible File Activity **Activity** column and Activity grouping.
-- Whole-second time display in log tables.
-- Removal of the user-facing Export Options tab while retaining standard export.
-- Configurable File Activity process filtering with historical cleanup support.
-- Automatic mapped-drive normalization for newly logged records.
-
-## Baseline status
-
-Version 0.2.2.1 is locked for local compilation, installation and acceptance testing. New feature work should use the next development version.
+Version 0.2.2.2 is a cleanup and housekeeping release. It renames the icon asset to `DeskPulse.ico`, removes obsolete single-project remnants, and organizes verification records without intentionally changing runtime behaviour.
 
 ## 0.2.x priorities
 
@@ -24,6 +12,14 @@ Version 0.2.2.1 is locked for local compilation, installation and acceptance tes
 - Add installer logging and clearer upgrade/recovery diagnostics.
 - Review multi-user Windows behaviour and per-user tray startup.
 - Add automated database backup/restore controls.
+
+## Feature backlog
+
+### Pause modes and tray icon states
+
+- **Pause for this session:** temporarily pause logging without persisting the state. Logging resumes after the DeskPulse service or computer restarts. Display a distinct session-paused tray icon.
+- **Pause indefinitely:** persist the paused state across service and computer restarts until the user explicitly enables logging. Display a distinct persistent-paused tray icon.
+- **Critical-threshold integration:** when the future sustained critical service CPU/RAM threshold is reached, write the diagnostic record and fallback marker, stop or disable logging safely, and enter the persistent pause state. Keep the tray available to explain the condition and require explicit user re-enablement after the cause has been addressed.
 
 ## Later
 
