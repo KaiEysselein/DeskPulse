@@ -133,9 +133,31 @@ Version 0.2.2.2 retains the configurable `FilteredFileActivityProcesses` list in
 
 All SQLite write operations initiated by the tray (selected-record deletion, rule cleanup, housekeeping, clearing one table, and clearing all activity) are now executed by DeskPulse.Service through the named pipe. The tray opens the activity database read-only for views, counts, statistics, and exports.
 
-## Baseline lock
+## Baseline and next milestone
 
-Version **0.2.2.2** is the cleanup and housekeeping baseline represented by this package. Further feature development should advance to a later version unless a narrowly scoped 0.2.2.2 corrective rebuild is required during compilation or acceptance testing.
+Version **0.2.2.2** is the current cleanup and housekeeping baseline.
+
+A limited number of minor corrective or refinement builds may continue within the `0.2.2.x` line. These builds should remain narrowly scoped and should not introduce the larger service-safety feature set planned for the next milestone.
+
+The next fixed milestone is:
+
+`0.3.0.0`
+
+Version `0.3.0.0` will be the next permanently retained release and should include the agreed feature work once it is implemented, tested, and accepted.
+
+The approved `0.3.0.0` release artifacts must be copied to:
+
+`D:\Kai\GitHub\DeskPulse\releases\v0.3.0.0`
+
+The corresponding formal GitHub Release should use the tag:
+
+`v0.3.0.0`
+
+Intermediate `0.2.2.x` installers continue to replace the contents of:
+
+`D:\Kai\GitHub\DeskPulse\releases\current`
+
+Do not create permanent milestone folders or formal GitHub Releases for intermediate `0.2.2.x` builds.
 
 ## Selected-record deletion stability
 
@@ -143,6 +165,23 @@ Version **0.2.2.2** is the cleanup and housekeeping baseline represented by this
 - View Log deletion now awaits the service asynchronously so the form remains responsive.
 
 - Rules Import offers **Merge with existing rules** (default) or **Replace existing rules**. Merge updates matching File/App rules and adds new ones without duplicates; User Activity rules are unchanged.
+
+## Planned next phase
+
+Before fixing the next milestone at `0.3.0.0`, minor changes may still be completed and tested under the `0.2.2.x` version line.
+
+The next milestone feature scope includes the previously agreed service-safety work:
+
+- monitor DeskPulse.Service CPU and memory use;
+- configurable warning and critical thresholds;
+- configurable sustained-duration values;
+- warning-state tray icon;
+- session-only pause;
+- persistent pause until manually re-enabled;
+- persistent critical-state handling across restarts;
+- user-facing safety settings under Settings → Maintenance.
+
+This work is feature development and must not be silently included in a minor housekeeping build. Once complete and accepted, promote all active version, installer, publish, handover, verification, and release references to `0.3.0.0`.
 
 ## Mandatory package delivery command chain
 
@@ -182,6 +221,9 @@ Generated publish output remains under `dev\publish` and is excluded from Git.
 
 Only milestone versions matching `v0.x.0.0` are retained permanently under `releases\v<version>` and, where applicable, as GitHub Releases. Intermediate versions retain their exact internal version but overwrite the approved artifacts under `releases\current`.
 
+The next planned retained milestone is `v0.3.0.0`. Minor `0.2.2.x` builds remain replaceable intermediate builds.
+
 `dev\Installer\Build-Installer.ps1` enforces this policy for installer output.
 
 For one-off repository, GitHub, or local maintenance actions, provide exact PowerShell commands directly in the conversation. Do not create downloadable PowerShell fix scripts unless the user explicitly requests one.
+
