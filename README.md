@@ -12,7 +12,7 @@ It records selected file, application, user-session, and Windows activity into a
 
 **Current version:** `0.2.2.2`
 
-### [Download the latest installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
+### [Formal milestone releases](https://github.com/KaiEysselein/DeskPulse/releases)
 
 </td>
 <td width="32%" align="center" valign="top">
@@ -87,6 +87,13 @@ All SQLite write operations are performed by `DeskPulse.Service`, including:
 - clearing all recorded activity.
 
 The tray opens the database read-only for views, counts, statistics, and exports.
+
+
+## Release policy
+
+DeskPulse keeps permanent releases only for milestone versions matching `v0.x.0.0`, such as `v0.2.0.0` and `v0.3.0.0`.
+
+Intermediate builds retain their exact application version, but their approved installer replaces the previous contents of the local `releases\current` folder. They are not retained as permanent GitHub Releases.
 
 ## Project links
 

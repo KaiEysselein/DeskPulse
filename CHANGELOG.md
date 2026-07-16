@@ -1,6 +1,9 @@
-﻿# Changelog
+# Changelog
 
 ## 0.2.2.2 - 2026-07-16
+- Added the workspace-level `dev` and `releases` separation.
+- Added milestone-only release retention: permanent releases are kept only for versions matching `v0.x.0.0`; intermediate installers replace `releases\current`.
+- Updated the installer build workflow to copy approved installers into the correct local release folder automatically.
 - Consolidated normal, paused, and warning PNG/ICO assets into one shared `Resources` folder.
 - Added tray icon state changes for active logging, temporary pause, and service-warning conditions.
 - Renamed the application icon asset from `file-logger.ico` to `DeskPulse.ico` in the Service and Tray projects and updated all active code and project references.

@@ -1,7 +1,10 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$workspaceRoot = Split-Path -Parent $projectRoot
 $issFile = Join-Path $PSScriptRoot 'DeskPulse.iss'
+$version = '0.2.2.2'
+$versionFolder = "v$version"
 
 $candidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -15,10 +18,12 @@ if (-not $iscc) {
     throw "Inno Setup 6 compiler (ISCC.exe) was not found."
 }
 
-$serviceExe = Join-Path $projectRoot 'publish\v0.2.2.2\service\DeskPulse.Service.exe'
-$trayExe = Join-Path $projectRoot 'publish\v0.2.2.2\tray\DeskPulse.Tray.exe'
-$installerDir = Join-Path $projectRoot 'publish\v0.2.2.2\installer'
-$installerExe = Join-Path $installerDir 'DeskPulse_Setup_0.2.2.2.exe'
+$publishRoot = Join-Path $projectRoot "publish\$versionFolder"
+$serviceExe = Join-Path $publishRoot 'service\DeskPulse.Service.exe'
+$trayExe = Join-Path $publishRoot 'tray\DeskPulse.Tray.exe'
+$installerDir = Join-Path $publishRoot 'installer'
+$installerName = "DeskPulse_Setup_$version.exe"
+$installerExe = Join-Path $installerDir $installerName
 
 if (-not (Test-Path $serviceExe)) {
     throw "Published service not found: $serviceExe"
@@ -40,6 +45,40 @@ finally {
     Pop-Location
 }
 
+if (-not (Test-Path $installerExe)) {
+    throw "Installer was not created: $installerExe"
+}
+
+$releasesRoot = Join-Path $workspaceRoot 'releases'
+$currentReleaseDir = Join-Path $releasesRoot 'current'
+
+New-Item -ItemType Directory -Path $currentReleaseDir -Force | Out-Null
+Get-ChildItem -LiteralPath $currentReleaseDir -Force -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force
+
+$currentInstaller = Join-Path $currentReleaseDir $installerName
+Copy-Item -LiteralPath $installerExe -Destination $currentInstaller -Force
+
+$isMilestone = $version -match '^0\.\d+\.0\.0$'
+$milestoneInstaller = $null
+
+if ($isMilestone) {
+    $milestoneDir = Join-Path $releasesRoot $versionFolder
+    New-Item -ItemType Directory -Path $milestoneDir -Force | Out-Null
+
+    $milestoneInstaller = Join-Path $milestoneDir $installerName
+    Copy-Item -LiteralPath $installerExe -Destination $milestoneInstaller -Force
+}
+
 Write-Host ""
 Write-Host "Installer created at:" -ForegroundColor Green
 Write-Host $installerExe
+Write-Host ""
+Write-Host "Current approved installer copied to:" -ForegroundColor Green
+Write-Host $currentInstaller
+
+if ($milestoneInstaller) {
+    Write-Host ""
+    Write-Host "Milestone installer retained at:" -ForegroundColor Green
+    Write-Host $milestoneInstaller
+}

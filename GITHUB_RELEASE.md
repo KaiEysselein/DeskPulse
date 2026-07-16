@@ -1,49 +1,51 @@
-# GitHub update — DeskPulse 0.2.2.2
+# DeskPulse Release Policy
 
+## Permanent milestone releases
 
-Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
-Repository: https://github.com/KaiEysselein/DeskPulse
+Permanent local archives and GitHub Releases are created only for versions matching:
 
-## Commit
+`v0.x.0.0`
+
+Examples:
+
+- `v0.2.0.0`
+- `v0.3.0.0`
+- `v0.4.0.0`
+
+These milestone folders are retained under the workspace-level `releases` directory.
+
+## Intermediate builds
+
+Intermediate builds such as `0.2.2.2` retain their exact application and installer version, but they are treated as replaceable development releases.
+
+The latest approved intermediate installer is stored under:
+
+`releases\current`
+
+Building the next intermediate installer clears and replaces the contents of that folder.
+
+Intermediate builds are not published as permanent GitHub Releases.
+
+## Workspace layout
 
 ```text
-Release DeskPulse 0.2.2.2 cleanup baseline
+DeskPulse\
+├── dev\
+│   ├── .git\
+│   ├── src\
+│   ├── scripts\
+│   ├── Installer\
+│   └── publish\
+└── releases\
+    ├── current\
+    ├── v0.2.0.0\
+    └── future milestone folders\
 ```
 
-## Release
+`dev\publish` remains temporary generated output and is ignored by Git.
 
-```text
-Tag: v0.2.2.2
-Title: DeskPulse 0.2.2.2 — Cleanup and housekeeping
-```
+## Installer archiving
 
-## Release notes
+`Installer\Build-Installer.ps1` always copies the completed installer into `releases\current`.
 
-DeskPulse 0.2.2.2 cleans and standardizes the repository, renames the icon asset to `DeskPulse.ico`, and reorganizes verification records without intentionally changing runtime behaviour.
-
-Highlights:
-
-- Added a visible **Activity** column to File Activity, preferring the inferred user-facing action and falling back to the recorded activity type.
-- Added **Activity** to File Activity grouping.
-- File/App/User log times display at whole-second precision; database timestamps retain their original precision.
-- Removed the user-facing **Export Options** tab while retaining standard Excel export behaviour.
-- Retained configurable filtered File Activity applications and historical cleanup support.
-- Retained automatic mapped-drive normalization for newly logged `LanmanRedirector` paths.
-- Build and publish scripts now fail immediately when a native `dotnet` command fails and verify that expected executables exist before reporting success.
-- Publish output is versioned under `publish\v0.2.2.2\service` and `publish\v0.2.2.2\tray`.
-- The installer is self-contained for x64 Windows.
-
-## Release assets
-
-- `DeskPulse_Setup_0.2.2.2.exe`
-- `DeskPulse_0.2.2.2_Source_Handover.zip`
-
-Generated binaries, publish folders, databases, ZIP packages and installer executables should remain excluded from the Git repository and be attached to the GitHub Release where applicable.
-
-## GitHub Desktop workflow
-
-1. Run the full local build, publish, installer and acceptance checks in `VERSION_CHECK.md`.
-2. Review all changed source and documentation files in GitHub Desktop.
-3. Confirm `publish`, `bin`, `obj`, databases, ZIPs and EXEs are not staged.
-4. Commit with the message above and push to `main`.
-5. Create tag `v0.2.2.2`, attach the installer and handover ZIP, and publish the release.
+When the active version matches `0.x.0.0`, the installer is also copied into the corresponding permanent milestone folder.

@@ -4,6 +4,13 @@
 
 Version 0.2.2.2 is a cleanup and housekeeping release. It renames the icon asset to `DeskPulse.ico`, removes obsolete single-project remnants, and organizes verification records without intentionally changing runtime behaviour.
 
+
+## Release retention
+
+- Retain permanent installer archives and GitHub Releases only for milestone versions matching `v0.x.0.0`.
+- Replace `releases\current` for each approved intermediate build.
+- Preserve the exact internal version number for diagnostics, installers, handovers, and source history.
+
 ## 0.2.x priorities
 
 - Complete clean-PC installation, upgrade, restart and uninstall regression testing.

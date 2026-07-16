@@ -155,3 +155,22 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Start-Process ".\publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe"
 ```
 
+
+## Workspace and release-retention policy
+
+The DeskPulse workspace is organized as:
+
+```text
+D:\Kai\GitHub\DeskPulse\
+├── dev\
+└── releases\
+```
+
+The active Git repository is `dev`. Generated publish output remains under `dev\publish` and is excluded from Git.
+
+Only milestone versions matching `v0.x.0.0` are retained permanently under `releases\v<version>` and, where applicable, as GitHub Releases. Intermediate versions retain their exact internal version but overwrite the approved artifacts under `releases\current`.
+
+`Installer\Build-Installer.ps1` enforces this policy for installer output.
+
+For one-off repository, GitHub, or local maintenance actions, provide exact PowerShell commands directly in the conversation. Do not create downloadable PowerShell fix scripts unless the user explicitly requests one.
+

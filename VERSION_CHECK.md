@@ -21,6 +21,8 @@ Version **0.2.2.2** is the locked active baseline. Historical version numbers in
 - [ ] `Build.ps1` completes with zero errors.
 - [ ] `Publish.ps1` creates both self-contained executables under `publish\v0.2.2.2`.
 - [ ] `Build-Installer.ps1` creates `publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe`.
+- [ ] The completed installer is copied to the workspace-level `releases\current` folder.
+- [ ] A permanent `releases\v<version>` copy is created only when the version matches `0.x.0.0`.
 - [ ] `DeskPulse.Service` starts automatically after reboot.
 - [ ] One `DeskPulse.Tray` process starts through the per-user `DeskPulse.Tray` HKCU Run value.
 - [ ] Legacy scheduled tasks and Startup-folder shortcuts do not create duplicate trays.
