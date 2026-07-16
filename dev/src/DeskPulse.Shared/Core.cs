@@ -20,7 +20,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.2.2.2";
+    public const string Version = "0.3.0.0";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -4743,13 +4743,23 @@ public sealed class ActivityRuleSetting
 public sealed class AppSettings
 {
     private const string RegistryPath = @"Software\DeskPulse";
-    private const int CurrentSettingsSchemaVersion = 5;
+    private const int CurrentSettingsSchemaVersion = 6;
 
     public string DataFolderPath { get; set; } = GetDefaultDataFolderPath();
 
     public bool IgnoreTempFolders { get; set; } = true;
 
     public bool StartWithWindows { get; set; }
+
+    public double ServiceSafetyWarningCpuPercent { get; set; } = 30;
+    public double ServiceSafetyCriticalCpuPercent { get; set; } = 45;
+    public double ServiceSafetyWarningMemoryPercent { get; set; } = 30;
+    public double ServiceSafetyCriticalMemoryPercent { get; set; } = 45;
+    public int ServiceSafetyWarningSustainedSeconds { get; set; } = 5;
+    public int ServiceSafetyCriticalSustainedSeconds { get; set; } = 10;
+
+    /// <summary>When true, a critical safeguard trigger keeps logging paused after the service or Windows restarts until manually resumed.</summary>
+    public bool PauseLoggingAtStartupAfterSafetyTrigger { get; set; } = true;
 
     public bool LogProgramActivity { get; set; } = true;
 
@@ -4842,6 +4852,13 @@ public sealed class AppSettings
             DataFolderPath = DataFolderPath,
             IgnoreTempFolders = IgnoreTempFolders,
             StartWithWindows = StartWithWindows,
+            ServiceSafetyWarningCpuPercent = ServiceSafetyWarningCpuPercent,
+            ServiceSafetyCriticalCpuPercent = ServiceSafetyCriticalCpuPercent,
+            ServiceSafetyWarningMemoryPercent = ServiceSafetyWarningMemoryPercent,
+            ServiceSafetyCriticalMemoryPercent = ServiceSafetyCriticalMemoryPercent,
+            ServiceSafetyWarningSustainedSeconds = ServiceSafetyWarningSustainedSeconds,
+            ServiceSafetyCriticalSustainedSeconds = ServiceSafetyCriticalSustainedSeconds,
+            PauseLoggingAtStartupAfterSafetyTrigger = PauseLoggingAtStartupAfterSafetyTrigger,
             LogProgramActivity = LogProgramActivity,
             LogExplorerFileActivity = LogExplorerFileActivity,
             FilteredFileActivityProcesses = new HashSet<string>(FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase),

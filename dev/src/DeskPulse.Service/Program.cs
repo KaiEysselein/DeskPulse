@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.IO.Pipes;
 using System.ServiceProcess;
@@ -39,6 +39,9 @@ public sealed class DeskPulseWindowsService : ServiceBase
     private FileIoMonitor? _monitor;
     private CancellationTokenSource? _pipeCancellation;
     private Task? _pipeTask;
+    private readonly ServiceLoadTestController _loadTest = new();
+    private ServiceSafetyMonitor? _safetyMonitor;
+    private static readonly string CriticalPauseMarker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DeskPulse", "critical-safety-pause.flag");
 
     public DeskPulseWindowsService()
     {
@@ -50,6 +53,23 @@ public sealed class DeskPulseWindowsService : ServiceBase
     {
         _monitor = new FileIoMonitor(false);
         _monitor.Start();
+
+        var startupSettings = AppSettings.Load();
+        if (File.Exists(CriticalPauseMarker))
+        {
+            if (startupSettings.PauseLoggingAtStartupAfterSafetyTrigger)
+            {
+                _monitor.PauseLogging();
+            }
+            else
+            {
+                // The critical condition paused the current run, but persistence was not requested.
+                // Remove the stale marker so a service/Windows restart resumes logging normally.
+                try { File.Delete(CriticalPauseMarker); } catch { }
+            }
+        }
+        _safetyMonitor = new ServiceSafetyMonitor(WriteSafetyWarning, ActivateCriticalSafetyPause, () => _monitor?.IsLoggingPaused == true);
+        _safetyMonitor.Start();
         _pipeCancellation = new CancellationTokenSource();
         _pipeTask = Task.Run(() => PipeLoopAsync(_pipeCancellation.Token));
     }
@@ -58,6 +78,8 @@ public sealed class DeskPulseWindowsService : ServiceBase
     {
         _pipeCancellation?.Cancel();
         try { _pipeTask?.Wait(TimeSpan.FromSeconds(3)); } catch { }
+        _safetyMonitor?.Dispose();
+        _loadTest.Dispose();
         _monitor?.Dispose(); _monitor = null;
     }
     protected override void OnShutdown() => OnStop();
@@ -148,16 +170,68 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "STATUS": return _monitor.IsLoggingPaused
                 ? "DeskPulse service is running. Logging is paused."
                 : "DeskPulse service is running and monitoring activity.";
-            case "LOGGING_STATE": return _monitor.IsLoggingPaused ? "PAUSED" : "ACTIVE";
+            case "LOGGING_STATE": return File.Exists(CriticalPauseMarker) ? "CRITICAL_PAUSED" : (_monitor.IsLoggingPaused ? "PAUSED" : "ACTIVE");
+            case "SAFETY_STATUS": return _safetyMonitor?.GetStatus() ?? "ERROR|Safety monitor unavailable.";
             case "PAUSE_LOGGING": _monitor.PauseLogging(); return "OK|PAUSED";
-            case "RESUME_LOGGING": _monitor.ResumeLogging(); return "OK|ACTIVE";
+            case "RESUME_LOGGING":
+                try { if (File.Exists(CriticalPauseMarker)) File.Delete(CriticalPauseMarker); } catch { }
+                _safetyMonitor?.ClearCriticalState();
+                _monitor.ResumeLogging(); return "OK|ACTIVE";
             case "RELOAD_SETTINGS": _monitor.ReloadSettings(); return "OK";
+            case "START_LOAD_TEST": return StartLoadTest(command);
+            case "STOP_LOAD_TEST": return _loadTest.Stop(WriteLoadTestEvent);
+            case "LOAD_TEST_STATUS": return _loadTest.GetStatus();
             case "DELETE_RECORDS": return DeleteSelectedRecords(command);
             case "CLEAR_TABLE": return ClearTable(command);
             case "CLEAR_ALL_RECORDS": return ClearAllRecords();
             case "TRAY_STARTED": _monitor.WriteUserEvent("DeskPulseTrayStarted", "DeskPulse started (possible login)", "DeskPulse tray application started; this may coincide with a Windows user login"); return "OK";
             case "TRAY_STOPPED": _monitor.WriteUserEvent("DeskPulseTrayStopped", "DeskPulse tray stopped", "DeskPulse tray application closed"); return "OK";
             default: return "Unknown command.";
+        }
+    }
+
+    private string StartLoadTest(string command)
+    {
+        var parts = command.Split('|');
+        if (parts.Length != 4 ||
+            !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cpuPercent) ||
+            !double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var memoryPercent) ||
+            !int.TryParse(parts[3], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var durationSeconds))
+            return "ERROR|Invalid load-test request.";
+
+        return _loadTest.Start(cpuPercent, memoryPercent, durationSeconds, WriteLoadTestEvent);
+    }
+
+    private void WriteLoadTestEvent(string note)
+    {
+        try
+        {
+            _monitor?.WriteUserEvent("DeskPulseDiagnosticLoadTest", "DeskPulse diagnostic load test", note);
+        }
+        catch
+        {
+            try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "service-errors.log"), DateTime.Now + " " + note + Environment.NewLine); } catch { }
+        }
+    }
+
+
+    private void WriteSafetyWarning(string note)
+    {
+        try { _monitor?.WriteUserEvent("DeskPulseServiceSafetyWarning", "DeskPulse service resource warning", note); } catch { }
+    }
+
+    private void ActivateCriticalSafetyPause(string note)
+    {
+        try
+        {
+            _monitor?.WriteUserEvent("DeskPulseServiceSafetyCritical", "DeskPulse service safety pause", note);
+            Directory.CreateDirectory(Path.GetDirectoryName(CriticalPauseMarker)!);
+            File.WriteAllText(CriticalPauseMarker, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine + note);
+            _monitor?.PauseLogging();
+        }
+        catch (Exception ex)
+        {
+            try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "service-errors.log"), DateTime.Now + " Critical safety pause failed: " + ex + Environment.NewLine); } catch { }
         }
     }
 

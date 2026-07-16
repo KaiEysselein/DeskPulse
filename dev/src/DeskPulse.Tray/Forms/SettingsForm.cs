@@ -40,6 +40,15 @@ public partial class SettingsForm : Form
     private Button _cleanDatabaseWithRulesButton = null!;
     private Button _restartWindowsServiceButton = null!;
     private Label _windowsServiceStatusLabel = null!;
+    private NumericUpDown _safetyWarningCpuNumeric = null!;
+    private NumericUpDown _safetyCriticalCpuNumeric = null!;
+    private NumericUpDown _safetyWarningMemoryNumeric = null!;
+    private NumericUpDown _safetyCriticalMemoryNumeric = null!;
+    private NumericUpDown _safetyWarningSecondsNumeric = null!;
+    private NumericUpDown _safetyCriticalSecondsNumeric = null!;
+    private CheckBox _pauseLoggingAtStartupAfterSafetyTriggerCheckBox = null!;
+    private Button _saveSafetySettingsButton = null!;
+    private Button _resetSafetyDefaultsButton = null!;
     private CheckBox _trackWindowsSystemActivityCheckBox = null!;
     private Button _configureFilteredFileActivityProcessesButton = null!;
     private Label _filteredFileActivityProcessesSummaryLabel = null!;
@@ -445,6 +454,180 @@ public partial class SettingsForm : Form
         serviceGroup.Controls.Add(_restartWindowsServiceButton);
         serviceGroup.Controls.Add(_windowsServiceStatusLabel);
         _maintenanceHousekeepingTabPage.Controls.Add(serviceGroup);
+
+        var safeguardGroup = new GroupBox
+        {
+            Text = "Service resource safeguards",
+            Left = 16,
+            Top = 328,
+            Width = 820,
+            Height = 300,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+
+        var safeguardDescription = new Label
+        {
+            Left = 16,
+            Top = 26,
+            Width = 785,
+            Height = 42,
+            Text = "DeskPulse monitors its own service CPU and RAM use. A sustained warning is logged; a sustained critical condition pauses logging until you resume it manually."
+        };
+
+        safeguardGroup.Controls.Add(safeguardDescription);
+        safeguardGroup.Controls.Add(CreateSafetyLabel("Warning CPU (%):", 16, 82));
+        safeguardGroup.Controls.Add(CreateSafetyLabel("Critical CPU (%):", 280, 82));
+        safeguardGroup.Controls.Add(CreateSafetyLabel("Warning RAM (%):", 16, 122));
+        safeguardGroup.Controls.Add(CreateSafetyLabel("Critical RAM (%):", 280, 122));
+        safeguardGroup.Controls.Add(CreateSafetyLabel("Warning duration (s):", 16, 162));
+        safeguardGroup.Controls.Add(CreateSafetyLabel("Critical duration (s):", 280, 162));
+
+        _safetyWarningCpuNumeric = CreateSafetyNumeric(160, 78, 1, 99, 30, 1);
+        _safetyCriticalCpuNumeric = CreateSafetyNumeric(424, 78, 2, 100, 45, 1);
+        _safetyWarningMemoryNumeric = CreateSafetyNumeric(160, 118, 1, 99, 30, 1);
+        _safetyCriticalMemoryNumeric = CreateSafetyNumeric(424, 118, 2, 100, 45, 1);
+        _safetyWarningSecondsNumeric = CreateSafetyNumeric(160, 158, 1, 300, 5, 0);
+        _safetyCriticalSecondsNumeric = CreateSafetyNumeric(424, 158, 2, 600, 10, 0);
+
+        safeguardGroup.Controls.AddRange(new Control[]
+        {
+            _safetyWarningCpuNumeric, _safetyCriticalCpuNumeric,
+            _safetyWarningMemoryNumeric, _safetyCriticalMemoryNumeric,
+            _safetyWarningSecondsNumeric, _safetyCriticalSecondsNumeric
+        });
+
+        _pauseLoggingAtStartupAfterSafetyTriggerCheckBox = new CheckBox
+        {
+            Left = 16,
+            Top = 196,
+            Width = 505,
+            Height = 26,
+            Text = "Keep logging paused after restart following a critical trigger",
+            Checked = true,
+            AutoSize = false
+        };
+
+        var startupPauseHint = new Label
+        {
+            Left = 544,
+            Top = 190,
+            Width = 255,
+            Height = 40,
+            ForeColor = System.Drawing.SystemColors.GrayText,
+            Text = "On by default for safety. When enabled, the triggered safety pause remains until Resume Logging is selected."
+        };
+
+        var testHint = new Label
+        {
+            Left = 544,
+            Top = 80,
+            Width = 255,
+            Height = 76,
+            ForeColor = System.Drawing.SystemColors.GrayText,
+            Text = "Diagnostic load tests are hard-capped at 50%. Set critical thresholds at or below 50% when testing the safeguards."
+        };
+
+        _saveSafetySettingsButton = new Button
+        {
+            Text = "Save safeguard settings",
+            Left = 16,
+            Top = 240,
+            Width = 205,
+            Height = 32,
+            FlatStyle = FlatStyle.System
+        };
+        _saveSafetySettingsButton.Click += SaveSafetySettingsButton_Click;
+
+        _resetSafetyDefaultsButton = new Button
+        {
+            Text = "Reset defaults",
+            Left = 235,
+            Top = 240,
+            Width = 130,
+            Height = 32,
+            FlatStyle = FlatStyle.System
+        };
+        _resetSafetyDefaultsButton.Click += ResetSafetyDefaultsButton_Click;
+
+        safeguardGroup.Controls.Add(_pauseLoggingAtStartupAfterSafetyTriggerCheckBox);
+        safeguardGroup.Controls.Add(startupPauseHint);
+        safeguardGroup.Controls.Add(testHint);
+        safeguardGroup.Controls.Add(_saveSafetySettingsButton);
+        safeguardGroup.Controls.Add(_resetSafetyDefaultsButton);
+        _maintenanceHousekeepingTabPage.Controls.Add(safeguardGroup);
+    }
+
+    private static Label CreateSafetyLabel(string text, int left, int top) => new()
+    {
+        Text = text, Left = left, Top = top, Width = 140, Height = 24
+    };
+
+    private static NumericUpDown CreateSafetyNumeric(int left, int top, decimal minimum, decimal maximum, decimal value, int decimalPlaces) => new()
+    {
+        Left = left, Top = top, Width = 90, Height = 26, Minimum = minimum, Maximum = maximum,
+        Value = value, DecimalPlaces = decimalPlaces, Increment = decimalPlaces == 0 ? 1 : 0.5M
+    };
+
+    private void LoadSafetySettings(AppSettings settings)
+    {
+        _safetyWarningCpuNumeric.Value = ClampDecimal((decimal)settings.ServiceSafetyWarningCpuPercent, _safetyWarningCpuNumeric.Minimum, _safetyWarningCpuNumeric.Maximum);
+        _safetyCriticalCpuNumeric.Value = ClampDecimal((decimal)settings.ServiceSafetyCriticalCpuPercent, _safetyCriticalCpuNumeric.Minimum, _safetyCriticalCpuNumeric.Maximum);
+        _safetyWarningMemoryNumeric.Value = ClampDecimal((decimal)settings.ServiceSafetyWarningMemoryPercent, _safetyWarningMemoryNumeric.Minimum, _safetyWarningMemoryNumeric.Maximum);
+        _safetyCriticalMemoryNumeric.Value = ClampDecimal((decimal)settings.ServiceSafetyCriticalMemoryPercent, _safetyCriticalMemoryNumeric.Minimum, _safetyCriticalMemoryNumeric.Maximum);
+        _safetyWarningSecondsNumeric.Value = ClampDecimal(settings.ServiceSafetyWarningSustainedSeconds, _safetyWarningSecondsNumeric.Minimum, _safetyWarningSecondsNumeric.Maximum);
+        _safetyCriticalSecondsNumeric.Value = ClampDecimal(settings.ServiceSafetyCriticalSustainedSeconds, _safetyCriticalSecondsNumeric.Minimum, _safetyCriticalSecondsNumeric.Maximum);
+        _pauseLoggingAtStartupAfterSafetyTriggerCheckBox.Checked = settings.PauseLoggingAtStartupAfterSafetyTrigger;
+    }
+
+    private static decimal ClampDecimal(decimal value, decimal minimum, decimal maximum) => Math.Min(maximum, Math.Max(minimum, value));
+
+    private void ResetSafetyDefaultsButton_Click(object? sender, EventArgs e)
+    {
+        _safetyWarningCpuNumeric.Value = 30;
+        _safetyCriticalCpuNumeric.Value = 45;
+        _safetyWarningMemoryNumeric.Value = 30;
+        _safetyCriticalMemoryNumeric.Value = 45;
+        _safetyWarningSecondsNumeric.Value = 5;
+        _safetyCriticalSecondsNumeric.Value = 10;
+        _pauseLoggingAtStartupAfterSafetyTriggerCheckBox.Checked = true;
+    }
+
+    private void SaveSafetySettingsButton_Click(object? sender, EventArgs e)
+    {
+        if (_safetyWarningCpuNumeric.Value >= _safetyCriticalCpuNumeric.Value)
+        {
+            MessageBox.Show("The CPU warning threshold must be lower than the CPU critical threshold.", "Safeguard Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (_safetyWarningMemoryNumeric.Value >= _safetyCriticalMemoryNumeric.Value)
+        {
+            MessageBox.Show("The RAM warning threshold must be lower than the RAM critical threshold.", "Safeguard Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (_safetyWarningSecondsNumeric.Value >= _safetyCriticalSecondsNumeric.Value)
+        {
+            MessageBox.Show("The warning duration must be shorter than the critical duration.", "Safeguard Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            var settings = AppSettings.Load();
+            settings.ServiceSafetyWarningCpuPercent = (double)_safetyWarningCpuNumeric.Value;
+            settings.ServiceSafetyCriticalCpuPercent = (double)_safetyCriticalCpuNumeric.Value;
+            settings.ServiceSafetyWarningMemoryPercent = (double)_safetyWarningMemoryNumeric.Value;
+            settings.ServiceSafetyCriticalMemoryPercent = (double)_safetyCriticalMemoryNumeric.Value;
+            settings.ServiceSafetyWarningSustainedSeconds = (int)_safetyWarningSecondsNumeric.Value;
+            settings.ServiceSafetyCriticalSustainedSeconds = (int)_safetyCriticalSecondsNumeric.Value;
+            settings.PauseLoggingAtStartupAfterSafetyTrigger = _pauseLoggingAtStartupAfterSafetyTriggerCheckBox.Checked;
+            settings.Save();
+            _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS");
+            MessageBox.Show("The service safeguard settings were saved. Threshold changes apply to the running service; the restart-pause option applies after the next service or Windows restart.", "Safeguard Settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("The safeguard settings could not be saved.\n\n" + ex.Message, "Safeguard Settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private async void RestartWindowsServiceButton_Click(object? sender, EventArgs e)
@@ -830,6 +1013,7 @@ public partial class SettingsForm : Form
         _trackWindowsSystemActivityCheckBox.Checked = settings.TrackWindowsSystemActivity;
         _dataFolderTextBox.Text = settings.DataFolderPath;
         _ignoreTempFoldersCheckBox.Checked = settings.IgnoreTempFolders;
+        LoadSafetySettings(settings);
 
         LoadExtensionLists(settings);
     }
@@ -2736,6 +2920,13 @@ public partial class SettingsForm : Form
             DataFolderPath = dataFolder,
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = startWithWindows,
+            ServiceSafetyWarningCpuPercent = existingSettings.ServiceSafetyWarningCpuPercent,
+            ServiceSafetyCriticalCpuPercent = existingSettings.ServiceSafetyCriticalCpuPercent,
+            ServiceSafetyWarningMemoryPercent = existingSettings.ServiceSafetyWarningMemoryPercent,
+            ServiceSafetyCriticalMemoryPercent = existingSettings.ServiceSafetyCriticalMemoryPercent,
+            ServiceSafetyWarningSustainedSeconds = existingSettings.ServiceSafetyWarningSustainedSeconds,
+            ServiceSafetyCriticalSustainedSeconds = existingSettings.ServiceSafetyCriticalSustainedSeconds,
+            PauseLoggingAtStartupAfterSafetyTrigger = existingSettings.PauseLoggingAtStartupAfterSafetyTrigger,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
             LogExplorerFileActivity = true,
             FilteredFileActivityProcesses = new HashSet<string>(_filteredFileActivityProcesses, StringComparer.OrdinalIgnoreCase),

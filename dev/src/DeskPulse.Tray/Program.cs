@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
@@ -40,9 +40,178 @@ internal static class Program
             return;
         }
 
+        if (TryHandleDiagnosticLoadCommand(args))
+            return;
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new TrayAppContext());
+    }
+
+    private static bool TryHandleDiagnosticLoadCommand(string[] args)
+    {
+        if (args.Length == 0)
+            return false;
+
+        string? command = null;
+        string title = "DeskPulse Diagnostic Load Test";
+
+        if (args[0].Equals("--stop-service-load-test", StringComparison.OrdinalIgnoreCase) ||
+            args[0].Equals("--stop-load", StringComparison.OrdinalIgnoreCase))
+        {
+            command = "STOP_LOAD_TEST";
+        }
+        else if (args[0].Equals("--service-load-status", StringComparison.OrdinalIgnoreCase) ||
+                 args[0].Equals("--load-status", StringComparison.OrdinalIgnoreCase))
+        {
+            command = "LOAD_TEST_STATUS";
+        }
+        else if (args[0].Equals("--test-service-cpu", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadPercentAndDuration(args, out var percent, out var duration, out var error))
+            {
+                MessageBox.Show(error, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return true;
+            }
+            command = BuildLoadCommand(percent, 0, duration);
+        }
+        else if (args[0].Equals("--test-service-memory", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadPercentAndDuration(args, out var percent, out var duration, out var error))
+            {
+                MessageBox.Show(error, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return true;
+            }
+            command = BuildLoadCommand(0, percent, duration);
+        }
+        else if (args[0].Equals("--test-service-load", StringComparison.OrdinalIgnoreCase) ||
+                 args[0].Equals("--load", StringComparison.OrdinalIgnoreCase) ||
+                 args[0].Equals("-l", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadCombinedLoad(args, out var cpu, out var memory, out var duration, out var error))
+            {
+                MessageBox.Show(error, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return true;
+            }
+            command = BuildLoadCommand(cpu, memory, duration);
+        }
+        else
+        {
+            return false;
+        }
+
+        var response = ServicePipeClient.SendAsync(command).GetAwaiter().GetResult();
+        var isError = response.StartsWith("ERROR|", StringComparison.OrdinalIgnoreCase) ||
+                      response.StartsWith("DeskPulse service is unavailable", StringComparison.OrdinalIgnoreCase);
+
+        if (!isError && response.StartsWith("OK|STARTED|", StringComparison.OrdinalIgnoreCase))
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new DiagnosticLoadTestForm());
+        }
+        else
+        {
+            MessageBox.Show(FormatDiagnosticResponse(response), title, MessageBoxButtons.OK,
+                isError ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+        return true;
+    }
+
+    private static bool TryReadPercentAndDuration(string[] args, out double percent, out int duration, out string error)
+    {
+        percent = 0;
+        duration = 0;
+        error = "";
+        if (args.Length != 3 ||
+            !double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out percent) ||
+            !int.TryParse(args[2], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out duration))
+        {
+            error = "Use: DeskPulse.Tray.exe --test-service-cpu <percent> <seconds>\n\nor\n\nDeskPulse.Tray.exe --test-service-memory <percent> <seconds>";
+            return false;
+        }
+        return ValidateLoadValues(percent, 0, duration, out error);
+    }
+
+    private static bool TryReadCombinedLoad(string[] args, out double cpu, out double memory, out int duration, out string error)
+    {
+        cpu = 0;
+        memory = 0;
+        duration = 60;
+        error = "";
+
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (i + 1 >= args.Length)
+            {
+                error = "Every load-test option requires a value.";
+                return false;
+            }
+
+            var option = args[i];
+            var value = args[++i];
+            if (option.Equals("--cpu", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out cpu))
+                { error = "The CPU percentage is invalid."; return false; }
+            }
+            else if (option.Equals("--memory", StringComparison.OrdinalIgnoreCase) || option.Equals("--ram", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out memory))
+                { error = "The memory percentage is invalid."; return false; }
+            }
+            else if (option.Equals("--duration", StringComparison.OrdinalIgnoreCase) || option.Equals("--seconds", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out duration))
+                { error = "The duration is invalid."; return false; }
+            }
+            else
+            {
+                error = "Unknown option: " + option;
+                return false;
+            }
+        }
+
+        return ValidateLoadValues(cpu, memory, duration, out error);
+    }
+
+    private static bool ValidateLoadValues(double cpu, double memory, int duration, out string error)
+    {
+        error = "";
+        if (cpu < 0 || memory < 0 || cpu > 50 || memory > 50)
+        {
+            error = "CPU and memory targets must each be between 0% and 50%. Values above 50% are never permitted.";
+            return false;
+        }
+        if (cpu <= 0 && memory <= 0)
+        {
+            error = "Specify a CPU or memory target greater than zero.";
+            return false;
+        }
+        if (duration < 1 || duration > 300)
+        {
+            error = "Duration must be between 1 and 300 seconds.";
+            return false;
+        }
+        return true;
+    }
+
+    private static string BuildLoadCommand(double cpu, double memory, int duration) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"START_LOAD_TEST|{cpu}|{memory}|{duration}");
+
+    private static string FormatDiagnosticResponse(string response)
+    {
+        if (response.StartsWith("OK|STARTED|", StringComparison.OrdinalIgnoreCase))
+            return "The controlled diagnostic service load test has started.\n\n" + response.Replace('|', ' ');
+        if (response.Equals("OK|STOPPING", StringComparison.OrdinalIgnoreCase))
+            return "The diagnostic service load test is stopping.";
+        if (response.Equals("OK|NOT_RUNNING", StringComparison.OrdinalIgnoreCase))
+            return "No diagnostic service load test is running.";
+        if (response.StartsWith("OK|", StringComparison.OrdinalIgnoreCase))
+            return response[3..];
+        if (response.StartsWith("ERROR|", StringComparison.OrdinalIgnoreCase))
+            return response[6..];
+        return response;
     }
 }
 
@@ -57,6 +226,7 @@ public sealed class TrayAppContext : ApplicationContext
     private bool _loggingPaused;
     private Form? _activeForm;
     private readonly System.Windows.Forms.Timer _focusLossTimer;
+    private readonly System.Windows.Forms.Timer _safetyTimer;
 
     public TrayAppContext()
     {
@@ -65,6 +235,9 @@ public sealed class TrayAppContext : ApplicationContext
         _warningTrayIcon = AppIcon.Load(AppIconState.Warning);
         _trayIcon = new NotifyIcon { Icon = _normalTrayIcon, Text = AppInfo.AppName, Visible = true };
         _focusLossTimer = new System.Windows.Forms.Timer { Interval = 180 };
+        _safetyTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        _safetyTimer.Tick += async (_, _) => await RefreshSafetyStateAsync();
+        _safetyTimer.Start();
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
         AddMenuCommand("View Log...", OpenViewLog);
@@ -122,6 +295,21 @@ public sealed class TrayAppContext : ApplicationContext
         }
     }
 
+    private async Task RefreshSafetyStateAsync()
+    {
+        var response = await ServicePipeClient.SendAsync("SAFETY_STATUS");
+        if (!response.StartsWith("OK|", StringComparison.OrdinalIgnoreCase)) return;
+        var state = response.Split('|').FirstOrDefault(x => x.StartsWith("STATE=", StringComparison.OrdinalIgnoreCase))?[6..] ?? "Normal";
+        if (state.Equals("Warning", StringComparison.OrdinalIgnoreCase))
+            SetTrayState(AppIconState.Warning, "DeskPulse - Service resource warning");
+        else if (state.Equals("CriticalPaused", StringComparison.OrdinalIgnoreCase))
+        {
+            _loggingPaused = true; _pauseLoggingMenuItem.Text = "Resume Logging";
+            SetTrayState(AppIconState.Warning, "DeskPulse - Critical safety pause");
+        }
+        else if (!_loggingPaused) SetTrayState(AppIconState.Normal, AppInfo.AppName);
+    }
+
     private async Task RefreshLoggingStateAsync()
     {
         var response = await ServicePipeClient.SendAsync("LOGGING_STATE");
@@ -130,6 +318,14 @@ public sealed class TrayAppContext : ApplicationContext
 
     private void ApplyLoggingStateResponse(string response, bool showErrors)
     {
+        if (response.Equals("CRITICAL_PAUSED", StringComparison.OrdinalIgnoreCase))
+        {
+            _loggingPaused = true;
+            _pauseLoggingMenuItem.Text = "Resume Logging";
+            SetTrayState(AppIconState.Warning, "DeskPulse - Critical safety pause");
+            return;
+        }
+
         if (response.Equals("PAUSED", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("OK|PAUSED", StringComparison.OrdinalIgnoreCase))
         {
@@ -266,6 +462,7 @@ public sealed class TrayAppContext : ApplicationContext
         try { ServicePipeClient.SendAsync("TRAY_STOPPED").GetAwaiter().GetResult(); } catch { }
         CloseActiveForm();
         _focusLossTimer.Stop(); _focusLossTimer.Dispose();
+        _safetyTimer.Stop(); _safetyTimer.Dispose();
         _trayIcon.Visible = false; _trayIcon.Dispose();
         _normalTrayIcon.Dispose(); _pausedTrayIcon.Dispose(); _warningTrayIcon.Dispose();
         _menu.Dispose();

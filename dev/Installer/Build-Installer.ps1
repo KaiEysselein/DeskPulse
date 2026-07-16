@@ -1,9 +1,9 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $projectRoot
 $issFile = Join-Path $PSScriptRoot 'DeskPulse.iss'
-$version = '0.2.2.2'
+$version = '0.3.0.0'
 $versionFolder = "v$version"
 
 $candidates = @(

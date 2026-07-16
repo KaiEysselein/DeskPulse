@@ -1,211 +1,27 @@
-# DeskPulse 0.2.2.2 Handover
+# DeskPulse Repository and Release Handover
 
+## Current retained release
 
-Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
-## 0.2.2.2 cleanup and housekeeping update
+The current accepted and permanently retained DeskPulse milestone is **0.3.0.0**.
 
-Mapped-drive ETW paths are normalized automatically for newly logged records to their user-facing drive-letter form by removing the redirector token, server, and mapped share root. The temporary user-facing historical repair control has been removed in 0.2.2.2.
+- Repository: `https://github.com/KaiEysselein/DeskPulse`
+- GitHub release tag: `v0.3.0.0`
+- Retained release folder: `releases\v0.3.0.0`
+- Current approved installer copy: `releases\current`
+- Active development source: `dev`
+- Detailed technical handover: `dev\HANDOVER.md`
 
-- Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
+Version 0.3.0.0 promotes the tested 0.2.2.3 service-safeguard baseline. The promotion itself introduced no additional runtime feature.
 
-## Authoritative baseline
-
-This package is the complete DeskPulse 0.2.2.2 source and handover baseline. Historical entries in `CHANGELOG.md` retain their original version numbers; all active project, installer, application and documentation references are 0.2.2.2.
-
-Repository: https://github.com/KaiEysselein/DeskPulse
-
-## Architecture
-
-DeskPulse is split into three .NET 8 Windows projects:
-
-- `DeskPulse.Service`: privileged Windows service; ETW file monitoring, application monitoring, Windows startup and session events, database writes and named-pipe server.
-- `DeskPulse.Tray`: non-elevated WinForms tray application; Settings, View Log, Export, Maintenance, About and named-pipe client.
-- `DeskPulse.Shared`: shared models, settings, rules, SQLite access and monitoring logic.
-
-The service remains active when the tray closes or no interactive user is logged in. The tray does not request administrator elevation during normal operation.
-
-## Service and tray behaviour
-
-- Windows service name: `DeskPulse.Service`
-- Named pipe: `DeskPulse.Service.0.2`
-- Service startup mode: Automatic
-- Tray startup: per-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value named `DeskPulse.Tray`
-- Service/tray pipe ACL permits an authenticated non-elevated user to query status and send supported commands.
-
-User Activity includes Windows startup, logon/logoff, lock/unlock, `DeskPulse service started` and `DeskPulse started (possible login)`.
-
-## Data and settings
-
-- Shared settings: `%ProgramData%\DeskPulse\settings.json`
-- Default data folder: `%USERPROFILE%\Documents\DeskPulse`
-- Default database: `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`
-- Default export: `%USERPROFILE%\Documents\DeskPulse\DeskPulse-export.xlsx`
-
-Legacy registry settings are migrated into the shared settings file. The uninstaller intentionally preserves `Documents\DeskPulse`, including the activity database and exports, while removing program files, service registration, shared settings and startup registrations.
-
-## Completed 0.2.2.2 housekeeping
-
-### 0.2.2.2 cleanup changes
-
-### File Activity log presentation
-
-- File Activity includes a visible **Activity** column based on `InferredAction`, with `ActivityType` as fallback.
-- **Activity** is available in the Group by selector.
-- File, App and User log tables display times without fractional seconds. Stored database timestamps retain full precision.
-- The user-facing **Export Options** tab has been removed; standard export remains available using the retained/default layout.
-
-- Settings uses **Save**, **Save and Close**, and **Close** consistently on editable tabs; Close/X/Esc prompt before discarding unsaved changes.
-- Tray menu commands activate on the first click, restore an already-open window, and avoid duplicate top-level forms.
-- Tray menu text is **Quit DeskPulse**.
-- Database housekeeping streams service-side progress to the tray with real counts and stages.
-- Deletion progress is reported only when each 10% threshold is crossed.
-- Rules Import provides **Merge** and **Replace** modes.
-- Installer startup choice appears only on the final completion page.
-- Rule-based database housekeeping processes file and app activity only; user/session history is preserved.
-- User Activity uses one Log checkbox per supported predefined event, and unchecked events persist.
-- Reset Defaults remains available on File Activity, App Activity, and User Activity.
-
-
-- Service/tray/shared-library architecture.
-- Self-contained win-x64 publish output; target PCs do not require .NET.
-- Installer registers and starts the service and starts the tray at user login.
-- Comprehensive uninstall cleanup while preserving the Documents database.
-- Pause/Resume Logging tray toggle.
-- Service status command and corrected named-pipe permissions.
-- Maintenance command to restart the Windows service after UAC approval.
-- Context-sensitive Settings footer: Save, Save and Close, and Close on editable tabs; Import/Export only on Rules; Close only on Maintenance; the Windows-system tracking toggle saves immediately.
-- Single active top-level DeskPulse form.
-- Consistent form icons.
-- Full-result Log View sorting with reset to page 1.
-- Precise paging status such as `Showing 1,001 to 1,500 of 8,999 records.`
-- Default report range from earliest database record through today, plus **Today Only**.
-- Optional exclusion-rule creation when deleting records.
-- Startup, login, logout, lock and unlock logging under User Activity.
-- Removed the obsolete Event Type field from active database/log/UI use.
-
-## Build and release verification
-
-Run from the development folder:
-
-```powershell
-cd D:\Kai\GitHub\DeskPulse\dev
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-.\scripts\Build.ps1
-.\scripts\Publish.ps1
-.\Installer\Build-Installer.ps1
-```
-
-Before release, verify:
-
-1. Build succeeds with zero errors.
-2. Installer upgrades an existing installation.
-3. Exactly one tray icon appears after restart.
-4. `DeskPulse.Service` is Running after restart.
-5. Service status, pause/resume and service restart work from the tray.
-6. File, App and User Activity records are written.
-7. View Log sorting, pagination, deletion and export work.
-8. Uninstall removes service, application, startup entries and settings.
-9. `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db` remains after uninstall.
-
-## Important deployment rule
-
-Use either the installer or the manual service scripts for a test installation, not both at the same time. Before changing installation methods, remove the previous service/startup registration to avoid duplicate tray instances.
-
-
-## Absolute data-path migration
-
-DeskPulse 0.2.2.2 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
-
-
-
-## Windows system activity control
-
-Version 0.2.2.2 includes a global `TrackWindowsSystemActivity` setting, defaulting to `false`. Built-in exclusions are generated in code by `WindowsDefaultExclusions`; they are not persisted as editable user rules. While the option is disabled, DeskPulse excludes the complete Windows installation tree (`%WINDIR%\**`), selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These exclusions are evaluated before user rules and therefore cannot be overridden accidentally by broad Include patterns. The Settings rule grids merge the built-in rules for display and mark them as grey, read-only `Windows default` rows. Service-side database housekeeping uses the same exclusion policy for historical records.
-
-Version 0.2.2.2 retains the configurable `FilteredFileActivityProcesses` list introduced in 0.2.1.7. Matching is case-insensitive; selected processes are excluded from new File Activity logging and are also applied during rule-based historical cleanup. The legacy `LogExplorerFileActivity` setting remains only for migration compatibility and is not exposed as a separate user-facing option.
-
-## Latest correction
-
-- Fixed View Log **Create Rule → clean old data** so database deletion and compaction run through `DeskPulse.Service` instead of the non-elevated tray, preventing SQLite read-only errors.
-
-
-## Database write ownership
-
-All SQLite write operations initiated by the tray (selected-record deletion, rule cleanup, housekeeping, clearing one table, and clearing all activity) are now executed by DeskPulse.Service through the named pipe. The tray opens the activity database read-only for views, counts, statistics, and exports.
-
-## Baseline and next milestone
-
-Version **0.2.2.2** is the current cleanup and housekeeping baseline.
-
-A limited number of minor corrective or refinement builds may continue within the `0.2.2.x` line. These builds should remain narrowly scoped and should not introduce the larger service-safety feature set planned for the next milestone.
-
-The next fixed milestone is:
-
-`0.3.0.0`
-
-Version `0.3.0.0` will be the next permanently retained release and should include the agreed feature work once it is implemented, tested, and accepted.
-
-The approved `0.3.0.0` release artifacts must be copied to:
-
-`D:\Kai\GitHub\DeskPulse\releases\v0.3.0.0`
-
-The corresponding formal GitHub Release should use the tag:
-
-`v0.3.0.0`
-
-Intermediate `0.2.2.x` installers continue to replace the contents of:
-
-`D:\Kai\GitHub\DeskPulse\releases\current`
-
-Do not create permanent milestone folders or formal GitHub Releases for intermediate `0.2.2.x` builds.
-
-## Selected-record deletion stability
-
-- Fixed selected-record deletion waiting indefinitely: service write commands now use the monitor-owned database instance and shared database lock instead of pausing ETW and opening a competing database instance.
-- View Log deletion now awaits the service asynchronously so the form remains responsive.
-
-- Rules Import offers **Merge with existing rules** (default) or **Replace existing rules**. Merge updates matching File/App rules and adds new ones without duplicates; User Activity rules are unchanged.
-
-## Planned next phase
-
-Before fixing the next milestone at `0.3.0.0`, minor changes may still be completed and tested under the `0.2.2.x` version line.
-
-The next milestone feature scope includes the previously agreed service-safety work:
-
-- monitor DeskPulse.Service CPU and memory use;
-- configurable warning and critical thresholds;
-- configurable sustained-duration values;
-- warning-state tray icon;
-- session-only pause;
-- persistent pause until manually re-enabled;
-- persistent critical-state handling across restarts;
-- user-facing safety settings under Settings → Maintenance.
-
-This work is feature development and must not be silently included in a minor housekeeping build. Once complete and accepted, promote all active version, installer, publish, handover, verification, and release references to `0.3.0.0`.
-
-## Mandatory package delivery command chain
-
-Every future DeskPulse source/code ZIP must be accompanied in the same response by the complete PowerShell build, publish, installer-build and installer-launch chain, updated to the package version:
-
-```powershell
-cd D:\Kai\GitHub\DeskPulse\dev
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\Build.ps1
-.\scripts\Publish.ps1
-.\Installer\Build-Installer.ps1
-Start-Process ".\publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe"
-```
-
-
-## Workspace and release-retention policy
-
-The DeskPulse workspace is organized as:
+## Repository structure
 
 ```text
 D:\Kai\GitHub\DeskPulse\
 ├── .git\
+├── HANDOVER.md
 ├── GitHub-facing documentation
 ├── dev\
+│   ├── HANDOVER.md
 │   ├── DeskPulse.sln
 │   ├── Installer\
 │   ├── Resources\
@@ -213,17 +29,32 @@ D:\Kai\GitHub\DeskPulse\
 │   ├── src\
 │   └── docs\
 └── releases\
+    ├── current\
+    └── v0.3.0.0\
 ```
 
-The active Git repository root is `D:\Kai\GitHub\DeskPulse`. GitHub-facing documentation remains in that root. Application source, build scripts, installer definitions, shared resources, and technical verification records are under `dev`.
+The repository-root handover records release and repository continuity. Detailed implementation, build, architecture, safeguards, diagnostic commands and technical verification belong in `dev\HANDOVER.md`.
 
-Generated publish output remains under `dev\publish` and is excluded from Git.
+## Release-retention policy
 
-Only milestone versions matching `v0.x.0.0` are retained permanently under `releases\v<version>` and, where applicable, as GitHub Releases. Intermediate versions retain their exact internal version but overwrite the approved artifacts under `releases\current`.
+Only milestone versions matching `v0.x.0.0` are retained permanently under `releases\v<version>` and may receive a formal GitHub Release. Intermediate builds retain their exact internal version but replace the approved artifacts under `releases\current`.
 
-The next planned retained milestone is `v0.3.0.0`. Minor `0.2.2.x` builds remain replaceable intermediate builds.
+Historical version entries must remain unchanged in `CHANGELOG.md` and archived verification records. Active version references must reflect the current working or released version.
 
-`dev\Installer\Build-Installer.ps1` enforces this policy for installer output.
+## 0.3.0.0 release scope
 
-For one-off repository, GitHub, or local maintenance actions, provide exact PowerShell commands directly in the conversation. Do not create downloadable PowerShell fix scripts unless the user explicitly requests one.
+The milestone includes service CPU and RAM safeguards, sustained warning and critical thresholds, critical safety pause, restart-persistent pause enabled by default, explicit recovery through **Resume Logging**, safeguard settings under **Settings → Maintenance**, and controlled diagnostic service-load tests hard-capped at 50% CPU and 50% RAM.
 
+## Known deferred item
+
+The tray-state icon artwork may show a non-transparent background on some Windows themes. This is a deferred visual correction and is not represented as completed in 0.3.0.0.
+
+## Future work
+
+- Correct transparency in all tray-state icon assets.
+- Consider optional installer support for starting the tray for all Windows users. Resolve concurrent sessions, per-session duplicate prevention, shared versus per-user settings, and database ownership before implementation.
+- Keep future repository-facing and technical handovers separate and update each only for its intended scope.
+
+## Release procedure
+
+Build and verify from `dev`. For the accepted 0.3.0.0 milestone, the installer should be present under both `releases\current` and `releases\v0.3.0.0`. The corresponding formal GitHub Release uses tag `v0.3.0.0`.
