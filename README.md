@@ -1,8 +1,12 @@
-# DeskPulse 0.2.2.2
+﻿# DeskPulse 0.2.2.2
+
+<p align="center">
+  <img src="Resources/DeskPulse_Normal.png" alt="DeskPulse icon" width="220">
+</p>
 
 
 Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
-Version 0.2.2.2 is a cleanup and housekeeping release. It renames the application icon asset to `DeskPulse.ico`, removes obsolete single-project remnants, and reorganizes verification records without intentionally changing runtime behaviour.
+Version 0.2.2.2 consolidates application resources under a shared `Resources` folder and provides distinct tray icons for normal, paused, and service-warning states.
 
 - Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
 
@@ -59,6 +63,15 @@ publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe
 ```
 
 The installer registers `DeskPulse.Service` for automatic startup. Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` using the value `DeskPulse.Tray`.
+
+
+## Tray status icons
+
+- **Normal** — DeskPulse is connected and logging is active.
+- **Paused** — logging is temporarily paused for the current session.
+- **Warning** — the service is unavailable or requires attention.
+
+The authoritative image and icon assets are stored once under `Resources`.
 
 ## Main controls
 

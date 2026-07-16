@@ -1,0 +1,13 @@
+DeskPulse shared resources and status icons
+
+Copy this package over the DeskPulse repository root, preserving folder paths.
+Delete the stale files listed in DELETE_STALE_RESOURCE_FILES.txt.
+
+Behaviour:
+- Normal icon: logging active.
+- Paused icon: current logging pause state.
+- Warning icon: service response unavailable or requires attention.
+
+The persistent “pause indefinitely until manually enabled” behaviour remains a separate future feature; this package provides the resources and current tray-state switching.
+
+Build and publish after applying because C# and project files changed.

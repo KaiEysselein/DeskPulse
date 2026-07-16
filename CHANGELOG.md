@@ -1,6 +1,8 @@
-# Changelog
+﻿# Changelog
 
 ## 0.2.2.2 - 2026-07-16
+- Consolidated normal, paused, and warning PNG/ICO assets into one shared `Resources` folder.
+- Added tray icon state changes for active logging, temporary pause, and service-warning conditions.
 - Renamed the application icon asset from `file-logger.ico` to `DeskPulse.ico` in the Service and Tray projects and updated all active code and project references.
 - Removed obsolete root-level remnants of the former single-project application layout from the active source package.
 - Reorganized build verification and release audit records under `docs\verification` and `docs\archive`.

@@ -49,6 +49,9 @@ internal static class Program
 public sealed class TrayAppContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
+    private readonly Icon _normalTrayIcon;
+    private readonly Icon _pausedTrayIcon;
+    private readonly Icon _warningTrayIcon;
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _pauseLoggingMenuItem;
     private bool _loggingPaused;
@@ -57,7 +60,10 @@ public sealed class TrayAppContext : ApplicationContext
 
     public TrayAppContext()
     {
-        _trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Text = AppInfo.AppName, Visible = true };
+        _normalTrayIcon = AppIcon.Load(AppIconState.Normal);
+        _pausedTrayIcon = AppIcon.Load(AppIconState.Paused);
+        _warningTrayIcon = AppIcon.Load(AppIconState.Warning);
+        _trayIcon = new NotifyIcon { Icon = _normalTrayIcon, Text = AppInfo.AppName, Visible = true };
         _focusLossTimer = new System.Windows.Forms.Timer { Interval = 180 };
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
@@ -129,7 +135,7 @@ public sealed class TrayAppContext : ApplicationContext
         {
             _loggingPaused = true;
             _pauseLoggingMenuItem.Text = "Resume Logging";
-            _trayIcon.Text = "DeskPulse - Logging paused";
+            SetTrayState(AppIconState.Paused, "DeskPulse - Logging paused");
             return;
         }
 
@@ -138,9 +144,11 @@ public sealed class TrayAppContext : ApplicationContext
         {
             _loggingPaused = false;
             _pauseLoggingMenuItem.Text = "Pause Logging";
-            _trayIcon.Text = AppInfo.AppName;
+            SetTrayState(AppIconState.Normal, AppInfo.AppName);
             return;
         }
+
+        SetTrayState(AppIconState.Warning, "DeskPulse - Service attention required");
 
         if (showErrors)
             MessageBox.Show(response, "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -258,15 +266,21 @@ public sealed class TrayAppContext : ApplicationContext
         try { ServicePipeClient.SendAsync("TRAY_STOPPED").GetAwaiter().GetResult(); } catch { }
         CloseActiveForm();
         _focusLossTimer.Stop(); _focusLossTimer.Dispose();
-        _trayIcon.Visible = false; _trayIcon.Dispose(); _menu.Dispose();
+        _trayIcon.Visible = false; _trayIcon.Dispose();
+        _normalTrayIcon.Dispose(); _pausedTrayIcon.Dispose(); _warningTrayIcon.Dispose();
+        _menu.Dispose();
         base.ExitThreadCore();
     }
 
-    private static Icon LoadTrayIcon()
+    private void SetTrayState(AppIconState state, string tooltip)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "DeskPulse.ico");
-        if (File.Exists(path)) return new Icon(path);
-        return Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? "") ?? SystemIcons.Application;
+        _trayIcon.Icon = state switch
+        {
+            AppIconState.Paused => _pausedTrayIcon,
+            AppIconState.Warning => _warningTrayIcon,
+            _ => _normalTrayIcon
+        };
+        _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
     }
 }
 

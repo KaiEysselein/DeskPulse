@@ -1,0 +1,14 @@
+DeskPulse README/image housekeeping
+
+Delete this stale file from the repository:
+
+src\DeskPulse.Tray\file-logger.png
+
+Keep:
+
+src\DeskPulse.Tray\DeskPulse.png
+src\DeskPulse.Tray\DeskPulse.ico
+src\DeskPulse.Service\DeskPulse.ico
+
+Copy README.md and the src folder from this package over the repository root,
+preserving the folder structure.
