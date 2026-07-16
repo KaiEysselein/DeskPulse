@@ -1,115 +1,105 @@
-﻿# DeskPulse 0.2.2.2
+# DeskPulse
 
-<p align="center">
-  <img src="Resources/DeskPulse_Normal.png" alt="DeskPulse icon" width="220">
-</p>
+<table>
+<tr>
+<td width="68%" valign="top">
 
+## Windows activity logging without the clutter
 
-Tray-opened forms close automatically after external focus loss, and log views support a persisted 24-hour or 12-hour AM/PM time display.
-Version 0.2.2.2 consolidates application resources under a shared `Resources` folder and provides distinct tray icons for normal, paused, and service-warning states.
+**DeskPulse** is a Windows activity logger built around a background Windows service and a lightweight per-user tray application.
 
-- Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (`DeskPulse.Tray`); the Windows service starts independently.
+It records selected file, application, user-session, and Windows activity into a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning, and exporting recorded data.
 
-DeskPulse is a Windows activity logger split into a privileged Windows service and a normal per-user tray application.
+**Current version:** `0.2.2.2`
 
-## Architecture
+[Download the latest installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
-- `DeskPulse.Service` owns ETW file monitoring, application monitoring, Windows startup/session events and database writes.
-- `DeskPulse.Tray` provides the tray menu, Settings, View Log, Export, Maintenance and About without requiring elevation.
-- `DeskPulse.Shared` contains models, rules, settings, database access and shared monitoring logic.
-- The service and tray communicate through the local named pipe `DeskPulse.Service.0.2`.
+</td>
+<td width="32%" align="center" valign="top">
+
+<img src="Resources/DeskPulse_Normal.png" alt="DeskPulse" width="260">
+
+</td>
+</tr>
+</table>
+
+## What DeskPulse does
+
+DeskPulse separates privileged monitoring from the normal desktop interface:
+
+- **DeskPulse.Service** runs in the background, monitors activity, and owns all database writes.
+- **DeskPulse.Tray** provides the tray menu, Settings, View Log, Export, Maintenance, and About interfaces.
+- **DeskPulse.Shared** contains the common settings, rules, models, database access, and monitoring logic.
+
+The application is designed for local use. Activity data remains on the computer unless the user explicitly exports it.
+
+## Main capabilities
+
+- File and folder activity logging
+- Application activity logging
+- Windows startup, shutdown, lock, unlock, logon, and logoff events
+- Rule-based Include and Exclude filtering
+- Configurable Windows-system activity suppression
+- Application-based File Activity filtering
+- Paged log views with details and export
+- Database cleanup using the current rules
+- Temporary pause and resume control
+- Windows service status and maintenance controls
+- SQLite storage under the user’s Documents folder
+
+## Status icons
+
+DeskPulse uses three tray states:
+
+| State | Meaning |
+|---|---|
+| **Normal** | Logging is active |
+| **Paused** | Logging is temporarily paused |
+| **Warning** | The service is unavailable or requires attention |
+
+The shared image and icon resources are stored under:
+
+```text
+Resources\
+```
 
 ## Data locations
 
-- Shared settings: `%ProgramData%\DeskPulse\settings.json`
-- Activity database and exports: `%USERPROFILE%\Documents\DeskPulse`
-- Default database: `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`
+| Purpose | Location |
+|---|---|
+| Shared settings | `%ProgramData%\DeskPulse\settings.json` |
+| Activity database | `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db` |
+| Exports | `%USERPROFILE%\Documents\DeskPulse` |
 
-The uninstaller removes the program, service, startup registrations and settings, but intentionally preserves the database and exports in `Documents\DeskPulse`.
+The uninstaller removes the application, service, startup registrations, and application settings. The activity database and exports under `Documents\DeskPulse` are intentionally preserved.
 
-## Filtered File Activity applications
+## Activity filtering
 
-Settings > General > Activity logging includes **Configure filtered file applications...**. The left list is populated from distinct application/process names already present in File Activity and shows record counts. Move applications to the right to suppress their future File Activity records. Process matching is case-insensitive. **Clean database with current rules...** also removes existing File Activity records attributed to the currently filtered applications.
+DeskPulse supports user-defined Include and Exclude rules for file, folder, application, and user activity.
 
-## Build
+Built-in Windows-system exclusions protect against high-volume background activity when **Track Windows system activity** is disabled. These read-only defaults take precedence over user Include rules.
 
-Open PowerShell in the repository root:
+File Activity can also be filtered by the application responsible for the event. This helps suppress repetitive activity from applications such as Windows File Explorer while retaining activity generated by other programs.
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-.\scripts\Build.ps1
-.\scripts\Publish.ps1
-```
+## Database ownership
 
-Published self-contained x64 applications are created under:
+All SQLite write operations are performed by `DeskPulse.Service`, including:
 
-- `publish\v0.2.2.2\service\DeskPulse.Service.exe`
-- `publish\v0.2.2.2\tray\DeskPulse.Tray.exe`
+- normal activity logging;
+- selected-record deletion;
+- rule cleanup;
+- database housekeeping;
+- clearing an activity table;
+- clearing all recorded activity.
 
-The target PC does not require .NET to be installed.
+The tray opens the database read-only for views, counts, statistics, and exports.
 
-## Installer
+## Project links
 
-After publishing:
+- [Releases](https://github.com/KaiEysselein/DeskPulse/releases)
+- [Change log](CHANGELOG.md)
+- [Roadmap](ROADMAP.md)
+- [Backlog](BACKLOG.md)
+- [License](LICENSE)
 
-```powershell
-.\Installer\Build-Installer.ps1
-```
-
-The installer is created at:
-
-```text
-publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe
-```
-
-The installer registers `DeskPulse.Service` for automatic startup. Tray autostart is controlled per user through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` using the value `DeskPulse.Tray`.
-
-
-## Tray status icons
-
-- **Normal** — DeskPulse is connected and logging is active.
-- **Paused** — logging is temporarily paused for the current session.
-- **Warning** — the service is unavailable or requires attention.
-
-The authoritative image and icon assets are stored once under `Resources`.
-
-## Main controls
-
-- **Pause Logging / Resume Logging** in the tray menu temporarily stops and restarts file and program monitoring without stopping the service.
-- **Service status** reports service connectivity and logging state.
-- **Settings → Maintenance → Restart Windows Service** restarts the service after UAC approval.
-- Only one top-level DeskPulse form is kept open at a time.
-
-## Repository
-
-Project page: https://github.com/KaiEysselein/DeskPulse
-
-License: GNU GPL v3.
-
-
-## Absolute data-path migration
-
-DeskPulse 0.2.2.2 normalizes legacy relative data paths to an absolute path under the interactive user's Documents folder. The installer initializes shared settings as the original user before starting the LocalSystem service. The default database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`.
-
-
-
-### Windows system activity protection
-
-Settings → General → Activity logging includes **Track Windows system activity**. It is disabled by default, causing DeskPulse to exclude the complete Windows installation folder (`%WINDIR%\**`) together with selected ProgramData locations, the Recycle Bin and high-volume Windows processes. These built-in rules are shown as grey, read-only **Windows default** rows in the File Activity and App Activity rule tabs and take precedence over user Include rules. Database housekeeping applies the same policy to historical records. Enable the option only when Windows internals need to be investigated; it can materially increase event volume, CPU use and database growth.
-
-Settings → General → Activity logging also includes **Log file activity caused by Windows File Explorer**. It is enabled by default. Disable it to suppress File Activity records attributed to `explorer.exe`, including many folder browsing, preview, copy, move, rename, delete, and double-click/open events. Activity subsequently generated by the opened application remains eligible for logging. Database housekeeping applies this setting to historical File Activity records.
-
-
-## Database write ownership
-
-All SQLite write operations initiated by the tray (selected-record deletion, rule cleanup, housekeeping, clearing one table, and clearing all activity) are now executed by DeskPulse.Service through the named pipe. The tray opens the activity database read-only for views, counts, statistics, and exports.
-
-
-## Settings button behaviour
-
-- General and Rules use **Save** and **Cancel** because changes are staged.
-- Rule import/export controls appear only on the Rules tab.
-- Maintenance uses **Close** because its operations execute immediately.
-- **Track Windows system activity** is saved immediately when toggled.
-
-- Rules Import offers **Merge with existing rules** (default) or **Replace existing rules**. Merge updates matching File/App rules and adds new ones without duplicates; User Activity rules are unchanged.
+DeskPulse is licensed under the **GNU General Public License v3.0**.
