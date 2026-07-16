@@ -1,10 +1,15 @@
-# Build and publish output
+# Development build and publish output
 bin/
 obj/
 publish/
 artifacts/
 Installer/Output/
 TestResults/
+
+# Local release artifacts
+releases/**/*.exe
+releases/**/*.msi
+releases/**/*.zip
 
 # Visual Studio / VS Code
 .vs/

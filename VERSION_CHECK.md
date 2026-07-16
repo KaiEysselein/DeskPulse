@@ -11,16 +11,18 @@ Version **0.2.2.2** is the locked active baseline. Historical version numbers in
 - `DeskPulse.Service.csproj`: `0.2.2.2`
 - `DeskPulse.Tray.csproj`: `0.2.2.2`
 - Inno Setup installer and output filename: `0.2.2.2`
-- Publish folders: `publish\v0.2.2.2\service` and `publish\v0.2.2.2\tray`
+- Development root: `dev`
+- Solution: `dev\DeskPulse.sln`
+- Publish folders: `dev\publish\v0.2.2.2\service` and `dev\publish\v0.2.2.2\tray`
 - README, HANDOVER, ROADMAP, GITHUB_RELEASE and current CHANGELOG entry: `0.2.2.2`
 - GitHub repository: `https://github.com/KaiEysselein/DeskPulse`
 - Pipe ACL package: `System.IO.Pipes.AccessControl` `5.0.0`
 
 ## Deployment checks
 
-- [ ] `Build.ps1` completes with zero errors.
-- [ ] `Publish.ps1` creates both self-contained executables under `publish\v0.2.2.2`.
-- [ ] `Build-Installer.ps1` creates `publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe`.
+- [ ] From `dev`, `scripts\Build.ps1` completes with zero errors.
+- [ ] `dev\scripts\Publish.ps1` creates both self-contained executables under `dev\publish\v0.2.2.2`.
+- [ ] `dev\Installer\Build-Installer.ps1` creates `dev\publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe`.
 - [ ] The completed installer is copied to the workspace-level `releases\current` folder.
 - [ ] A permanent `releases\v<version>` copy is created only when the version matches `0.x.0.0`.
 - [ ] `DeskPulse.Service` starts automatically after reboot.

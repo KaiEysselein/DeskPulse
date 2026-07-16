@@ -17,11 +17,29 @@ It records selected file, application, user-session, and Windows activity into a
 </td>
 <td width="32%" align="center" valign="top">
 
-<img src="Resources/DeskPulse_Normal.png" alt="DeskPulse" width="260">
+<img src="dev/Resources/DeskPulse_Normal.png" alt="DeskPulse" width="260">
 
 </td>
 </tr>
 </table>
+
+## Repository structure
+
+```text
+DeskPulse\
+├── dev\
+│   ├── Installer\
+│   ├── Resources\
+│   ├── scripts\
+│   ├── src\
+│   └── DeskPulse.sln
+├── releases\
+└── project documentation in the repository root
+```
+
+- [`dev`](dev) contains application source code, build scripts, installer definitions, shared resources, and technical verification records.
+- `releases` is the local artifact area for the latest approved intermediate installer and retained `v0.x.0.0` milestones.
+- GitHub-facing documentation remains in the repository root.
 
 ## What DeskPulse does
 
@@ -55,7 +73,7 @@ Activity data remains on the computer unless the user explicitly exports it.
 | **Paused** | Logging is temporarily paused |
 | **Warning** | The service is unavailable or requires attention |
 
-Shared artwork and icon resources are stored under `Resources`.
+Shared artwork and icon resources are stored under [`dev/Resources`](dev/Resources).
 
 ## Data locations
 

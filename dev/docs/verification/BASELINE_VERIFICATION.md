@@ -9,22 +9,25 @@ Verified in the source package:
 - Active application version constant: 0.2.2.2
 - Shared, Service and Tray project versions: 0.2.2.2
 - Installer version and output filename: 0.2.2.2
-- Publish folders: `publish\v0.2.2.2\service` and `publish\v0.2.2.2\tray`
+- Repository root: `D:\Kai\GitHub\DeskPulse`
+- Development root: `dev`
+- Publish folders: `dev\publish\v0.2.2.2\service` and `dev\publish\v0.2.2.2\tray`
 - README, HANDOVER, ROADMAP, VERSION_CHECK, GITHUB_RELEASE and current CHANGELOG release: 0.2.2.2
 - GitHub repository: `https://github.com/KaiEysselein/DeskPulse`
 - Historical version references are confined to release history and backward-compatibility comments.
 - Tray source contains no direct SQLite write mode or SQL INSERT, UPDATE, DELETE or VACUUM statements.
-- `DATABASE_WRITE_AUDIT.md` records the service-owned database-write boundary.
+- Root `DATABASE_WRITE_AUDIT.md` records the service-owned database-write boundary.
 
 Final release remains conditional on successful local execution of:
 
 ```powershell
+cd D:\Kai\GitHub\DeskPulse\dev
 .\scripts\Build.ps1
 .\scripts\Publish.ps1
 .\Installer\Build-Installer.ps1
 ```
 
-and the acceptance checklist in `VERSION_CHECK.md`.
+and the acceptance checklist in the repository-root `VERSION_CHECK.md`.
 
 ## Selected-record deletion stability
 

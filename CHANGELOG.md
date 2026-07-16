@@ -1,6 +1,8 @@
 # Changelog
 
 ## 0.2.2.2 - 2026-07-16
+- Finalized the repository layout with GitHub-facing documentation and Git metadata at the repository root, application development content under `dev`, and approved local artifacts under `releases`.
+- Updated active documentation, image links, build instructions, verification paths, and handover notes for the final workspace layout.
 - Added the workspace-level `dev` and `releases` separation.
 - Added milestone-only release retention: permanent releases are kept only for versions matching `v0.x.0.0`; intermediate installers replace `releases\current`.
 - Updated the installer build workflow to copy approved installers into the correct local release folder automatically.

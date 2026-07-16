@@ -7,7 +7,7 @@ DeskPulse 0.2.2.2 is limited to repository cleanup, documentation organization, 
 ## Audit results
 
 - Active source and project version: 0.2.2.2.
-- Installer output: `publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe`.
+- Installer output: `dev\publish\v0.2.2.2\installer\DeskPulse_Setup_0.2.2.2.exe`.
 - Icon asset: `DeskPulse.ico` in both Service and Tray projects.
 - Obsolete root-level single-project remnants are absent from the package.
 - Current and historical verification records are separated under `docs`.

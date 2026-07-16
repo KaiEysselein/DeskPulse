@@ -85,9 +85,10 @@ Legacy registry settings are migrated into the shared settings file. The uninsta
 
 ## Build and release verification
 
-Run from the repository root:
+Run from the development folder:
 
 ```powershell
+cd D:\Kai\GitHub\DeskPulse\dev
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 .\scripts\Build.ps1
 .\scripts\Publish.ps1
@@ -148,6 +149,7 @@ Version **0.2.2.2** is the cleanup and housekeeping baseline represented by this
 Every future DeskPulse source/code ZIP must be accompanied in the same response by the complete PowerShell build, publish, installer-build and installer-launch chain, updated to the package version:
 
 ```powershell
+cd D:\Kai\GitHub\DeskPulse\dev
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\scripts\Build.ps1
 .\scripts\Publish.ps1
@@ -162,15 +164,24 @@ The DeskPulse workspace is organized as:
 
 ```text
 D:\Kai\GitHub\DeskPulse\
+├── .git\
+├── GitHub-facing documentation
 ├── dev\
+│   ├── DeskPulse.sln
+│   ├── Installer\
+│   ├── Resources\
+│   ├── scripts\
+│   ├── src\
+│   └── docs\
 └── releases\
 ```
 
-The active Git repository is `dev`. Generated publish output remains under `dev\publish` and is excluded from Git.
+The active Git repository root is `D:\Kai\GitHub\DeskPulse`. GitHub-facing documentation remains in that root. Application source, build scripts, installer definitions, shared resources, and technical verification records are under `dev`.
+
+Generated publish output remains under `dev\publish` and is excluded from Git.
 
 Only milestone versions matching `v0.x.0.0` are retained permanently under `releases\v<version>` and, where applicable, as GitHub Releases. Intermediate versions retain their exact internal version but overwrite the approved artifacts under `releases\current`.
 
-`Installer\Build-Installer.ps1` enforces this policy for installer output.
+`dev\Installer\Build-Installer.ps1` enforces this policy for installer output.
 
 For one-off repository, GitHub, or local maintenance actions, provide exact PowerShell commands directly in the conversation. Do not create downloadable PowerShell fix scripts unless the user explicitly requests one.
-
