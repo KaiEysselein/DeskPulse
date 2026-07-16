@@ -1,10 +1,10 @@
-# Build output
+# Build and publish output
 bin/
 obj/
-
-# Publish output
 publish/
 artifacts/
+Installer/Output/
+TestResults/
 
 # Visual Studio / VS Code
 .vs/
@@ -40,28 +40,17 @@ DeskPulse-startup.log
 *.sqlite-wal
 *.sqlite-shm
 
-# Temporary files
+# Temporary and packaged files
 *.tmp
 *.temp
 *.bak
-
-# Windows files
-Thumbs.db
-Desktop.ini
-
-# Installer / packaged output
 *.zip
 *.msi
 *.exe
 
-# Keep the current public installer in the repository
-!publish/
-publish/*
-!publish/v0.2.2.2/
-publish/v0.2.2.2/*
-!publish/v0.2.2.2/installer/
-publish/v0.2.2.2/installer/*
-!publish/v0.2.2.2/installer/DeskPulse_Setup_0.2.2.2.exe
+# Windows files
+Thumbs.db
+Desktop.ini
 
 # Local cleanup and folder scans
 _cleanup_quarantine/
