@@ -54,6 +54,15 @@ Desktop.ini
 *.msi
 *.exe
 
+# Keep the current public installer in the repository
+!publish/
+publish/*
+!publish/v0.2.2.2/
+publish/v0.2.2.2/*
+!publish/v0.2.2.2/installer/
+publish/v0.2.2.2/installer/*
+!publish/v0.2.2.2/installer/DeskPulse_Setup_0.2.2.2.exe
+
 # Local cleanup and folder scans
 _cleanup_quarantine/
 _DeskPulseFolderScan_*/

@@ -12,7 +12,7 @@ It records selected file, application, user-session, and Windows activity into a
 
 **Current version:** `0.2.2.2`
 
-[Download the latest installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
+[Download DeskPulse 0.2.2.2 installer](https://github.com/KaiEysselein/DeskPulse/raw/refs/heads/main/publish/v0.2.2.2/installer/DeskPulse_Setup_0.2.2.2.exe)
 
 </td>
 <td width="32%" align="center" valign="top">
