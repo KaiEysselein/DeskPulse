@@ -33,6 +33,14 @@ GitHub-facing documentation remains at the repository root. Application source, 
 
 `dev\publish` is temporary generated output and is ignored by Git.
 
+
+## Current milestone
+
+- Version: `0.3.0.0`
+- GitHub tag: `v0.3.0.0`
+- Permanent local folder: `releases\v0.3.0.0`
+- Installer: `DeskPulse_Setup_0.3.0.0.exe`
+
 ## Permanent milestone releases
 
 Permanent local archives and GitHub Releases are created only for versions matching `v0.x.0.0`, such as `v0.2.0.0` and `v0.3.0.0`.

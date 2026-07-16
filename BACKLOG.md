@@ -1,25 +1,29 @@
 # DeskPulse Feature Backlog
 
-This file records feature and enhancement requests that are intentionally excluded from the 0.2.2.2 cleanup release.
+This file records work intentionally deferred beyond the accepted `0.3.0.0` milestone.
 
-## Pause modes and icon states
+## Multi-user tray startup
 
-### Pause for this session
+- Add an installer option to start `DeskPulse.Tray` for every Windows user on the machine.
+- Prefer a machine-wide **At logon of any user** scheduled task over a simple HKLM Run entry.
+- Resolve concurrent-session behaviour and prevent duplicate tray instances within each user session.
+- Confirm whether settings and database ownership remain shared or require per-user separation.
+- Preserve the automatic machine-wide Windows service independently of tray startup.
 
-- Non-persistent pause.
-- Resets after the DeskPulse service or Windows restarts.
-- Uses a distinct tray icon so the temporary state is immediately visible.
+## Tray icon transparency
 
-### Pause indefinitely
+- Rebuild Normal, Paused, and Warning ICO resources with true alpha transparency at all required Windows icon sizes.
+- Verify appearance on light and dark Windows themes and at common tray scaling levels.
 
-- Persistent pause across service and Windows restarts.
-- Remains active until the user explicitly enables logging.
-- Uses a separate tray icon from the session-only pause state.
+## Service and diagnostics refinements
 
-### Critical service-threshold response
+- Add structured and versioned named-pipe request/response contracts.
+- Expand service-health, reconnect, and diagnostic-history views.
+- Add installer logging and clearer upgrade/recovery diagnostics.
 
-- Integrate the persistent pause state with the planned DeskPulse service CPU/RAM safeguards.
-- At a sustained warning threshold, log one warning and continue.
-- At a sustained critical threshold, write a critical diagnostic record and fallback marker, then stop or disable logging safely.
-- Keep the tray running so it can explain the condition and offer the controlled recovery action.
-- Do not automatically resume logging after restart; require explicit user re-enablement after the cause has been addressed.
+## Data protection and maintenance
+
+- Add automated database backup and restore controls.
+- Add optional retention policies for very large databases.
+- Consider code signing for release binaries and installers.
+- Add an automated GitHub build and release workflow.

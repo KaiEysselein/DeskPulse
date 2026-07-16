@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0.0 - 2026-07-16
+- Promoted the tested `0.2.2.3` service-safeguard implementation to the retained `0.3.0.0` milestone.
+- Added sustained CPU and RAM warning and critical thresholds for `DeskPulse.Service`.
+- Added configurable threshold percentages and durations under **Settings → Maintenance**.
+- Added controlled CPU, memory, and combined service-load tests with a hard service-side 50% cap.
+- Added a live diagnostic test window with elapsed-time progress, measured resource values, and **Stop Test**.
+- Added critical safety pause handling and explicit **Resume Logging** recovery.
+- Added the option to keep logging paused after restart following a critical trigger; the safer persistent behaviour is enabled by default.
+- Updated active application, assembly, installer, publish, verification, handover, release, and GitHub-facing documentation references to `0.3.0.0`.
+- Recorded tray icon transparency as a deferred visual correction.
+
+## 0.2.2.3 - 2026-07-16
+- Developed and tested the service-safeguard feature set before milestone promotion.
+- Verified that Task Manager measurements correspond with the diagnostic load-test display.
+- Verified critical pause and successful manual resume of logging.
+
 ## 0.2.2.2 - 2026-07-16
 - Finalized the repository layout with GitHub-facing documentation and Git metadata at the repository root, application development content under `dev`, and approved local artifacts under `releases`.
 - Updated active documentation, image links, build instructions, verification paths, and handover notes for the final workspace layout.
