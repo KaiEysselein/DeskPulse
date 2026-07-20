@@ -135,6 +135,10 @@ v0.3.1.0
 17. Installer is copied to both `releases\current` and `releases\v0.3.1.0`.
 18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.1.0 as current.
 
+## Planned medium feature — Calendar activity view
+
+Add a Calendar view under View Log with month, day and hourly drill-down. The month view will show selectable compact daily summaries; double-clicking a day will show hourly summaries, and double-clicking an hour will open the existing filtered log view. The design must support selectable file, file-type, application, user and Explorer activity metrics and use grouped SQLite queries rather than loading raw rows for calendar summaries.
+
 ## Future installer item
 
 Consider optional machine-wide tray startup for all Windows users. Before implementation, resolve concurrent-session behaviour, per-session duplicate prevention, shared versus per-user settings, and database path/ownership. Prefer an **At logon of any user** scheduled task rather than changing only the HKCU Run registration.

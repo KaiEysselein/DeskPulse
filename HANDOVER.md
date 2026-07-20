@@ -62,8 +62,9 @@ The source and documentation are prepared for 0.3.1.0. Final release approval re
 
 ## Future work
 
-- Optional machine-wide tray startup for all Windows users.
-- Resolve concurrent sessions, per-session duplicate prevention, shared versus per-user settings and database ownership before implementing machine-wide startup.
+- **Medium Feature — Multi-user architecture and all-user tray startup:** resolve per-user settings and databases, session-aware tray instances, named-pipe identity and safe migration before enabling machine-wide startup.
+- **Medium Feature — Calendar activity view:** add a View Log calendar with monthly daily summaries, hourly drill-down, selectable activity categories and efficient SQL aggregation.
+- **Medium Feature — Pause-state model:** distinguish session-only and persistent pause modes with clear tray states.
 
 ## Release procedure
 
