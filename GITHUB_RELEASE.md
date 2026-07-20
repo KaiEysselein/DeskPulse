@@ -1,60 +1,26 @@
-# DeskPulse Release Policy
+# DeskPulse 0.3.1.0
 
-## Repository layout
+DeskPulse 0.3.1.0 promotes the completed correction work from 0.3.0.1 into a formal release.
+
+## Highlights
+
+- Fixed **Clean database with current rules...** so Settings remains open and the confirmation is displayed correctly.
+- Added User Activity records when DeskPulse is installed, updated or reinstalled.
+- Corrected transparency for the Normal, Paused and Warning tray icons.
+- Preserved the existing service CPU/RAM safeguards and their service-side 50% diagnostic caps.
+
+## Upgrade
+
+The installer supports upgrading an existing DeskPulse installation. The activity database and exports under `Documents\DeskPulse` are preserved.
+
+## Installer
+
+Release asset:
 
 ```text
-DeskPulse\
-├── .git\
-├── README.md
-├── CHANGELOG.md
-├── ROADMAP.md
-├── BACKLOG.md
-├── HANDOVER.md
-├── VERSION_CHECK.md
-├── DATABASE_WRITE_AUDIT.md
-├── GITHUB_RELEASE.md
-├── LICENSE
-├── dev\
-│   ├── DeskPulse.sln
-│   ├── Installer\
-│   ├── Resources\
-│   ├── scripts\
-│   ├── src\
-│   ├── docs\
-│   └── publish\
-└── releases\
-    ├── current\
-    └── retained milestone folders\
+DeskPulse_Setup_0.3.1.0.exe
 ```
 
-The Git repository root is `D:\Kai\GitHub\DeskPulse`.
+## Verification
 
-GitHub-facing documentation remains at the repository root. Application source, build scripts, installer definitions, resources, and technical verification documents are contained under `dev`.
-
-`dev\publish` is temporary generated output and is ignored by Git.
-
-
-## Current milestone
-
-- Version: `0.3.0.0`
-- GitHub tag: `v0.3.0.0`
-- Permanent local folder: `releases\v0.3.0.0`
-- Installer: `DeskPulse_Setup_0.3.0.0.exe`
-
-## Permanent milestone releases
-
-Permanent local archives and GitHub Releases are created only for versions matching `v0.x.0.0`, such as `v0.2.0.0` and `v0.3.0.0`.
-
-Milestone artifacts are retained under `releases\v<version>`.
-
-## Intermediate builds
-
-Intermediate builds retain their exact application and installer version but replace the contents of `releases\current`.
-
-Intermediate builds are not retained as permanent GitHub Releases.
-
-## Installer archiving
-
-`dev\Installer\Build-Installer.ps1` always copies the completed installer into `releases\current`.
-
-When the active version matches `0.x.0.0`, the installer is also copied into the corresponding permanent milestone folder.
+The release should be published only after the local 0.3.1.0 build and acceptance checklist have passed.

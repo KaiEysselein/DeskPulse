@@ -1,44 +1,31 @@
 # DeskPulse Roadmap
 
-## Current baseline: 0.3.0.0
+## Current release: 0.3.1.0
 
-Version `0.3.0.0` is the accepted milestone release containing the tested service CPU/RAM safeguards, controlled diagnostic load testing, sustained warning and critical thresholds, persistent critical safety pause, and user-configurable safeguard settings under **Settings → Maintenance**.
+- Database-cleanup window-handling correction
+- Installation lifecycle activity logging
+- Transparent tray-state icons
+- Existing service resource safeguards and diagnostic tests
 
-## Completed in the 0.3.0.0 milestone
+## Planned
 
-- Monitor `DeskPulse.Service` CPU and RAM use.
-- Configurable warning and critical thresholds and sustained durations.
-- Warning-state tray indication while logging continues.
-- Critical diagnostic event and controlled logging pause.
-- Optional persistent pause after a critical trigger, enabled by default.
-- Explicit **Resume Logging** recovery.
-- CPU, memory, and combined diagnostic load tests with a hard service-side 50% cap.
-- Live load-test window with progress, measured values, and **Stop Test**.
+### Machine-wide tray startup
 
-## Repository organization
+Consider optional installer support for starting DeskPulse Tray for every Windows user who logs on. Before implementation, resolve:
 
-- Keep GitHub-facing documentation and Git metadata at the repository root.
-- Keep application source, build scripts, installer definitions, shared resources, and technical verification records under `dev`.
-- Keep approved local installer and handover artifacts under `releases`.
-- Treat `dev\publish` as temporary generated output.
+- concurrent user-session behaviour;
+- one tray instance per user session;
+- shared versus per-user settings;
+- activity database path and ownership;
+- interaction with the LocalSystem service.
 
-## Release retention
+Prefer an **At logon of any user** scheduled task over merely changing the current HKCU Run registration to HKLM.
 
-- Retain permanent installer archives and GitHub Releases only for milestone versions matching `v0.x.0.0`.
-- Replace `releases\current` for each approved intermediate build.
-- Preserve exact internal version numbers in diagnostics, installers, handovers, and source history.
+### Pause-state model
 
-## Next priorities
+Retain the planned distinction between:
 
-- Correct tray-state icon transparency.
-- Review and implement optional all-user tray startup with sound multi-session behaviour.
-- Complete clean-PC installation, upgrade, restart, safeguard-recovery, and uninstall regression testing.
-- Add structured/versioned named-pipe contracts and richer service diagnostics.
-- Add installer logging and clearer upgrade/recovery reporting.
-- Add automated database backup and restore controls.
+- **Pause for this session**, which resets after restart; and
+- **Pause indefinitely**, which persists until the user explicitly resumes logging.
 
-## Later
-
-- Code-sign release binaries and installer.
-- Add an automated GitHub build/release workflow.
-- Add optional retention policies and performance controls for very large databases.
+Persistent pause should remain the safety behaviour following a critical service-resource trigger where configured.

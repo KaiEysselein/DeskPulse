@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $projectRoot
 $issFile = Join-Path $PSScriptRoot 'DeskPulse.iss'
-$version = '0.3.0.0'
+$version = '0.3.1.0'
 $versionFolder = "v$version"
 
 $candidates = @(
@@ -59,7 +59,7 @@ Get-ChildItem -LiteralPath $currentReleaseDir -Force -ErrorAction SilentlyContin
 $currentInstaller = Join-Path $currentReleaseDir $installerName
 Copy-Item -LiteralPath $installerExe -Destination $currentInstaller -Force
 
-$isMilestone = $version -match '^0\.\d+\.0\.0$'
+$isMilestone = $version -match '^0\.\d+\.\d+\.0$'
 $milestoneInstaller = $null
 
 if ($isMilestone) {

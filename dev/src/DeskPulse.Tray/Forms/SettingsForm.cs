@@ -709,6 +709,7 @@ public partial class SettingsForm : Form
     private void CleanDatabaseWithCurrentRulesButton_Click(object? sender, EventArgs e)
     {
         var confirm = MessageBox.Show(
+            this,
             "This will permanently remove every historical DeskPulse record that conflicts with the rules currently displayed in Settings.\n\n" +
             "The cleanup applies the current File and App Activity rules, Windows-system setting, and filtered File Activity applications, and then compacts the SQLite database.\n\n" +
             "The current rules will also be saved before cleanup begins. Deleted records cannot be recovered unless you have a database backup.\n\nContinue?",
@@ -735,6 +736,7 @@ public partial class SettingsForm : Form
 
         var result = progressForm.Result;
         MessageBox.Show(
+            this,
             "Database housekeeping completed.\n\n" +
             "File activity records removed: " + result.ActivityRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +
             "App activity records removed: " + result.ProgramRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +

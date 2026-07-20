@@ -178,6 +178,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 _safetyMonitor?.ClearCriticalState();
                 _monitor.ResumeLogging(); return "OK|ACTIVE";
             case "RELOAD_SETTINGS": _monitor.ReloadSettings(); return "OK";
+            case "INSTALL_LIFECYCLE": return RecordInstallLifecycle(command);
             case "START_LOAD_TEST": return StartLoadTest(command);
             case "STOP_LOAD_TEST": return _loadTest.Stop(WriteLoadTestEvent);
             case "LOAD_TEST_STATUS": return _loadTest.GetStatus();
@@ -188,6 +189,49 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "TRAY_STOPPED": _monitor.WriteUserEvent("DeskPulseTrayStopped", "DeskPulse tray stopped", "DeskPulse tray application closed"); return "OK";
             default: return "Unknown command.";
         }
+    }
+
+
+    private string RecordInstallLifecycle(string command)
+    {
+        var parts = command.Split('|', 5);
+        if (parts.Length != 5)
+            return "ERROR|Invalid installation lifecycle request.";
+
+        var action = parts[1].Trim();
+        var previousVersion = parts[2].Trim();
+        var newVersion = parts[3].Trim();
+        var installingUser = parts[4].Trim();
+
+        string eventType;
+        string eventDescription;
+        string note;
+
+        if (action.Equals("Installed", StringComparison.OrdinalIgnoreCase))
+        {
+            eventType = "DeskPulseInstalled";
+            eventDescription = "DeskPulse installed";
+            note = $"DeskPulse {newVersion} was installed.";
+        }
+        else if (action.Equals("Updated", StringComparison.OrdinalIgnoreCase))
+        {
+            eventType = "DeskPulseUpdated";
+            eventDescription = "DeskPulse updated";
+            note = $"DeskPulse was updated from version {previousVersion} to {newVersion}.";
+        }
+        else if (action.Equals("Reinstalled", StringComparison.OrdinalIgnoreCase))
+        {
+            eventType = "DeskPulseReinstalled";
+            eventDescription = "DeskPulse reinstalled";
+            note = $"DeskPulse {newVersion} was reinstalled.";
+        }
+        else
+        {
+            return "ERROR|Unknown installation lifecycle action.";
+        }
+
+        _monitor?.WriteUserEvent(eventType, eventDescription, note, installingUser);
+        return "OK";
     }
 
     private string StartLoadTest(string command)

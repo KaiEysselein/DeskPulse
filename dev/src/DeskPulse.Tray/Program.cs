@@ -40,12 +40,47 @@ internal static class Program
             return;
         }
 
+        if (TryHandleInstallLifecycleCommand(args))
+            return;
+
         if (TryHandleDiagnosticLoadCommand(args))
             return;
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new TrayAppContext());
+    }
+
+
+    private static bool TryHandleInstallLifecycleCommand(string[] args)
+    {
+        if (args.Length != 4 || !args[0].Equals("--record-install-lifecycle", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var action = args[1].Trim();
+        var previousVersion = args[2].Trim();
+        var newVersion = args[3].Trim();
+        var command = $"INSTALL_LIFECYCLE|{action}|{previousVersion}|{newVersion}|{Environment.UserName}";
+
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            var response = ServicePipeClient.SendAsync(command).GetAwaiter().GetResult();
+            if (response.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            Thread.Sleep(1000);
+        }
+
+        try
+        {
+            var logFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeskPulse");
+            Directory.CreateDirectory(logFolder);
+            File.AppendAllText(Path.Combine(logFolder, "installer-lifecycle-errors.log"),
+                DateTime.Now + " Failed to record installation lifecycle event: " + action + " " + previousVersion + " -> " + newVersion + Environment.NewLine);
+        }
+        catch { }
+
+        return true;
     }
 
     private static bool TryHandleDiagnosticLoadCommand(string[] args)
@@ -386,7 +421,13 @@ public sealed class TrayAppContext : ApplicationContext
         };
 
         form.StartPosition = FormStartPosition.CenterScreen;
-        form.Deactivate += ActiveForm_Deactivate;
+
+        // Settings is a persistent working window. It must never be dismissed merely
+        // because focus changes while a button, confirmation, picker, or modal child
+        // is being opened. Focus-loss auto-close is reserved for the other tray forms.
+        if (form is not SettingsForm)
+            form.Deactivate += ActiveForm_Deactivate;
+
         form.FormClosed += (_, _) => _focusLossTimer.Stop();
         form.Show();
         RestoreAndActivate(form);
@@ -404,7 +445,12 @@ public sealed class TrayAppContext : ApplicationContext
         _focusLossTimer.Stop();
 
         var form = _activeForm;
-        if (form is null || form.IsDisposed || !form.Visible || form.ContainsFocus)
+        if (form is null || form.IsDisposed || !form.Visible || form.ContainsFocus || !form.Enabled)
+            return;
+
+        // Settings contains long-running and modal maintenance actions. Never close it
+        // from the generic tray focus-loss timer. The user closes it explicitly.
+        if (form is SettingsForm)
             return;
 
         // Keep the tray-opened form alive while one of its child dialogs is active.

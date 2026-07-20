@@ -20,7 +20,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.3.0.0";
+    public const string Version = "0.3.1.0";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -172,7 +172,7 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    public void WriteUserEvent(string eventType, string eventDescription, string note)
+    public void WriteUserEvent(string eventType, string eventDescription, string note, string? userNameOverride = null)
     {
         if (_loggingPaused)
             return;
@@ -187,7 +187,7 @@ public sealed class FileIoMonitor : IDisposable
             {
                 EventTime = DateTime.Now,
                 EventDescription = eventDescription,
-                UserName = Environment.UserName,
+                UserName = string.IsNullOrWhiteSpace(userNameOverride) ? Environment.UserName : userNameOverride.Trim(),
                 MachineName = Environment.MachineName,
                 ProcessName = AppInfo.AppName,
                 ProcessId = Environment.ProcessId,
@@ -5290,6 +5290,9 @@ public sealed class AppSettings
         {
             "DeskPulseStarted",
             "DeskPulseStopped",
+            "DeskPulseInstalled",
+            "DeskPulseUpdated",
+            "DeskPulseReinstalled",
             "WindowsStarted",
             "SessionLocked",
             "SessionUnlocked",
@@ -5345,6 +5348,9 @@ public sealed class AppSettings
         {
             "DeskPulseStarted",
             "DeskPulseStopped",
+            "DeskPulseInstalled",
+            "DeskPulseUpdated",
+            "DeskPulseReinstalled",
             "WindowsStarted",
             "SessionLocked",
             "SessionUnlocked",

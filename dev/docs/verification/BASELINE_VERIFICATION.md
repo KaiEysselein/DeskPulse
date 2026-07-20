@@ -1,20 +1,21 @@
-# DeskPulse 0.3.0.0 Baseline Verification
+# DeskPulse 0.3.1.0 Baseline Verification
 
-This package is the authoritative DeskPulse 0.3.0.0 milestone source baseline, subject to successful local compilation and final installation verification.
+This package is the candidate DeskPulse 0.3.1.0 release baseline, subject to successful local compilation, installation and acceptance testing.
 
-Verified in the source package:
+## Active version references
 
-- Active application version constant: 0.3.0.0
-- Shared, Service and Tray project versions: 0.3.0.0
-- Installer version and output filename: 0.3.0.0
-- Publish folders: `dev\publish\v0.3.0.0\service` and `dev\publish\v0.3.0.0\tray`
-- Milestone retention folder: `releases\v0.3.0.0`
-- Current approved installer folder: `releases\current`
-- Service safeguard monitor, critical pause and recovery are present.
-- Safeguard settings are exposed under Settings → Maintenance.
-- Critical-pause restart persistence defaults to enabled.
-- Diagnostic CPU and RAM load generation is capped service-side at 50% per resource.
-- Tray source retains read-only database access; service owns database writes.
-- Historical version references remain in archived documents only.
+- Application version constant: 0.3.1.0
+- Shared, Service and Tray project versions: 0.3.1.0
+- Installer version and output filename: 0.3.1.0
+- Publish folders: `dev\publish\v0.3.1.0\service` and `dev\publish\v0.3.1.0\tray`
+- Retained release folder: `releases\v0.3.1.0`
+- GitHub release tag: `v0.3.1.0`
 
-Final acceptance requires successful execution of the build/publish/installer chain and the 0.3.0.0 acceptance checklist in `HANDOVER.md`.
+## Included release changes
+
+- Database cleanup confirmation/window-lifetime correction.
+- Installation, update and reinstall lifecycle User Activity logging.
+- Transparent Normal, Paused and Warning PNG/ICO assets.
+- Active version, publish, installer and release documentation promotion.
+
+Final acceptance requires successful execution of the build, publish and installer chain and completion of the 0.3.1.0 checklist in `HANDOVER.md`.

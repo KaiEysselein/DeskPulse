@@ -1,16 +1,25 @@
-# DeskPulse 0.3.0.0 Technical Development Handover
+# DeskPulse 0.3.1.0 Technical Development Handover
 
 ## Purpose and scope
 
-This file is the detailed technical handover for the source under `dev`. It covers architecture, runtime behaviour, safeguard implementation, diagnostic commands, build and verification requirements. Repository-level release status and public-project continuity are maintained separately in `..\HANDOVER.md`.
-
-## Authoritative milestone baseline
-
-DeskPulse 0.3.0.0 is the accepted milestone promotion of the tested 0.2.2.3 service-safeguard baseline. No additional runtime feature was introduced during promotion; active application, assembly, installer, publish, verification and handover references are promoted to 0.3.0.0.
-
-Historical version references remain unchanged in archived verification and release-history documents.
+This is the detailed technical handover for the active source under `dev`. It covers architecture, runtime behaviour, safeguards, installation lifecycle logging, build and verification requirements. Repository-level release continuity and GitHub-facing documentation are maintained separately in `..\HANDOVER.md`.
 
 Repository: https://github.com/KaiEysselein/DeskPulse
+
+## Current release baseline
+
+DeskPulse **0.3.1.0** promotes the completed 0.3.0.1 correction work into the next release baseline.
+
+Included changes since 0.3.0.0:
+
+- Fixed **Settings → Maintenance → Clean database with current rules...** closing Settings before its confirmation dialog appeared.
+- Excluded the Settings form from the generic tray focus-loss auto-close mechanism; Settings now remains open until explicitly closed.
+- Kept the database-housekeeping confirmation and completion dialogs explicitly owned by Settings.
+- Added User Activity records for DeskPulse installation, update, and same-version reinstallation.
+- Corrected Normal, Paused, and Warning tray icon transparency and regenerated their multi-size ICO assets.
+- Completed a static audit of explicitly wired button handlers; no missing named Click handlers were found. This does not replace runtime functional testing.
+
+Historical version references remain unchanged in archived verification and release-history documents.
 
 ## Architecture
 
@@ -22,21 +31,20 @@ DeskPulse consists of three .NET 8 Windows projects:
 
 The service owns all SQLite write operations. The tray opens the activity database read-only for views, counts, statistics and exports.
 
-## Service-safety milestone scope
+## Service safeguards
 
-Version 0.3.0.0 includes:
+DeskPulse includes:
 
 - Once-per-second monitoring of DeskPulse.Service CPU and working-set RAM use.
-- Configurable CPU and RAM warning thresholds.
-- Configurable CPU and RAM critical thresholds.
+- Configurable CPU and RAM warning and critical thresholds.
 - Configurable sustained warning and critical durations.
-- Warning event logging and warning tray state while logging continues.
+- Warning event logging while activity logging continues.
 - Critical event logging and immediate safety pause of activity logging.
-- Optional persistence of the critical safety pause across service and Windows restarts.
-- **Keep logging paused after restart following a critical trigger** enabled by default for safety.
-- Explicit **Resume Logging** recovery, which clears the persistent critical marker and restarts monitoring.
-- User-facing safeguard configuration under **Settings → Maintenance**.
-- Validation requiring warning thresholds and durations to remain below their corresponding critical values.
+- Optional persistence of the critical pause across service and Windows restarts.
+- **Keep logging paused after restart following a critical trigger** enabled by default.
+- Explicit **Resume Logging** recovery.
+- Safeguard configuration under **Settings → Maintenance**.
+- Validation requiring warning values to remain below their corresponding critical values.
 
 Default safeguard values:
 
@@ -45,9 +53,7 @@ Default safeguard values:
 | Warning | 30% | 30% | 5 seconds |
 | Critical | 45% | 45% | 10 seconds |
 
-## Diagnostic safeguard test facility
-
-The installed tray executable can start controlled load inside DeskPulse.Service so the safeguards can be verified:
+## Diagnostic safeguard tests
 
 ```powershell
 & "C:\Program Files\DeskPulse\Tray\DeskPulse.Tray.exe" --test-service-cpu 40 60
@@ -59,17 +65,28 @@ The installed tray executable can start controlled load inside DeskPulse.Service
 
 Aliases for the combined test are `--load` and `-l`; `--ram` may be used instead of `--memory`.
 
-Safety limits:
+Safety limits are enforced service-side:
 
 - CPU target never exceeds 50%.
 - RAM target never exceeds 50% of total physical memory.
-- Limits are enforced by DeskPulse.Service regardless of tray input.
 - Requests above 50% are rejected.
 - Duration is limited to 1–300 seconds.
 - Only one test may run at a time.
 - Tests can be stopped from the live test window or command line.
 
-The **DeskPulse Diagnostic Load Test** window states that the test verifies the service safeguards and displays elapsed-time progress, target values, measured service CPU, allocated test memory, service working set and total system RAM use.
+## Installation lifecycle logging
+
+After the service starts successfully, the installer records one User Activity event:
+
+- **DeskPulse installed** when no prior installed executable is detected.
+- **DeskPulse updated** when the detected prior version differs from 0.3.1.0.
+- **DeskPulse reinstalled** when 0.3.1.0 is installed over the same version.
+
+The installer invokes the tray in non-UI command mode. The tray retries the service named-pipe command for up to 15 seconds, and the service remains the sole SQLite writer. The record contains the installing user, machine, new version, and previous version where applicable. Existing user choices for these event types are not overwritten.
+
+## Tray icon assets
+
+The Normal, Paused, and Warning PNG files use true RGBA transparency. Their ICO files contain transparent frames at 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256 pixels.
 
 ## Build, publish and install
 
@@ -77,45 +94,46 @@ Run from the development folder:
 
 ```powershell
 cd D:\Kai\GitHub\DeskPulse\dev
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\Build.ps1
-.\scripts\Publish.ps1
-.\Installer\Build-Installer.ps1
-Start-Process ".\publish\v0.3.0.0\installer\DeskPulse_Setup_0.3.0.0.exe"
+Get-ChildItem -Path . -Recurse -File | Unblock-File
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Installer\Build-Installer.ps1"
+Start-Process ".\publish\v0.3.1.0\installer\DeskPulse_Setup_0.3.1.0.exe"
 ```
 
-Because 0.3.0.0 is a retained milestone, `Build-Installer.ps1` copies the installer to both:
+The installer build copies the approved installer to:
 
 ```text
 D:\Kai\GitHub\DeskPulse\releases\current
-D:\Kai\GitHub\DeskPulse\releases\v0.3.0.0
+D:\Kai\GitHub\DeskPulse\releases\v0.3.1.0
 ```
 
-The formal GitHub Release tag is:
+Release versions whose fourth component is zero are retained under their own release folder. The formal GitHub Release tag is:
 
 ```text
-v0.3.0.0
+v0.3.1.0
 ```
 
 ## Acceptance verification
 
 1. Build succeeds with zero errors.
-2. Installer upgrades the accepted 0.2.2.3 installation.
-3. Service and tray report version 0.3.0.0.
-4. Exactly one tray instance appears in the active user session.
-5. DeskPulse.Service starts automatically and remains responsive.
-6. File, App and User Activity records are written normally.
-7. A controlled warning-level test records one warning and keeps logging active.
-8. A controlled critical-level test pauses logging and records the critical event.
-9. With restart persistence enabled, the critical pause survives service or Windows restart.
-10. Resume Logging clears the safety pause and restores activity monitoring.
-11. Safeguard settings save, reload and validate correctly.
-12. Diagnostic tests cannot exceed 50% CPU or 50% RAM and can be stopped manually.
-13. Installer is retained under `releases\v0.3.0.0` and copied to `releases\current`.
-
-## Known deferred item
-
-The current tray-state icon artwork may show a non-transparent background on some Windows themes. This visual asset correction is deferred and is not represented as completed in 0.3.0.0. It does not affect safeguard operation, logging, recovery or data integrity.
+2. Publish outputs exist under `publish\v0.3.1.0\service` and `publish\v0.3.1.0\tray`.
+3. The installer is created as `DeskPulse_Setup_0.3.1.0.exe`.
+4. Installer upgrades the accepted 0.3.0.0 or 0.3.0.1 installation.
+5. Service and tray report version 0.3.1.0.
+6. Exactly one tray instance appears in the active user session.
+7. DeskPulse.Service starts automatically and remains responsive.
+8. File, App and User Activity records are written normally.
+9. **Clean database with current rules...** displays confirmation, performs cleanup, and leaves Settings stable.
+10. Install, update, or reinstall writes the correct lifecycle User Activity event.
+11. Normal, Paused, and Warning icons display without rectangular or checkerboard backgrounds.
+12. A warning-level diagnostic test records one warning and keeps logging active.
+13. A critical-level diagnostic test pauses logging and records the critical event.
+14. With restart persistence enabled, the critical pause survives service or Windows restart.
+15. **Resume Logging** clears the safety pause and restores monitoring.
+16. Diagnostic tests cannot exceed 50% CPU or 50% RAM and can be stopped manually.
+17. Installer is copied to both `releases\current` and `releases\v0.3.1.0`.
+18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.1.0 as current.
 
 ## Future installer item
 

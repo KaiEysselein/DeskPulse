@@ -1,29 +1,13 @@
-# DeskPulse Feature Backlog
+# DeskPulse Backlog
 
-This file records work intentionally deferred beyond the accepted `0.3.0.0` milestone.
+## Open enhancements
 
-## Multi-user tray startup
+- Design and implement optional machine-wide tray startup after resolving concurrent-session, duplicate-prevention, settings-scope and database-ownership architecture.
+- Implement distinct session-only and persistent pause modes with clear tray icon states.
+- Continue runtime testing of all form buttons and tray-menu actions as new defects are reported.
 
-- Add an installer option to start `DeskPulse.Tray` for every Windows user on the machine.
-- Prefer a machine-wide **At logon of any user** scheduled task over a simple HKLM Run entry.
-- Resolve concurrent-session behaviour and prevent duplicate tray instances within each user session.
-- Confirm whether settings and database ownership remain shared or require per-user separation.
-- Preserve the automatic machine-wide Windows service independently of tray startup.
+## Closed in 0.3.1.0
 
-## Tray icon transparency
-
-- Rebuild Normal, Paused, and Warning ICO resources with true alpha transparency at all required Windows icon sizes.
-- Verify appearance on light and dark Windows themes and at common tray scaling levels.
-
-## Service and diagnostics refinements
-
-- Add structured and versioned named-pipe request/response contracts.
-- Expand service-health, reconnect, and diagnostic-history views.
-- Add installer logging and clearer upgrade/recovery diagnostics.
-
-## Data protection and maintenance
-
-- Add automated database backup and restore controls.
-- Add optional retention policies for very large databases.
-- Consider code signing for release binaries and installers.
-- Add an automated GitHub build and release workflow.
+- Settings disappeared when **Clean database with current rules...** was clicked.
+- Tray-state PNG/ICO assets displayed non-transparent backgrounds.
+- Installation, update and reinstallation were not recorded under User Activity.
