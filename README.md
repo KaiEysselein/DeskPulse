@@ -10,7 +10,6 @@ It records selected file, application, user-session and Windows activity in a lo
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
-![DeskPulse](dev/Resources/DeskPulse_Normal.png)
 
 ## What DeskPulse does
 
