@@ -34,4 +34,4 @@ Passed local Windows build, installation and acceptance verification on 2026-07-
 - Phase-staggered 50% CPU test peaked at 48.1% visually and 48.2% in the recorded warning sample.
 - Stop Test recorded both cancellation-requested and cancelled diagnostic events.
 - The three installer copies were byte-identical after final generation.
-- Final installer SHA-256: `24125D7FC5DC93DCA1A82EFAADDF1B367213B6EF0D08A303889D88CBC01407A4`.
+- Final installer SHA-256: `6C7E24E20CD7B9579DD1C4EEE03F825DECE9D40F7DD0E3A777BC479464236762`.
