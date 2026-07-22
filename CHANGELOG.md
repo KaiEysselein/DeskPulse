@@ -14,6 +14,8 @@ All notable DeskPulse changes are recorded here. Historical verification records
 - **Clean database with current rules...** no longer causes the Settings window to disappear before confirmation.
 - Settings is no longer closed by the generic tray focus-loss mechanism.
 - Normal, Paused and Warning tray icons now use genuine transparent PNG and ICO assets without checkerboard or rectangular backgrounds.
+- Diagnostic-load, service-resource-warning and critical-safety-pause events are now enabled and migrated into User Activity rules.
+- Diagnostic CPU workers are phase-staggered with 49% duty headroom so the service remains below the advertised 50% hard cap.
 
 ### Changed
 

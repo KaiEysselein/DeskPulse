@@ -17,6 +17,8 @@ Included changes since 0.3.0.0:
 - Kept the database-housekeeping confirmation and completion dialogs explicitly owned by Settings.
 - Added User Activity records for DeskPulse installation, update, and same-version reinstallation.
 - Corrected Normal, Paused, and Warning tray icon transparency and regenerated their multi-size ICO assets.
+- Enabled and migrated User Activity rules for diagnostic-load, service-resource-warning and critical-safety-pause events.
+- Staggered diagnostic CPU workers and reserved duty-cycle headroom below the 50% service-side hard cap.
 - Completed a static audit of explicitly wired button handlers; no missing named Click handlers were found. This does not replace runtime functional testing.
 
 Historical version references remain unchanged in archived verification and release-history documents.

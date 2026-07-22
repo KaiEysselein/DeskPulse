@@ -6,6 +6,7 @@ namespace DeskPulse;
 internal sealed class ServiceLoadTestController : IDisposable
 {
     private const double MaximumResourcePercent = 50.0;
+    private const double MaximumCpuDutyPercent = 49.0;
     private const int MaximumDurationSeconds = 300;
     private readonly object _sync = new();
     private CancellationTokenSource? _cancellation;
@@ -114,7 +115,11 @@ internal sealed class ServiceLoadTestController : IDisposable
             {
                 var workerCount = Math.Max(1, Environment.ProcessorCount);
                 for (var i = 0; i < workerCount; i++)
-                    workers.Add(Task.Run(() => RunCpuWorkerAsync(cpuPercent, token), token));
+                {
+                    var phaseOffsetMilliseconds = (int)Math.Floor(i * 100.0 / workerCount);
+                    workers.Add(Task.Run(
+                        () => RunCpuWorkerAsync(cpuPercent, phaseOffsetMilliseconds, token), token));
+                }
             }
 
             if (memoryPercent > 0)
@@ -197,12 +202,16 @@ internal sealed class ServiceLoadTestController : IDisposable
         }
     }
 
-    private static async Task RunCpuWorkerAsync(double targetPercent, CancellationToken token)
+    private static async Task RunCpuWorkerAsync(double targetPercent, int phaseOffsetMilliseconds, CancellationToken token)
     {
         const int cycleMilliseconds = 100;
-        var busyMilliseconds = Math.Clamp((int)Math.Round(cycleMilliseconds * targetPercent / 100.0), 1, 50);
+        var controlledTarget = Math.Min(targetPercent, MaximumCpuDutyPercent);
+        var busyMilliseconds = Math.Clamp((int)Math.Round(cycleMilliseconds * controlledTarget / 100.0), 1, 49);
         var idleMilliseconds = cycleMilliseconds - busyMilliseconds;
         var stopwatch = new Stopwatch();
+
+        if (phaseOffsetMilliseconds > 0)
+            await Task.Delay(phaseOffsetMilliseconds, token);
 
         while (!token.IsCancellationRequested)
         {

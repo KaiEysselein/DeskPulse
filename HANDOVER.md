@@ -11,7 +11,7 @@ The current DeskPulse release candidate is **0.3.1.0**.
 - Active development source: `dev`
 - Detailed technical handover: `dev\HANDOVER.md`
 
-Version 0.3.1.0 promotes the completed 0.3.0.1 correction work: database-cleanup window handling, installation lifecycle activity logging and transparent tray-state assets.
+Version 0.3.1.0 promotes the completed 0.3.0.1 correction work: database-cleanup window handling, installation lifecycle activity logging, transparent tray-state assets, reliable safeguard-event logging and stabilized diagnostic CPU load generation.
 
 ## Repository structure
 
@@ -52,13 +52,15 @@ Historical entries must remain unchanged in archived verification records. Activ
 - Fix database-cleanup confirmation and Settings window lifetime.
 - Log DeskPulse installation, update and reinstallation under User Activity.
 - Correct transparency in all Normal, Paused and Warning tray-state assets.
+- Log diagnostic-load, resource-warning and critical-safety-pause events under User Activity.
+- Stagger diagnostic CPU workers and reserve duty-cycle headroom below the 50% hard cap.
 - Preserve service-only SQLite write ownership.
 - Retain all service CPU/RAM safeguards and hard diagnostic caps.
 - Update README, CHANGELOG, release notes, roadmap, backlog and both handovers.
 
 ## Verification status
 
-The source and documentation are prepared for 0.3.1.0. Final release approval requires successful local build, installer generation, upgrade testing and completion of the acceptance checklist in `dev\HANDOVER.md`.
+Release 0.3.1.0 passed local build, publish, installer, upgrade and acceptance verification on 2026-07-22. The approved installer is retained under both release locations.
 
 ## Future work
 
