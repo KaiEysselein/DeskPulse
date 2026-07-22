@@ -1,7 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text;
 using System.Windows.Forms;
 
@@ -48,7 +50,30 @@ internal static class Program
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+
+        if (args.Any(a => a.Equals("--administrator-settings", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!IsProcessElevated())
+            {
+                MessageBox.Show(
+                    "Administrator settings must be opened through the DeskPulse tray menu and approved through Windows User Account Control.",
+                    "DeskPulse Administrator Settings",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            Application.Run(new SettingsForm(administratorMode: true));
+            return;
+        }
+
         Application.Run(new TrayAppContext());
+    }
+
+    private static bool IsProcessElevated()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
     }
 
 
@@ -277,6 +302,7 @@ public sealed class TrayAppContext : ApplicationContext
         _menu = new ContextMenuStrip();
         AddMenuCommand("View Log...", OpenViewLog);
         AddMenuCommand("Settings...", OpenSettings);
+        AddMenuCommand("Administrator settings...", OpenAdministratorSettings);
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
         _pauseLoggingMenuItem.Click += async (_, _) => await ToggleLoggingAsync();
         _menu.Items.Add(_pauseLoggingMenuItem);
@@ -401,6 +427,37 @@ public sealed class TrayAppContext : ApplicationContext
         OpenSingleForm(form);
     }
 
+    private static void OpenAdministratorSettings()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--administrator-settings",
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // The user cancelled the Windows UAC prompt.
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open Administrator settings.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
     private void OpenSingleForm(Form form)
     {
         if (_activeForm != null && !_activeForm.IsDisposed && _activeForm.GetType() == form.GetType())
@@ -422,10 +479,10 @@ public sealed class TrayAppContext : ApplicationContext
 
         form.StartPosition = FormStartPosition.CenterScreen;
 
-        // Settings is a persistent working window. It must never be dismissed merely
-        // because focus changes while a button, confirmation, picker, or modal child
-        // is being opened. Focus-loss auto-close is reserved for the other tray forms.
-        if (form is not SettingsForm)
+        // Settings and View Log are persistent working windows. They must never be
+        // dismissed merely because a button opens a picker, native dialog, or workbook.
+        // Focus-loss auto-close is reserved for the lightweight tray forms.
+        if (form is not SettingsForm && form is not ViewLogForm)
             form.Deactivate += ActiveForm_Deactivate;
 
         form.FormClosed += (_, _) => _focusLossTimer.Stop();
@@ -448,9 +505,9 @@ public sealed class TrayAppContext : ApplicationContext
         if (form is null || form.IsDisposed || !form.Visible || form.ContainsFocus || !form.Enabled)
             return;
 
-        // Settings contains long-running and modal maintenance actions. Never close it
-        // from the generic tray focus-loss timer. The user closes it explicitly.
-        if (form is SettingsForm)
+        // Working windows contain long-running and modal actions. The user closes them
+        // explicitly; native dialogs such as SaveFileDialog are not in OpenForms.
+        if (form is SettingsForm || form is ViewLogForm)
             return;
 
         // Keep the tray-opened form alive while one of its child dialogs is active.

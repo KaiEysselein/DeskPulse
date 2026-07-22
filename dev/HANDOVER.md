@@ -1,4 +1,4 @@
-# DeskPulse 0.3.1.0 Technical Development Handover
+# DeskPulse 0.3.2.0 Technical Development Handover
 
 ## Purpose and scope
 
@@ -8,9 +8,16 @@ Repository: https://github.com/KaiEysselein/DeskPulse
 
 ## Current release baseline
 
-DeskPulse **0.3.1.0** promotes the completed 0.3.0.1 correction work into the next release baseline.
+DeskPulse **0.3.2.0** adds a focused administrator-settings process boundary to the accepted 0.3.1.0 baseline.
 
 Included changes since 0.3.0.0:
+
+- Kept ordinary Settings unelevated with General and Rules only.
+- Added an **Administrator settings...** tray action that starts a separate process with the Windows UAC `runas` verb.
+- Required `--administrator-settings` to validate an elevated administrator token before showing Maintenance only.
+- Made the elevated process lifetime match the Administrator settings window lifetime.
+- Left service-side named-pipe authorization and the ProgramData system/per-user database architecture explicitly pending.
+- Fixed View Log export being cancelled by the generic focus-loss timer when its native Save dialog opened.
 
 - Fixed **Settings → Maintenance → Clean database with current rules...** closing Settings before its confirmation dialog appeared.
 - Excluded the Settings form from the generic tray focus-loss auto-close mechanism; Settings now remains open until explicitly closed.
@@ -32,6 +39,12 @@ DeskPulse consists of three .NET 8 Windows projects:
 - `DeskPulse.Shared`: shared settings, models, rules, SQLite access and monitoring logic.
 
 The service owns all SQLite write operations. The tray opens the activity database read-only for views, counts, statistics and exports.
+
+### 0.3.2.0 storage and security boundary
+
+The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.
+
+The 0.3.2.x continuation is responsible for the service-owned system/per-user database layout, event scope and SID routing, safe migration with rollback, system/per-user rule ownership, access-control changes and service-side verification of administrative pipe clients.
 
 ## Service safeguards
 
@@ -81,8 +94,8 @@ Safety limits are enforced service-side:
 After the service starts successfully, the installer records one User Activity event:
 
 - **DeskPulse installed** when no prior installed executable is detected.
-- **DeskPulse updated** when the detected prior version differs from 0.3.1.0.
-- **DeskPulse reinstalled** when 0.3.1.0 is installed over the same version.
+- **DeskPulse updated** when the detected prior version differs from 0.3.2.0.
+- **DeskPulse reinstalled** when 0.3.2.0 is installed over the same version.
 
 The installer invokes the tray in non-UI command mode. The tray retries the service named-pipe command for up to 15 seconds, and the service remains the sole SQLite writer. The record contains the installing user, machine, new version, and previous version where applicable. Existing user choices for these event types are not overwritten.
 
@@ -100,29 +113,29 @@ Get-ChildItem -Path . -Recurse -File | Unblock-File
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Installer\Build-Installer.ps1"
-Start-Process ".\publish\v0.3.1.0\installer\DeskPulse_Setup_0.3.1.0.exe"
+Start-Process ".\publish\v0.3.2.0\installer\DeskPulse_Setup_0.3.2.0.exe"
 ```
 
 The installer build copies the approved installer to:
 
 ```text
 D:\Kai\GitHub\DeskPulse\releases\current
-D:\Kai\GitHub\DeskPulse\releases\v0.3.1.0
+D:\Kai\GitHub\DeskPulse\releases\v0.3.2.0
 ```
 
 Release versions whose fourth component is zero are retained under their own release folder. The formal GitHub Release tag is:
 
 ```text
-v0.3.1.0
+v0.3.2.0
 ```
 
 ## Acceptance verification
 
 1. Build succeeds with zero errors.
-2. Publish outputs exist under `publish\v0.3.1.0\service` and `publish\v0.3.1.0\tray`.
-3. The installer is created as `DeskPulse_Setup_0.3.1.0.exe`.
+2. Publish outputs exist under `publish\v0.3.2.0\service` and `publish\v0.3.2.0\tray`.
+3. The installer is created as `DeskPulse_Setup_0.3.2.0.exe`.
 4. Installer upgrades the accepted 0.3.0.0 or 0.3.0.1 installation.
-5. Service and tray report version 0.3.1.0.
+5. Service and tray report version 0.3.2.0.
 6. Exactly one tray instance appears in the active user session.
 7. DeskPulse.Service starts automatically and remains responsive.
 8. File, App and User Activity records are written normally.
@@ -134,8 +147,13 @@ v0.3.1.0
 14. With restart persistence enabled, the critical pause survives service or Windows restart.
 15. **Resume Logging** clears the safety pause and restores monitoring.
 16. Diagnostic tests cannot exceed 50% CPU or 50% RAM and can be stopped manually.
-17. Installer is copied to both `releases\current` and `releases\v0.3.1.0`.
-18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.1.0 as current.
+17. Installer is copied to both `releases\current` and `releases\v0.3.2.0`.
+18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.2.0 as current.
+19. Ordinary Settings shows General and Rules only without requesting elevation.
+20. Administrator settings requests UAC, rejects an unelevated command-line launch, shows Maintenance only, and leaves no elevated DeskPulse process after closing.
+21. View Log remains open through the Save dialog and creates the selected Excel workbook.
+
+Build, publish and installer compilation passed on 2026-07-22. Installation, the administrator-settings flow and the corrected export flow were interactively confirmed. Database migration/splitting tests are not applicable to 0.3.2.0 and belong to 0.3.2.x.
 
 ## Planned medium feature — Calendar activity view
 

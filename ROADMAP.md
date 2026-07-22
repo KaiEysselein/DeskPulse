@@ -1,13 +1,23 @@
 # DeskPulse Roadmap
 
-## Current release: 0.3.1.0
+## Current release: 0.3.2.0
 
 - Database-cleanup window-handling correction
 - Installation lifecycle activity logging
 - Transparent tray-state icons
 - Existing service resource safeguards and diagnostic tests
+- Unelevated General and Rules settings with a separate UAC-elevated Maintenance window
 
 ## Planned
+
+### 0.3.2.x — Service-owned database migration and separation
+
+- Move the live database out of the user's Documents folder into service-owned `%ProgramData%\DeskPulse` storage.
+- Separate machine-wide records from per-user records keyed by Windows SID.
+- Migrate the existing database and settings with backup, validation and rollback.
+- Separate system and per-user rule ownership.
+- Authorize administrative named-pipe requests service-side using the client token and identity.
+- Keep 0.3.2.0 documented as the UI/process separation only; do not treat it as the completed data or security architecture.
 
 ### Medium Feature — Multi-user architecture and all-user tray startup
 

@@ -1,4 +1,4 @@
-# DeskPulse 0.3.0.0 Database Write Audit
+# DeskPulse 0.3.2.0 Database Write Audit
 
 The tray application has been audited for SQLite write access.
 
@@ -21,6 +21,8 @@ The following operations are now sent over the named pipe and executed by `DeskP
 - Live File, App, and User Activity inserts
 
 ## Tray database access
+
+This audit describes the current 0.3.2.0 single-database architecture. The database remains under the configured user Documents folder; the planned 0.3.2.x ProgramData system/per-user split and its authorization model are not implemented here.
 
 The tray now opens SQLite in read-only mode for:
 

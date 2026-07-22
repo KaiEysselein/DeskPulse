@@ -2,6 +2,23 @@
 
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
+## 0.3.2.0 — 2026-07-22
+
+### Added
+
+- Added an **Administrator settings...** tray action that starts the same executable as a separate process through the Windows UAC `runas` flow.
+- Added explicit validation that `--administrator-settings` is running with an elevated administrator token.
+
+### Changed
+
+- Ordinary Settings now remains unelevated and exposes only the user-facing General and Rules pages.
+- The elevated, short-lived Administrator settings window exposes only Maintenance and ends administrator access when it closes.
+- Service-side named-pipe authorization and the ProgramData system/per-user database architecture are deferred to 0.3.2.x; this release does not present the UI split as a complete security boundary.
+
+### Fixed
+
+- View Log now remains open while its native Save dialog and Excel export workflow have focus, preventing export from being cancelled by the tray focus-loss timer.
+
 ## 0.3.1.0 — 2026-07-20
 
 ### Added

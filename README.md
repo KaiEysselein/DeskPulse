@@ -6,7 +6,7 @@
 
 It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
 
-**Current version:** `0.3.1.0`
+**Current version:** `0.3.2.0`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
@@ -16,7 +16,7 @@ It records selected file, application, user-session and Windows activity in a lo
 DeskPulse separates privileged monitoring from the normal desktop interface:
 
 - **DeskPulse.Service** runs in the background, monitors activity and owns all database writes.
-- **DeskPulse.Tray** provides the tray menu, Settings, View Log, Export, Maintenance and About interfaces.
+- **DeskPulse.Tray** provides the tray menu, ordinary Settings, View Log, Export, a separate UAC-elevated Administrator settings window, and About interfaces.
 - **DeskPulse.Shared** contains common settings, rules, models, database access and monitoring logic.
 
 DeskPulse is designed for local use. Activity data remains on the computer unless the user explicitly exports it.
@@ -36,6 +36,7 @@ DeskPulse is designed for local use. Activity data remains on the computer unles
 - Service CPU and RAM safeguards
 - Controlled safeguard diagnostic tests, hard-capped at 50% CPU and RAM
 - Windows service status and maintenance controls
+- Separate short-lived Administrator settings process for Maintenance tools
 - SQLite storage under the user’s Documents folder
 
 ## Status icons
@@ -57,6 +58,12 @@ The shared transparent PNG and ICO resources are stored under `dev\Resources`.
 | Exports | `%USERPROFILE%\Documents\DeskPulse` |
 
 The uninstaller removes the application, service, startup registrations and application settings. The activity database and exports under `Documents\DeskPulse` are intentionally preserved.
+
+## 0.3.2 release boundary
+
+Version 0.3.2.0 separates ordinary and administrator-facing settings UI only. It does not move or split the activity database, change event ownership, or complete the administrative service security boundary.
+
+Planned 0.3.2.x development will move storage into service-owned locations under `%ProgramData%\DeskPulse`, split machine-wide and per-user activity by Windows SID, migrate existing data safely, and add service-side authorization for administrative named-pipe commands.
 
 ## Activity filtering
 

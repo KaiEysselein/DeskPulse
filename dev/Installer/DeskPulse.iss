@@ -1,5 +1,5 @@
 #define MyAppName "DeskPulse"
-#define MyAppVersion "0.3.1.0"
+#define MyAppVersion "0.3.2.0"
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -16,7 +16,7 @@ DefaultDirName={autopf}\DeskPulse
 DefaultGroupName=DeskPulse
 DisableProgramGroupPage=yes
 
-OutputDir=..\publish\v0.3.1.0\installer
+OutputDir=..\publish\v0.3.2.0\installer
 OutputBaseFilename=DeskPulse_Setup_{#MyAppVersion}
 
 Compression=lzma2
@@ -48,8 +48,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify
 
 [Files]
-Source: "..\publish\v0.3.1.0\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\v0.3.1.0\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.2.0\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.2.0\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; Remove startup shortcuts from older builds. Tray autostart is now stored in the current user HKCU Run key.

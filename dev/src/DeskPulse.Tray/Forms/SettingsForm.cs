@@ -58,7 +58,7 @@ public partial class SettingsForm : Form
     private bool _isDirty;
     private bool _allowClose;
 
-    public SettingsForm()
+    public SettingsForm(bool administratorMode = false)
     {
         InitializeComponent();
         AppIcon.Apply(this);
@@ -67,12 +67,18 @@ public partial class SettingsForm : Form
         ConfigureRuleImportExportButtons();
         ConfigureMaintenanceTab();
 
-        Text = "DeskPulse Settings";
+        Text = administratorMode ? "DeskPulse Administrator Settings" : "DeskPulse Settings";
 
         _settingsTabControl.TabPages.Clear();
-        _settingsTabControl.TabPages.Add(_generalTabPage);
-        _settingsTabControl.TabPages.Add(_rulesTabPage);
-        _settingsTabControl.TabPages.Add(_maintenanceHousekeepingTabPage);
+        if (administratorMode)
+        {
+            _settingsTabControl.TabPages.Add(_maintenanceHousekeepingTabPage);
+        }
+        else
+        {
+            _settingsTabControl.TabPages.Add(_generalTabPage);
+            _settingsTabControl.TabPages.Add(_rulesTabPage);
+        }
         _settingsTabControl.SelectedIndexChanged += SettingsTabControl_SelectedIndexChanged;
 
         ConfigureSettingsFooterButtons();
@@ -3621,4 +3627,3 @@ internal sealed class ActivityRuleEditor : UserControl
         _grid.CurrentCell = _grid.Rows[target].Cells[0];
     }
 }
-
