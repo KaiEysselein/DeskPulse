@@ -36,6 +36,8 @@ public sealed class FileIoMonitor : IDisposable
 
     private AppSettings _settings;
     private DeskPulseDatabase _database;
+    private readonly DeskPulseDatabase _systemDatabase;
+    private EventAttribution _activeAttribution;
     private ProgramActivityMonitor _programActivityMonitor;
     private TraceEventSession? _session;
     private Thread? _workerThread;
@@ -49,12 +51,18 @@ public sealed class FileIoMonitor : IDisposable
     {
         _settings = AppSettings.Load();
 
-        _database = new DeskPulseDatabase(PrepareAndResolveDatabaseFilePath(_settings));
+        StorageLayout.PrepareSystemStorage();
+        _systemDatabase = new DeskPulseDatabase(StorageLayout.SystemDatabaseFilePath);
+        _systemDatabase.Initialize();
+        (_database, _activeAttribution) = PrepareAndResolveUserDatabase(_settings);
         _database.Initialize();
-        _programActivityMonitor = new ProgramActivityMonitor(GetSettingsSnapshot, GetDatabaseSnapshot);
+        _programActivityMonitor = new ProgramActivityMonitor(
+            GetSettingsSnapshot,
+            GetDatabaseSnapshot,
+            GetActiveAttribution);
 
         WriteDeskPulseProgramEvent("ServiceStarted", "DeskPulse service started", "DeskPulse background service startup completed");
-        WriteUserEvent("DeskPulseServiceStarted", "DeskPulse service started", "DeskPulse background service startup detected");
+        WriteUserEvent("DeskPulseServiceStarted", "DeskPulse service started", "DeskPulse background service startup detected", scope: EventScope.System);
         WriteWindowsStartupEventOnce();
         if (subscribeToInteractiveSessionEvents)
             SubscribeSessionEvents();
@@ -126,7 +134,8 @@ public sealed class FileIoMonitor : IDisposable
             WriteUserEvent(
                 "WindowsStarted",
                 "Windows started",
-                $"Windows boot detected at approximately {bootTime:yyyy-MM-dd HH:mm:ss}");
+                $"Windows boot detected at approximately {bootTime:yyyy-MM-dd HH:mm:ss}",
+                scope: EventScope.System);
 
             key?.SetValue("LastRecordedWindowsBootUtc", bootKey, RegistryValueKind.String);
         }
@@ -150,7 +159,7 @@ public sealed class FileIoMonitor : IDisposable
                 !LoggingRulesEngine.IsProgramActivityMonitored(executablePath, AppInfo.AppName, settings.AppActivityRules))
                 return;
 
-            GetDatabaseSnapshot().InsertProgramEvent(new ProgramEventRecord
+            _systemDatabase.InsertProgramEvent(new ProgramEventRecord
             {
                 EventTime = DateTime.Now,
                 EventDescription = eventDescription,
@@ -161,7 +170,8 @@ public sealed class FileIoMonitor : IDisposable
                 UserName = Environment.UserName,
                 MachineName = Environment.MachineName,
                 AppVersion = AppInfo.Version,
-                Note = note
+                Note = note,
+                Scope = EventScope.System
             });
         }
         catch
@@ -170,7 +180,12 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    public void WriteUserEvent(string eventType, string eventDescription, string note, string? userNameOverride = null)
+    public void WriteUserEvent(
+        string eventType,
+        string eventDescription,
+        string note,
+        string? userNameOverride = null,
+        string scope = EventScope.User)
     {
         if (_loggingPaused)
             return;
@@ -181,7 +196,14 @@ public sealed class FileIoMonitor : IDisposable
             if (!LoggingRulesEngine.IsUserActivityMonitored(eventType, eventDescription, settings.UserActivityRules))
                 return;
 
-            GetDatabaseSnapshot().InsertUserEvent(new UserEventRecord
+            var attribution = scope == EventScope.System
+                ? EventAttribution.System
+                : GetActiveAttribution();
+            var database = attribution.Scope == EventScope.System
+                ? _systemDatabase
+                : GetDatabaseSnapshot();
+
+            database.InsertUserEvent(new UserEventRecord
             {
                 EventTime = DateTime.Now,
                 EventDescription = eventDescription,
@@ -190,7 +212,10 @@ public sealed class FileIoMonitor : IDisposable
                 ProcessName = AppInfo.AppName,
                 ProcessId = Environment.ProcessId,
                 AppVersion = AppInfo.Version,
-                Note = note
+                Note = note,
+                Scope = attribution.Scope,
+                WindowsSid = attribution.WindowsSid,
+                SessionId = attribution.SessionId
             });
         }
         catch (Exception ex)
@@ -281,13 +306,20 @@ public sealed class FileIoMonitor : IDisposable
         {
             _settings = AppSettings.Load();
 
-            var databaseFilePath = PrepareAndResolveDatabaseFilePath(_settings);
+            var (resolvedDatabase, attribution) = PrepareAndResolveUserDatabase(_settings);
+            var databaseFilePath = resolvedDatabase.DatabaseFilePath;
 
             if (!string.Equals(_database.DatabaseFilePath, databaseFilePath, StringComparison.OrdinalIgnoreCase))
             {
                 _database.Dispose();
-                _database = new DeskPulseDatabase(databaseFilePath);
+                _database = resolvedDatabase;
             }
+            else
+            {
+                resolvedDatabase.Dispose();
+            }
+
+            _activeAttribution = attribution;
 
             _database.Initialize();
             _programActivityMonitor.ReloadSettings();
@@ -329,16 +361,22 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    private static string PrepareAndResolveDatabaseFilePath(AppSettings settings)
+    private static (DeskPulseDatabase Database, EventAttribution Attribution) PrepareAndResolveUserDatabase(AppSettings settings)
     {
-        if (StorageLayout.TryResolveCurrentOrInteractiveUserSid(out var interactiveUserSid))
+        if (StorageLayout.TryResolveCurrentOrInteractiveUser(
+            out var interactiveUserSid,
+            out var sessionId,
+            out var userName))
         {
             StorageMigration.EnsureUserDatabase(settings.LegacyDatabaseFilePath, interactiveUserSid);
-            return StorageLayout.GetUserDatabaseFilePath(interactiveUserSid);
+            return (
+                new DeskPulseDatabase(StorageLayout.GetUserDatabaseFilePath(interactiveUserSid)),
+                EventAttribution.User(interactiveUserSid, sessionId, userName));
         }
 
-        StorageLayout.PrepareSystemStorage();
-        return StorageLayout.SystemDatabaseFilePath;
+        return (
+            new DeskPulseDatabase(StorageLayout.SystemDatabaseFilePath),
+            EventAttribution.System);
     }
 
     private DeskPulseDatabase GetDatabaseSnapshot()
@@ -346,6 +384,14 @@ public sealed class FileIoMonitor : IDisposable
         lock (_settingsLock)
         {
             return _database;
+        }
+    }
+
+    private EventAttribution GetActiveAttribution()
+    {
+        lock (_settingsLock)
+        {
+            return _activeAttribution;
         }
     }
 
@@ -555,7 +601,16 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
-            GetDatabaseSnapshot().InsertActivityEvent(record);
+            var attribution = string.Equals(record.ActivityType, "Error", StringComparison.OrdinalIgnoreCase)
+                ? EventAttribution.System
+                : GetActiveAttribution();
+            record.Scope = attribution.Scope;
+            record.WindowsSid = attribution.WindowsSid;
+            record.SessionId = attribution.SessionId;
+            var database = attribution.Scope == EventScope.System
+                ? _systemDatabase
+                : GetDatabaseSnapshot();
+            database.InsertActivityEvent(record);
         }
         catch (Exception ex)
         {
@@ -797,7 +852,7 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
-            WriteUserEvent("DeskPulseServiceStopped", "DeskPulse service stopped", "DeskPulse background service shutdown started");
+            WriteUserEvent("DeskPulseServiceStopped", "DeskPulse service stopped", "DeskPulse background service shutdown started", scope: EventScope.System);
             WriteDeskPulseProgramEvent("ServiceStopped", "DeskPulse service stopped", "DeskPulse background service shutdown started");
         }
         catch
@@ -840,6 +895,16 @@ public sealed class FileIoMonitor : IDisposable
         {
             // Ignore shutdown errors.
         }
+
+        try
+        {
+            if (!ReferenceEquals(_database, _systemDatabase))
+                _systemDatabase.Dispose();
+        }
+        catch
+        {
+            // Ignore shutdown errors.
+        }
     }
 }
 
@@ -848,16 +913,21 @@ public sealed class ProgramActivityMonitor : IDisposable
     private readonly object _lock = new();
     private readonly Func<AppSettings> _getSettings;
     private readonly Func<DeskPulseDatabase> _getDatabase;
+    private readonly Func<EventAttribution> _getAttribution;
     private readonly Dictionary<int, ProgramSnapshot> _knownProcesses = new();
     private System.Threading.Timer? _timer;
     private bool _disposed;
     private bool _isScanning;
     private bool _paused;
 
-    public ProgramActivityMonitor(Func<AppSettings> getSettings, Func<DeskPulseDatabase> getDatabase)
+    public ProgramActivityMonitor(
+        Func<AppSettings> getSettings,
+        Func<DeskPulseDatabase> getDatabase,
+        Func<EventAttribution> getAttribution)
     {
         _getSettings = getSettings;
         _getDatabase = getDatabase;
+        _getAttribution = getAttribution;
     }
 
     public void Start() => Resume();
@@ -890,7 +960,7 @@ public sealed class ProgramActivityMonitor : IDisposable
 
             _knownProcesses.Clear();
 
-            foreach (var process in CaptureCurrentSessionProcesses())
+            foreach (var process in CaptureCurrentSessionProcesses(_getAttribution()))
                 _knownProcesses[process.ProcessId] = process;
 
             _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -918,7 +988,7 @@ public sealed class ProgramActivityMonitor : IDisposable
                 {
                     _knownProcesses.Clear();
 
-                    foreach (var process in CaptureCurrentSessionProcesses())
+                    foreach (var process in CaptureCurrentSessionProcesses(_getAttribution()))
                         _knownProcesses[process.ProcessId] = process;
 
                     _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -948,7 +1018,7 @@ public sealed class ProgramActivityMonitor : IDisposable
             if (!_getSettings().LogProgramActivity)
                 return;
 
-            var currentProcesses = CaptureCurrentSessionProcesses()
+            var currentProcesses = CaptureCurrentSessionProcesses(_getAttribution())
                 .ToDictionary(process => process.ProcessId);
 
             List<ProgramSnapshot> startedProcesses;
@@ -998,10 +1068,13 @@ public sealed class ProgramActivityMonitor : IDisposable
         }
     }
 
-    private static List<ProgramSnapshot> CaptureCurrentSessionProcesses()
+    private static List<ProgramSnapshot> CaptureCurrentSessionProcesses(EventAttribution attribution)
     {
         var result = new List<ProgramSnapshot>();
-        var currentSessionId = Process.GetCurrentProcess().SessionId;
+        if (attribution.Scope != EventScope.User || !attribution.SessionId.HasValue)
+            return result;
+
+        var currentSessionId = attribution.SessionId.Value;
 
         foreach (var process in Process.GetProcesses())
         {
@@ -1025,8 +1098,11 @@ public sealed class ProgramActivityMonitor : IDisposable
                     FilePath = SafeGetMainModuleFileName(process),
                     WindowTitle = SafeGetMainWindowTitle(process),
                     StartTime = SafeGetStartTime(process),
-                    UserName = Environment.UserName,
-                    MachineName = Environment.MachineName
+                    UserName = attribution.UserName,
+                    MachineName = Environment.MachineName,
+                    Scope = attribution.Scope,
+                    WindowsSid = attribution.WindowsSid,
+                    SessionId = attribution.SessionId
                 });
             }
             catch
@@ -1057,7 +1133,10 @@ public sealed class ProgramActivityMonitor : IDisposable
                 UserName = snapshot.UserName,
                 MachineName = snapshot.MachineName,
                 AppVersion = AppInfo.Version,
-                Note = note
+                Note = note,
+                Scope = snapshot.Scope,
+                WindowsSid = snapshot.WindowsSid,
+                SessionId = snapshot.SessionId
             });
         }
         catch (Exception ex)
@@ -1110,6 +1189,28 @@ public sealed class ProgramSnapshot
     public DateTime? StartTime { get; set; }
     public string UserName { get; set; } = "";
     public string MachineName { get; set; } = "";
+    public string Scope { get; set; } = EventScope.User;
+    public string WindowsSid { get; set; } = "";
+    public int? SessionId { get; set; }
+}
+
+public static class EventScope
+{
+    public const string System = "System";
+    public const string User = "User";
+}
+
+public sealed record EventAttribution(
+    string Scope,
+    string WindowsSid,
+    int? SessionId,
+    string UserName)
+{
+    public static EventAttribution System { get; } =
+        new(EventScope.System, string.Empty, null, "SYSTEM");
+
+    public static EventAttribution User(string windowsSid, int sessionId, string userName) =>
+        new(EventScope.User, windowsSid, sessionId, userName);
 }
 
 public sealed class ExportProgressInfo
@@ -1232,6 +1333,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     InferredAction TEXT NULL,
                     ProcessName TEXT NULL,
                     ProcessId INTEGER NULL,
+                    Scope TEXT NULL,
+                    WindowsSid TEXT NULL,
+                    SessionId INTEGER NULL,
                     Note TEXT NULL
                 );
                 """);
@@ -1240,6 +1344,7 @@ public sealed class DeskPulseDatabase : IDisposable
             EnsureColumnExists(connection, "ActivityEvents", "FolderPath", "TEXT NULL");
             EnsureColumnExists(connection, "ActivityEvents", "FileName", "TEXT NULL");
             EnsureColumnExists(connection, "ActivityEvents", "Extension", "TEXT NULL");
+            EnsureAttributionColumns(connection, "ActivityEvents");
 
             ExecuteNonQuery(connection,
                 """
@@ -1255,6 +1360,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     ProcessName TEXT NULL,
                     ProcessId INTEGER NULL,
                     AppVersion TEXT NULL,
+                    Scope TEXT NULL,
+                    WindowsSid TEXT NULL,
+                    SessionId INTEGER NULL,
                     Note TEXT NULL
                 );
                 """);
@@ -1295,6 +1403,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     UserName TEXT NULL,
                     MachineName TEXT NULL,
                     AppVersion TEXT NULL,
+                    Scope TEXT NULL,
+                    WindowsSid TEXT NULL,
+                    SessionId INTEGER NULL,
                     Note TEXT NULL
                 );
                 """);
@@ -1303,6 +1414,9 @@ public sealed class DeskPulseDatabase : IDisposable
             ExecuteNonQuery(connection, "DROP INDEX IF EXISTS IX_ProgramEvents_EventType;");
             RemoveColumnIfExists(connection, "UserEvents", "EventType");
             RemoveColumnIfExists(connection, "ProgramEvents", "EventType");
+            EnsureAttributionColumns(connection, "UserEvents");
+            EnsureAttributionColumns(connection, "ProgramEvents");
+            BackfillAttributionColumns(connection);
 
             ExecuteNonQuery(
                 connection,
@@ -1318,6 +1432,9 @@ public sealed class DeskPulseDatabase : IDisposable
                 connection,
                 "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_ProgramName ON ProgramEvents (ProgramName);"
             );
+            ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_ActivityEvents_WindowsSid_SessionId ON ActivityEvents (WindowsSid, SessionId);");
+            ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_UserEvents_WindowsSid_SessionId ON UserEvents (WindowsSid, SessionId);");
+            ExecuteNonQuery(connection, "CREATE INDEX IF NOT EXISTS IX_ProgramEvents_WindowsSid_SessionId ON ProgramEvents (WindowsSid, SessionId);");
         }
     }
 
@@ -1391,6 +1508,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     InferredAction,
                     ProcessName,
                     ProcessId,
+                    Scope,
+                    WindowsSid,
+                    SessionId,
                     Note
                 )
                 VALUES
@@ -1417,6 +1537,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     $InferredAction,
                     $ProcessName,
                     $ProcessId,
+                    $Scope,
+                    $WindowsSid,
+                    $SessionId,
                     $Note
                 );
                 """;
@@ -1443,6 +1566,9 @@ public sealed class DeskPulseDatabase : IDisposable
             AddText(command, "$InferredAction", record.InferredAction);
             AddText(command, "$ProcessName", record.ProcessName);
             AddInteger(command, "$ProcessId", record.ProcessId);
+            AddText(command, "$Scope", record.Scope);
+            AddText(command, "$WindowsSid", record.WindowsSid);
+            AddInteger(command, "$SessionId", record.SessionId);
             AddText(command, "$Note", record.Note);
 
             command.ExecuteNonQuery();
@@ -1473,6 +1599,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     ProcessName,
                     ProcessId,
                     AppVersion,
+                    Scope,
+                    WindowsSid,
+                    SessionId,
                     Note
                 )
                 VALUES
@@ -1486,6 +1615,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     $ProcessName,
                     $ProcessId,
                     $AppVersion,
+                    $Scope,
+                    $WindowsSid,
+                    $SessionId,
                     $Note
                 );
                 """;
@@ -1501,6 +1633,9 @@ public sealed class DeskPulseDatabase : IDisposable
             AddText(command, "$ProcessName", record.ProcessName);
             AddInteger(command, "$ProcessId", record.ProcessId);
             AddText(command, "$AppVersion", record.AppVersion);
+            AddText(command, "$Scope", record.Scope);
+            AddText(command, "$WindowsSid", record.WindowsSid);
+            AddInteger(command, "$SessionId", record.SessionId);
             AddText(command, "$Note", record.Note);
 
             command.ExecuteNonQuery();
@@ -1533,6 +1668,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     UserName,
                     MachineName,
                     AppVersion,
+                    Scope,
+                    WindowsSid,
+                    SessionId,
                     Note
                 )
                 VALUES
@@ -1548,6 +1686,9 @@ public sealed class DeskPulseDatabase : IDisposable
                     $UserName,
                     $MachineName,
                     $AppVersion,
+                    $Scope,
+                    $WindowsSid,
+                    $SessionId,
                     $Note
                 );
                 """;
@@ -1565,6 +1706,9 @@ public sealed class DeskPulseDatabase : IDisposable
             AddText(command, "$UserName", record.UserName);
             AddText(command, "$MachineName", record.MachineName);
             AddText(command, "$AppVersion", record.AppVersion);
+            AddText(command, "$Scope", record.Scope);
+            AddText(command, "$WindowsSid", record.WindowsSid);
+            AddInteger(command, "$SessionId", record.SessionId);
             AddText(command, "$Note", record.Note);
 
             command.ExecuteNonQuery();
@@ -3164,6 +3308,32 @@ public sealed class DeskPulseDatabase : IDisposable
         ExecuteNonQuery(connection, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};");
     }
 
+    private static void EnsureAttributionColumns(SqliteConnection connection, string tableName)
+    {
+        EnsureColumnExists(connection, tableName, "Scope", "TEXT NULL");
+        EnsureColumnExists(connection, tableName, "WindowsSid", "TEXT NULL");
+        EnsureColumnExists(connection, tableName, "SessionId", "INTEGER NULL");
+    }
+
+    private void BackfillAttributionColumns(SqliteConnection connection)
+    {
+        var isUserDatabase = StorageLayout.TryGetUserSidFromDatabaseFilePath(
+            DatabaseFilePath,
+            out var windowsSid);
+        var scope = isUserDatabase ? EventScope.User : EventScope.System;
+
+        foreach (var tableName in new[] { "ActivityEvents", "UserEvents", "ProgramEvents" })
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                $"UPDATE {tableName} SET Scope = $Scope, WindowsSid = $WindowsSid " +
+                "WHERE TRIM(COALESCE(Scope, '')) = '';";
+            AddText(command, "$Scope", scope);
+            AddText(command, "$WindowsSid", isUserDatabase ? windowsSid : string.Empty);
+            command.ExecuteNonQuery();
+        }
+    }
+
     private static bool ColumnExists(SqliteConnection connection, string tableName, string columnName)
     {
         using var command = connection.CreateCommand();
@@ -3292,6 +3462,9 @@ public sealed class ActivityEventRecord
     public string InferredAction { get; set; } = "";
     public string ProcessName { get; set; } = "";
     public int ProcessId { get; set; }
+    public string Scope { get; set; } = EventScope.User;
+    public string WindowsSid { get; set; } = "";
+    public int? SessionId { get; set; }
     public string Note { get; set; } = "";
 }
 
@@ -3660,6 +3833,9 @@ public sealed class UserEventRecord
     public string ProcessName { get; set; } = "";
     public int ProcessId { get; set; }
     public string AppVersion { get; set; } = "";
+    public string Scope { get; set; } = EventScope.User;
+    public string WindowsSid { get; set; } = "";
+    public int? SessionId { get; set; }
     public string Note { get; set; } = "";
 }
 
@@ -3689,6 +3865,9 @@ public sealed class ProgramEventRecord
     public string UserName { get; set; } = "";
     public string MachineName { get; set; } = "";
     public string AppVersion { get; set; } = "";
+    public string Scope { get; set; } = EventScope.User;
+    public string WindowsSid { get; set; } = "";
+    public int? SessionId { get; set; }
     public string Note { get; set; } = "";
 }
 

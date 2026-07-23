@@ -236,7 +236,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
             return "ERROR|Unknown installation lifecycle action.";
         }
 
-        _monitor?.WriteUserEvent(eventType, eventDescription, note, installingUser);
+        _monitor?.WriteUserEvent(eventType, eventDescription, note, installingUser, EventScope.System);
         return "OK";
     }
 
@@ -256,7 +256,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
     {
         try
         {
-            _monitor?.WriteUserEvent("DeskPulseDiagnosticLoadTest", "DeskPulse diagnostic load test", note);
+            _monitor?.WriteUserEvent("DeskPulseDiagnosticLoadTest", "DeskPulse diagnostic load test", note, scope: EventScope.System);
         }
         catch
         {
@@ -267,14 +267,14 @@ public sealed class DeskPulseWindowsService : ServiceBase
 
     private void WriteSafetyWarning(string note)
     {
-        try { _monitor?.WriteUserEvent("DeskPulseServiceSafetyWarning", "DeskPulse service resource warning", note); } catch { }
+        try { _monitor?.WriteUserEvent("DeskPulseServiceSafetyWarning", "DeskPulse service resource warning", note, scope: EventScope.System); } catch { }
     }
 
     private void ActivateCriticalSafetyPause(string note)
     {
         try
         {
-            _monitor?.WriteUserEvent("DeskPulseServiceSafetyCritical", "DeskPulse service safety pause", note);
+            _monitor?.WriteUserEvent("DeskPulseServiceSafetyCritical", "DeskPulse service safety pause", note, scope: EventScope.System);
             Directory.CreateDirectory(Path.GetDirectoryName(CriticalPauseMarker)!);
             File.WriteAllText(CriticalPauseMarker, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine + note);
             _monitor?.PauseLogging();

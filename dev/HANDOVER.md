@@ -60,6 +60,24 @@ SID database, and uninstall/reinstall preserved it. The test identified and
 fixed migration-only SQLite connection pooling and Inno Setup directory
 ownership before the final successful run.
 
+The next attribution/routing slice was also completed and runtime-tested on
+2026-07-23:
+
+- `ActivityEvents`, `UserEvents` and `ProgramEvents` now store `Scope`,
+  `WindowsSid` and `SessionId`;
+- existing SID-database rows are backfilled as user-scoped with their database
+  SID, while unknown historical session IDs remain null;
+- new file and program activity records carry the active user's SID and Windows
+  session ID;
+- service lifecycle, installation lifecycle, diagnostic and safeguard events
+  are routed to the system database with system scope;
+- process monitoring now targets the resolved interactive session instead of
+  the LocalSystem service's session 0.
+
+The installed upgrade passed schema, routing, restart and SQLite integrity
+checks for both the user and system databases. Simultaneous-session routing is
+still future work; the service currently follows the active console session.
+
 ### 0.3.2.0 storage and security boundary
 
 The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.

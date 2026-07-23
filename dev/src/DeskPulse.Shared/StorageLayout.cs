@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -23,6 +24,31 @@ public static class StorageLayout
     public static string GetUserDatabaseFilePath(string windowsSid) =>
         Path.Combine(GetUserFolder(windowsSid), "DeskPulse.db");
 
+    public static bool TryGetUserSidFromDatabaseFilePath(string databaseFilePath, out string windowsSid)
+    {
+        windowsSid = string.Empty;
+        try
+        {
+            var parent = Directory.GetParent(Path.GetFullPath(databaseFilePath));
+            var usersRoot = Path.GetFullPath(UsersFolder).TrimEnd(Path.DirectorySeparatorChar);
+            if (parent == null ||
+                !string.Equals(
+                    parent.Parent?.FullName?.TrimEnd(Path.DirectorySeparatorChar),
+                    usersRoot,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            windowsSid = new SecurityIdentifier(parent.Name).Value;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static string ResolveCurrentOrInteractiveUserSid()
     {
         if (TryResolveCurrentOrInteractiveUserSid(out var windowsSid))
@@ -34,19 +60,31 @@ public static class StorageLayout
 
     public static bool TryResolveCurrentOrInteractiveUserSid(out string windowsSid)
     {
+        return TryResolveCurrentOrInteractiveUser(out windowsSid, out _, out _);
+    }
+
+    public static bool TryResolveCurrentOrInteractiveUser(
+        out string windowsSid,
+        out int sessionId,
+        out string userName)
+    {
         using var currentIdentity = WindowsIdentity.GetCurrent();
         if (currentIdentity.User != null &&
             !currentIdentity.User.IsWellKnown(WellKnownSidType.LocalSystemSid))
         {
             windowsSid = currentIdentity.User.Value;
+            sessionId = Process.GetCurrentProcess().SessionId;
+            userName = currentIdentity.Name;
             return true;
         }
 
-        var sessionId = NativeMethods.WTSGetActiveConsoleSessionId();
-        if (sessionId == uint.MaxValue ||
-            !NativeMethods.WTSQueryUserToken(sessionId, out var userToken))
+        var consoleSessionId = NativeMethods.WTSGetActiveConsoleSessionId();
+        if (consoleSessionId == uint.MaxValue ||
+            !NativeMethods.WTSQueryUserToken(consoleSessionId, out var userToken))
         {
             windowsSid = string.Empty;
+            sessionId = -1;
+            userName = string.Empty;
             return false;
         }
 
@@ -54,6 +92,8 @@ public static class StorageLayout
         using (var interactiveIdentity = new WindowsIdentity(userToken.DangerousGetHandle()))
         {
             windowsSid = interactiveIdentity.User?.Value ?? string.Empty;
+            sessionId = checked((int)consoleSessionId);
+            userName = interactiveIdentity.Name;
             return windowsSid.Length > 0;
         }
     }
