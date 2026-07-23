@@ -51,7 +51,8 @@ The development working tree now contains the first ProgramData storage foundati
 - SID folders receive protected ACLs granting full control only to LocalSystem and administrators, with read-only access for the owning user;
 - uninstall preserves the new system and per-user database folders.
 
-This is not yet the complete multi-user architecture. Event-level scope/SID/session metadata, simultaneous-session routing, rule ownership separation and service-side administrative pipe authorization remain open.
+The database, attribution, simultaneous-session routing, tray startup and
+service-side pipe-authorization foundations described below are now complete.
 
 The migration foundation was runtime-tested on 2026-07-23 against the installed
 0.3.2.0 database. SQLite integrity and table counts were checked before and
@@ -126,6 +127,39 @@ Runtime verification on 2026-07-23 confirmed that direct PowerShell clients
 could read status but could not delete records, start diagnostic load or invoke
 historical repair. The installed unelevated tray remained authorized for its
 expected per-user and installation-lifecycle commands.
+
+### System and per-user settings ownership
+
+Settings are now separated by ownership:
+
+- per-user preferences and File, User and App Activity rules are stored in
+  `C:\ProgramData\DeskPulse\Users\<Windows-SID>\Settings\settings.json`;
+- each Settings folder grants full control only to LocalSystem,
+  administrators and its owning SID, while the sibling activity database
+  remains read-only to that user;
+- machine-wide service safeguard thresholds and restart-pause persistence are
+  stored in `C:\ProgramData\DeskPulse\System\settings.json`, writable only by
+  LocalSystem and administrators;
+- named-pipe settings reloads resolve the verified caller process and refresh
+  only that caller SID's cached rules;
+- file and program events are evaluated against the rules belonging to the
+  process/session SID;
+- system-scoped service and lifecycle events bypass per-user rules, so an
+  ordinary user cannot suppress system records;
+- a fresh SID receives independent defaults and resolves its default data path
+  through the SID's registered Windows profile rather than the LocalSystem
+  profile.
+
+The installed upgrade was verified on 2026-07-23. The original user's migrated
+rule counts matched the legacy settings backup (36 combined, 23 File, 17 User
+and 13 App rules), the system settings file contained only the safeguard
+properties, the owning user could write its Settings child folder, and its
+database remained read-only. A settings backup was retained at
+`Documents\DeskPulse Backups\DeskPulse-settings-before-split-2026-07-23.json`.
+
+An administrator UI for configurable system-wide logging rules and a combined
+authorized machine-wide database view remain separate backlog work. Current
+system lifecycle events follow a non-suppressible service policy.
 
 ### 0.3.2.0 storage and security boundary
 

@@ -38,6 +38,7 @@ public sealed class FileIoMonitor : IDisposable
     private DeskPulseDatabase _database;
     private readonly DeskPulseDatabase _systemDatabase;
     private readonly Dictionary<string, DeskPulseDatabase> _userDatabases = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AppSettings> _userSettings = new(StringComparer.OrdinalIgnoreCase);
     private EventAttribution _activeAttribution;
     private ProgramActivityMonitor _programActivityMonitor;
     private TraceEventSession? _session;
@@ -51,6 +52,8 @@ public sealed class FileIoMonitor : IDisposable
     public FileIoMonitor(bool subscribeToInteractiveSessionEvents = false)
     {
         _settings = AppSettings.Load();
+        _settings.EnsureSystemSettingsInitialized();
+        _settings = AppSettings.Load();
 
         StorageLayout.PrepareSystemStorage();
         _systemDatabase = new DeskPulseDatabase(StorageLayout.SystemDatabaseFilePath);
@@ -58,9 +61,12 @@ public sealed class FileIoMonitor : IDisposable
         (_database, _activeAttribution) = PrepareAndResolveUserDatabase(_settings);
         _database.Initialize();
         if (_activeAttribution.Scope == EventScope.User)
+        {
             _userDatabases[_activeAttribution.WindowsSid] = _database;
+            _userSettings[_activeAttribution.WindowsSid] = _settings;
+        }
         _programActivityMonitor = new ProgramActivityMonitor(
-            GetSettingsSnapshot,
+            GetSettingsForAttribution,
             GetDatabaseForAttribution,
             sessionId => ResolveSessionAttribution(sessionId));
 
@@ -155,12 +161,7 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
-            var settings = GetSettingsSnapshot();
             var executablePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "DeskPulse.Service.exe");
-
-            if (!settings.LogProgramActivity ||
-                !LoggingRulesEngine.IsProgramActivityMonitored(executablePath, AppInfo.AppName, settings.AppActivityRules))
-                return;
 
             _systemDatabase.InsertProgramEvent(new ProgramEventRecord
             {
@@ -196,13 +197,20 @@ public sealed class FileIoMonitor : IDisposable
 
         try
         {
-            var settings = GetSettingsSnapshot();
-            if (!LoggingRulesEngine.IsUserActivityMonitored(eventType, eventDescription, settings.UserActivityRules))
-                return;
-
             var attribution = scope == EventScope.System
                 ? EventAttribution.System
                 : ResolveSessionAttribution(sessionId);
+            if (attribution.Scope == EventScope.User)
+            {
+                var settings = GetSettingsForAttribution(attribution);
+                if (!LoggingRulesEngine.IsUserActivityMonitored(
+                    eventType,
+                    eventDescription,
+                    settings.UserActivityRules))
+                {
+                    return;
+                }
+            }
             var database = GetDatabaseForAttribution(attribution);
 
             database.InsertUserEvent(new UserEventRecord
@@ -324,6 +332,8 @@ public sealed class FileIoMonitor : IDisposable
             }
 
             _activeAttribution = attribution;
+            if (attribution.Scope == EventScope.User)
+                _userSettings[attribution.WindowsSid] = _settings;
 
             _database.Initialize();
             _programActivityMonitor.ReloadSettings();
@@ -362,6 +372,46 @@ public sealed class FileIoMonitor : IDisposable
         lock (_settingsLock)
         {
             return _settings.Clone();
+        }
+    }
+
+    public void ReloadSettingsForProcess(int processId)
+    {
+        var attribution = ResolveProcessAttribution(processId);
+        if (attribution.Scope != EventScope.User)
+        {
+            ReloadSettings();
+            return;
+        }
+
+        lock (_settingsLock)
+        {
+            var settings = AppSettings.LoadForSid(attribution.WindowsSid);
+            _userSettings[attribution.WindowsSid] = settings;
+            if (string.Equals(
+                _activeAttribution.WindowsSid,
+                attribution.WindowsSid,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                _settings = settings;
+            }
+            _programActivityMonitor.ReloadSettings();
+        }
+    }
+
+    private AppSettings GetSettingsForAttribution(EventAttribution attribution)
+    {
+        if (attribution.Scope != EventScope.User || string.IsNullOrWhiteSpace(attribution.WindowsSid))
+            return _settings.Clone();
+
+        lock (_settingsLock)
+        {
+            if (!_userSettings.TryGetValue(attribution.WindowsSid, out var settings))
+            {
+                settings = AppSettings.LoadForSid(attribution.WindowsSid);
+                _userSettings[attribution.WindowsSid] = settings;
+            }
+            return settings.Clone();
         }
     }
 
@@ -795,7 +845,8 @@ public sealed class FileIoMonitor : IDisposable
 
     private bool ShouldMonitorFile(string rawFileName, string normalizedFileName, string operation, string processName, int processId)
     {
-        var settings = GetSettingsSnapshot();
+        var attribution = ResolveProcessAttribution(processId);
+        var settings = GetSettingsForAttribution(attribution);
         var ext = PathUtilities.GetExtension(normalizedFileName);
         var fullPath = GetSafeFullPath(normalizedFileName) ?? "";
 
@@ -990,7 +1041,7 @@ public sealed class FileIoMonitor : IDisposable
 public sealed class ProgramActivityMonitor : IDisposable
 {
     private readonly object _lock = new();
-    private readonly Func<AppSettings> _getSettings;
+    private readonly Func<EventAttribution, AppSettings> _getSettings;
     private readonly Func<EventAttribution, DeskPulseDatabase> _getDatabase;
     private readonly Func<int, EventAttribution> _resolveSessionAttribution;
     private readonly Dictionary<int, ProgramSnapshot> _knownProcesses = new();
@@ -1000,7 +1051,7 @@ public sealed class ProgramActivityMonitor : IDisposable
     private bool _paused;
 
     public ProgramActivityMonitor(
-        Func<AppSettings> getSettings,
+        Func<EventAttribution, AppSettings> getSettings,
         Func<EventAttribution, DeskPulseDatabase> getDatabase,
         Func<int, EventAttribution> resolveSessionAttribution)
     {
@@ -1034,7 +1085,7 @@ public sealed class ProgramActivityMonitor : IDisposable
 
             _paused = false;
 
-            if (_timer != null || !_getSettings().LogProgramActivity)
+            if (_timer != null)
                 return;
 
             _knownProcesses.Clear();
@@ -1061,23 +1112,14 @@ public sealed class ProgramActivityMonitor : IDisposable
                 return;
             }
 
-            if (_getSettings().LogProgramActivity)
+            if (_timer == null)
             {
-                if (_timer == null)
-                {
-                    _knownProcesses.Clear();
-
-                    foreach (var process in CaptureInteractiveSessionProcesses())
-                        _knownProcesses[process.ProcessId] = process;
-
-                    _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
-                }
-            }
-            else
-            {
-                _timer?.Dispose();
-                _timer = null;
                 _knownProcesses.Clear();
+
+                foreach (var process in CaptureInteractiveSessionProcesses())
+                    _knownProcesses[process.ProcessId] = process;
+
+                _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
             }
         }
     }
@@ -1094,9 +1136,6 @@ public sealed class ProgramActivityMonitor : IDisposable
 
         try
         {
-            if (!_getSettings().LogProgramActivity)
-                return;
-
             var currentProcesses = CaptureInteractiveSessionProcesses()
                 .ToDictionary(process => process.ProcessId);
 
@@ -1121,18 +1160,22 @@ public sealed class ProgramActivityMonitor : IDisposable
                     _knownProcesses[pair.Key] = pair.Value;
             }
 
-            var settings = _getSettings();
-
             foreach (var process in startedProcesses)
             {
+                var attribution = process.GetAttribution();
+                var settings = _getSettings(attribution);
                 if ((settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
+                    settings.LogProgramActivity &&
                     LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
                     WriteProgramEvent("ProgramStarted", "Program started", process, process.StartTime ?? DateTime.Now, "Detected in the current interactive Windows session");
             }
 
             foreach (var process in stoppedProcesses)
             {
+                var attribution = process.GetAttribution();
+                var settings = _getSettings(attribution);
                 if ((settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
+                    settings.LogProgramActivity &&
                     LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
                     WriteProgramEvent("ProgramStopped", "Program closed", process, DateTime.Now, "Process no longer detected in the current interactive Windows session");
             }
@@ -1279,6 +1322,9 @@ public sealed class ProgramSnapshot
     public string Scope { get; set; } = EventScope.User;
     public string WindowsSid { get; set; } = "";
     public int? SessionId { get; set; }
+
+    public EventAttribution GetAttribution() =>
+        new(Scope, WindowsSid, SessionId, UserName);
 }
 
 public static class EventScope
@@ -5053,6 +5099,39 @@ public sealed class ActivityRuleSetting
     }
 }
 
+public sealed class SystemAppSettings
+{
+    public double ServiceSafetyWarningCpuPercent { get; set; } = 30;
+    public double ServiceSafetyCriticalCpuPercent { get; set; } = 45;
+    public double ServiceSafetyWarningMemoryPercent { get; set; } = 30;
+    public double ServiceSafetyCriticalMemoryPercent { get; set; } = 45;
+    public int ServiceSafetyWarningSustainedSeconds { get; set; } = 5;
+    public int ServiceSafetyCriticalSustainedSeconds { get; set; } = 10;
+    public bool PauseLoggingAtStartupAfterSafetyTrigger { get; set; } = true;
+
+    public static SystemAppSettings From(AppSettings settings) => new()
+    {
+        ServiceSafetyWarningCpuPercent = settings.ServiceSafetyWarningCpuPercent,
+        ServiceSafetyCriticalCpuPercent = settings.ServiceSafetyCriticalCpuPercent,
+        ServiceSafetyWarningMemoryPercent = settings.ServiceSafetyWarningMemoryPercent,
+        ServiceSafetyCriticalMemoryPercent = settings.ServiceSafetyCriticalMemoryPercent,
+        ServiceSafetyWarningSustainedSeconds = settings.ServiceSafetyWarningSustainedSeconds,
+        ServiceSafetyCriticalSustainedSeconds = settings.ServiceSafetyCriticalSustainedSeconds,
+        PauseLoggingAtStartupAfterSafetyTrigger = settings.PauseLoggingAtStartupAfterSafetyTrigger
+    };
+
+    public void ApplyTo(AppSettings settings)
+    {
+        settings.ServiceSafetyWarningCpuPercent = ServiceSafetyWarningCpuPercent;
+        settings.ServiceSafetyCriticalCpuPercent = ServiceSafetyCriticalCpuPercent;
+        settings.ServiceSafetyWarningMemoryPercent = ServiceSafetyWarningMemoryPercent;
+        settings.ServiceSafetyCriticalMemoryPercent = ServiceSafetyCriticalMemoryPercent;
+        settings.ServiceSafetyWarningSustainedSeconds = ServiceSafetyWarningSustainedSeconds;
+        settings.ServiceSafetyCriticalSustainedSeconds = ServiceSafetyCriticalSustainedSeconds;
+        settings.PauseLoggingAtStartupAfterSafetyTrigger = PauseLoggingAtStartupAfterSafetyTrigger;
+    }
+}
+
 public sealed class AppSettings
 {
     private const string RegistryPath = @"Software\DeskPulse";
@@ -5191,20 +5270,27 @@ public sealed class AppSettings
         };
     }
 
-    private static readonly string SharedSettingsFolder = Path.Combine(
+    private static readonly string LegacySharedSettingsFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DeskPulse");
-    private static readonly string SharedSettingsFile = Path.Combine(SharedSettingsFolder, "settings.json");
+    private static readonly string LegacySharedSettingsFile = Path.Combine(LegacySharedSettingsFolder, "settings.json");
     private static readonly object SettingsFileLock = new();
 
     public static AppSettings Load()
     {
+        var windowsSid = StorageLayout.ResolveCurrentOrInteractiveUserSid();
+        return LoadForSid(windowsSid);
+    }
+
+    public static AppSettings LoadForSid(string windowsSid)
+    {
         lock (SettingsFileLock)
         {
+            var userSettingsFile = StorageLayout.GetUserSettingsFilePath(windowsSid);
             try
             {
-                if (File.Exists(SharedSettingsFile))
+                if (File.Exists(userSettingsFile))
                 {
-                    var json = File.ReadAllText(SharedSettingsFile);
+                    var json = File.ReadAllText(userSettingsFile);
                     var loaded = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
                     {
                         PropertyNameCaseInsensitive = true
@@ -5212,15 +5298,21 @@ public sealed class AppSettings
                     if (loaded != null)
                     {
                         var originalDataFolderPath = loaded.DataFolderPath;
-                        NormalizeSharedSettings(loaded);
+                        NormalizeSharedSettings(loaded, windowsSid);
 
                         // Persist path normalization immediately. This migrates older settings
                         // such as "DeskPulse" or "DeskPulse\\DeskPulse.db" to an absolute
                         // path under the interactive user's Documents folder. The Windows
                         // service must never resolve a relative SQLite path against its own
                         // system working directory.
-                        if (!string.Equals(originalDataFolderPath, loaded.DataFolderPath, StringComparison.OrdinalIgnoreCase))
-                            loaded.Save();
+                        if (!string.Equals(
+                            originalDataFolderPath,
+                            loaded.DataFolderPath,
+                            StringComparison.OrdinalIgnoreCase))
+                        {
+                            loaded.SaveForSid(windowsSid);
+                        }
+                        ApplySystemSettings(loaded);
 
                         return loaded;
                     }
@@ -5231,16 +5323,61 @@ public sealed class AppSettings
                 // Fall through to legacy migration/defaults.
             }
 
-            var migrated = LoadLegacyRegistry();
-            NormalizeSharedSettings(migrated);
-            migrated.Save();
+            AppSettings migrated;
+            if (CanMigrateLegacySharedSettings(windowsSid) &&
+                TryLoadSettingsFile(LegacySharedSettingsFile, out var legacySettings))
+            {
+                migrated = legacySettings;
+            }
+            else
+            {
+                migrated = new AppSettings();
+            }
+            NormalizeSharedSettings(migrated, windowsSid);
+            migrated.SaveForSid(windowsSid);
+            ApplySystemSettings(migrated);
             return migrated;
         }
     }
 
-    private static void NormalizeSharedSettings(AppSettings settings)
+    private static bool TryLoadSettingsFile(string filePath, out AppSettings settings)
     {
-        settings.DataFolderPath = ResolveDataFolderPath(settings.DataFolderPath);
+        settings = new AppSettings();
+        try
+        {
+            if (!File.Exists(filePath))
+                return false;
+            var json = File.ReadAllText(filePath);
+            settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            }) ?? new AppSettings();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool CanMigrateLegacySharedSettings(string windowsSid)
+    {
+        if (!Directory.Exists(StorageLayout.UsersFolder))
+            return true;
+
+        return !Directory.EnumerateFiles(
+                StorageLayout.UsersFolder,
+                "settings.json",
+                SearchOption.AllDirectories)
+            .Any(path => !string.Equals(
+                Path.GetFullPath(path),
+                Path.GetFullPath(StorageLayout.GetUserSettingsFilePath(windowsSid)),
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void NormalizeSharedSettings(AppSettings settings, string? windowsSid = null)
+    {
+        settings.DataFolderPath = ResolveDataFolderPath(settings.DataFolderPath, windowsSid);
         settings.LoggingRules ??= GetDefaultLoggingRules();
         settings.FileActivityRuleSettings ??= ToRuleSettings(GetDefaultFileActivityRules());
         settings.FolderActivityRuleSettings ??= new List<ActivityRuleSetting>();
@@ -5387,14 +5524,61 @@ public sealed class AppSettings
 
     public void Save()
     {
+        SaveForSid(StorageLayout.ResolveCurrentOrInteractiveUserSid());
+    }
+
+    public void SaveForSid(string windowsSid)
+    {
         lock (SettingsFileLock)
         {
-            NormalizeSharedSettings(this);
-            Directory.CreateDirectory(SharedSettingsFolder);
-            var temporaryFile = SharedSettingsFile + ".tmp";
+            NormalizeSharedSettings(this, windowsSid);
+            StorageLayout.PrepareUserSettingsStorage(windowsSid);
+            var userSettingsFile = StorageLayout.GetUserSettingsFilePath(windowsSid);
+            var temporaryFile = userSettingsFile + ".tmp";
             var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(temporaryFile, json);
-            File.Move(temporaryFile, SharedSettingsFile, true);
+            File.Move(temporaryFile, userSettingsFile, true);
+        }
+    }
+
+    public void SaveSystemSettings()
+    {
+        lock (SettingsFileLock)
+        {
+            StorageLayout.PrepareSystemStorage();
+            var systemSettings = SystemAppSettings.From(this);
+            var temporaryFile = StorageLayout.SystemSettingsFilePath + ".tmp";
+            File.WriteAllText(
+                temporaryFile,
+                JsonSerializer.Serialize(systemSettings, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporaryFile, StorageLayout.SystemSettingsFilePath, true);
+        }
+    }
+
+    public void EnsureSystemSettingsInitialized()
+    {
+        lock (SettingsFileLock)
+        {
+            if (!File.Exists(StorageLayout.SystemSettingsFilePath))
+                SaveSystemSettings();
+        }
+    }
+
+    private static void ApplySystemSettings(AppSettings settings)
+    {
+        try
+        {
+            if (!File.Exists(StorageLayout.SystemSettingsFilePath))
+                return;
+            var json = File.ReadAllText(StorageLayout.SystemSettingsFilePath);
+            var system = JsonSerializer.Deserialize<SystemAppSettings>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            system?.ApplyTo(settings);
+        }
+        catch
+        {
+            // Retain defaults if protected system settings cannot be read.
         }
     }
 
@@ -5934,12 +6118,12 @@ public sealed class AppSettings
         return Path.GetFullPath(Path.Combine(documents, "DeskPulse"));
     }
 
-    private static string ResolveDataFolderPath(string? configuredPath)
+    private static string ResolveDataFolderPath(string? configuredPath, string? windowsSid = null)
     {
         var value = Environment.ExpandEnvironmentVariables(configuredPath?.Trim() ?? string.Empty);
 
         if (string.IsNullOrWhiteSpace(value))
-            return GetDefaultDataFolderPath();
+            return GetDefaultDataFolderPath(windowsSid);
 
         if (Path.IsPathRooted(value))
             return Path.GetFullPath(value);
@@ -5947,11 +6131,41 @@ public sealed class AppSettings
         // Legacy 0.1.x/early 0.2.x settings sometimes stored only "DeskPulse".
         // Resolve all relative data paths against the current interactive user's
         // Documents folder, never against Program Files or the service working directory.
-        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var documents = TryGetDocumentsFolderForSid(windowsSid) ??
+                        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         if (string.IsNullOrWhiteSpace(documents))
             documents = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
 
         return Path.GetFullPath(Path.Combine(documents, value));
+    }
+
+    private static string GetDefaultDataFolderPath(string? windowsSid)
+    {
+        var documents = TryGetDocumentsFolderForSid(windowsSid);
+        return documents == null
+            ? GetDefaultDataFolderPath()
+            : Path.GetFullPath(Path.Combine(documents, "DeskPulse"));
+    }
+
+    private static string? TryGetDocumentsFolderForSid(string? windowsSid)
+    {
+        if (string.IsNullOrWhiteSpace(windowsSid))
+            return null;
+
+        try
+        {
+            using var profileKey = Registry.LocalMachine.OpenSubKey(
+                $@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{windowsSid}");
+            var profilePath = profileKey?.GetValue("ProfileImagePath")?.ToString();
+            if (string.IsNullOrWhiteSpace(profilePath))
+                return null;
+
+            return Path.Combine(Environment.ExpandEnvironmentVariables(profilePath), "Documents");
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string ReadString(RegistryKey key, string name, string fallback)

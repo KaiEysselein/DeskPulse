@@ -55,11 +55,13 @@ public partial class SettingsForm : Form
     private HashSet<string> _filteredFileActivityProcesses = new(StringComparer.OrdinalIgnoreCase);
     private bool _initializingUi = true;
     private readonly Button _saveAndCloseButton = new();
+    private readonly bool _administratorMode;
     private bool _isDirty;
     private bool _allowClose;
 
     public SettingsForm(bool administratorMode = false)
     {
+        _administratorMode = administratorMode;
         InitializeComponent();
         AppIcon.Apply(this);
         ConfigureActivityRuleTabs();
@@ -626,7 +628,7 @@ public partial class SettingsForm : Form
             settings.ServiceSafetyWarningSustainedSeconds = (int)_safetyWarningSecondsNumeric.Value;
             settings.ServiceSafetyCriticalSustainedSeconds = (int)_safetyCriticalSecondsNumeric.Value;
             settings.PauseLoggingAtStartupAfterSafetyTrigger = _pauseLoggingAtStartupAfterSafetyTriggerCheckBox.Checked;
-            settings.Save();
+            settings.SaveSystemSettings();
             _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS");
             MessageBox.Show("The service safeguard settings were saved. Threshold changes apply to the running service; the restart-pause option applies after the next service or Windows restart.", "Safeguard Settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -730,7 +732,10 @@ public partial class SettingsForm : Form
         if (settings == null)
             return;
 
-        settings.Save();
+        if (_administratorMode)
+            settings.SaveSystemSettings();
+        else
+            settings.Save();
 
         using var progressForm = new RuleCleanupProgressForm(
             "DeskPulse Database Housekeeping",
@@ -2961,7 +2966,10 @@ public partial class SettingsForm : Form
             ExportSheets = exportSheets
         };
 
-        settings.Save();
+        if (_administratorMode)
+            settings.SaveSystemSettings();
+        else
+            settings.Save();
         _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS");
         _isDirty = false;
         DialogResult = DialogResult.None;

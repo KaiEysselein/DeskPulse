@@ -16,6 +16,8 @@ public static class StorageLayout
 
     public static string SystemDatabaseFilePath => Path.Combine(SystemFolder, "DeskPulse-System.db");
 
+    public static string SystemSettingsFilePath => Path.Combine(SystemFolder, "settings.json");
+
     public static string UsersFolder => Path.Combine(RootFolder, "Users");
 
     public static string GetUserFolder(string windowsSid) =>
@@ -23,6 +25,12 @@ public static class StorageLayout
 
     public static string GetUserDatabaseFilePath(string windowsSid) =>
         Path.Combine(GetUserFolder(windowsSid), "DeskPulse.db");
+
+    public static string GetUserSettingsFolder(string windowsSid) =>
+        Path.Combine(GetUserFolder(windowsSid), "Settings");
+
+    public static string GetUserSettingsFilePath(string windowsSid) =>
+        Path.Combine(GetUserSettingsFolder(windowsSid), "settings.json");
 
     public static bool TryGetUserSidFromDatabaseFilePath(string databaseFilePath, out string windowsSid)
     {
@@ -130,6 +138,31 @@ public static class StorageLayout
         Directory.CreateDirectory(UsersFolder);
         var userFolder = Directory.CreateDirectory(GetUserFolder(userSid.Value));
         SetStorageAcl(userFolder, userSid);
+    }
+
+    public static void PrepareUserSettingsStorage(string windowsSid)
+    {
+        PrepareUserStorage(windowsSid);
+        var userSid = new SecurityIdentifier(ValidateSid(windowsSid));
+        var settingsFolder = Directory.CreateDirectory(GetUserSettingsFolder(userSid.Value));
+
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[]
+        {
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            userSid
+        })
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                sid,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
+        settingsFolder.SetAccessControl(security);
     }
 
     private static void SetStorageAcl(DirectoryInfo folder, SecurityIdentifier readOnlySid)

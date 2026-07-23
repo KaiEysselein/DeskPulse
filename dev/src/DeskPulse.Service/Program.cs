@@ -388,7 +388,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 try { if (File.Exists(CriticalPauseMarker)) File.Delete(CriticalPauseMarker); } catch { }
                 _safetyMonitor?.ClearCriticalState();
                 _monitor.ResumeLogging(); return "OK|ACTIVE";
-            case "RELOAD_SETTINGS": _monitor.ReloadSettings(); return "OK";
+            case "RELOAD_SETTINGS": _monitor.ReloadSettingsForProcess(clientProcessId); return "OK";
             case "INSTALL_LIFECYCLE": return RecordInstallLifecycle(command);
             case "START_LOAD_TEST": return StartLoadTest(command);
             case "STOP_LOAD_TEST": return _loadTest.Stop(WriteLoadTestEvent);
