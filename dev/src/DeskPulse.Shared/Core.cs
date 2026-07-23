@@ -49,9 +49,7 @@ public sealed class FileIoMonitor : IDisposable
     {
         _settings = AppSettings.Load();
 
-        EnsureDataFolderExists(_settings.DataFolderPath);
-
-        _database = new DeskPulseDatabase(_settings.DatabaseFilePath);
+        _database = new DeskPulseDatabase(PrepareAndResolveDatabaseFilePath(_settings));
         _database.Initialize();
         _programActivityMonitor = new ProgramActivityMonitor(GetSettingsSnapshot, GetDatabaseSnapshot);
 
@@ -283,12 +281,12 @@ public sealed class FileIoMonitor : IDisposable
         {
             _settings = AppSettings.Load();
 
-            EnsureDataFolderExists(_settings.DataFolderPath);
+            var databaseFilePath = PrepareAndResolveDatabaseFilePath(_settings);
 
-            if (!string.Equals(_database.DatabaseFilePath, _settings.DatabaseFilePath, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(_database.DatabaseFilePath, databaseFilePath, StringComparison.OrdinalIgnoreCase))
             {
                 _database.Dispose();
-                _database = new DeskPulseDatabase(_settings.DatabaseFilePath);
+                _database = new DeskPulseDatabase(databaseFilePath);
             }
 
             _database.Initialize();
@@ -329,6 +327,18 @@ public sealed class FileIoMonitor : IDisposable
         {
             return _settings.Clone();
         }
+    }
+
+    private static string PrepareAndResolveDatabaseFilePath(AppSettings settings)
+    {
+        if (StorageLayout.TryResolveCurrentOrInteractiveUserSid(out var interactiveUserSid))
+        {
+            StorageMigration.EnsureUserDatabase(settings.LegacyDatabaseFilePath, interactiveUserSid);
+            return StorageLayout.GetUserDatabaseFilePath(interactiveUserSid);
+        }
+
+        StorageLayout.PrepareSystemStorage();
+        return StorageLayout.SystemDatabaseFilePath;
     }
 
     private DeskPulseDatabase GetDatabaseSnapshot()
@@ -4822,7 +4832,10 @@ public sealed class AppSettings
 
     public List<ExportSheetOption> ExportSheets { get; set; } = ExportSheetOption.GetDefaultOptions();
 
-    public string DatabaseFilePath => Path.Combine(DataFolderPath, "DeskPulse.db");
+    public string LegacyDatabaseFilePath => Path.Combine(DataFolderPath, "DeskPulse.db");
+
+    public string DatabaseFilePath =>
+        StorageLayout.GetUserDatabaseFilePath(StorageLayout.ResolveCurrentOrInteractiveUserSid());
 
     public string ExcelExportFilePath => Path.Combine(DataFolderPath, "DeskPulse-export.xlsx");
 

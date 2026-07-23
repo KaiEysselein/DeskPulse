@@ -1,5 +1,5 @@
 ﻿# Manual test uninstall. Run from elevated PowerShell.
-# Preserves %USERPROFILE%\Documents\DeskPulse and its database.
+# Preserves legacy Documents data and ProgramData System/Users databases.
 $ErrorActionPreference = 'Continue'
 Stop-Process -Name 'DeskPulse.Tray' -Force -ErrorAction SilentlyContinue
 Stop-Service 'DeskPulse.Service' -ErrorAction SilentlyContinue
@@ -12,8 +12,11 @@ Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -li
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'DeskPulse Tray.lnk') -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'DeskPulse.lnk') -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:ProgramFiles 'DeskPulse') -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $env:ProgramData 'DeskPulse') -Recurse -Force -ErrorAction SilentlyContinue
+$programData = Join-Path $env:ProgramData 'DeskPulse'
+Remove-Item (Join-Path $programData 'settings.json') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $programData 'settings.json.tmp') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $programData 'critical-safety-pause.flag') -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:LOCALAPPDATA 'DeskPulse') -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:APPDATA 'DeskPulse') -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Host 'DeskPulse service, program files, settings and startup entries removed. Documents\DeskPulse was preserved.' -ForegroundColor Yellow
+Write-Host 'DeskPulse service, program files, settings and startup entries removed. Activity databases were preserved.' -ForegroundColor Yellow

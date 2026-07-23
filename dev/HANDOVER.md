@@ -40,6 +40,26 @@ DeskPulse consists of three .NET 8 Windows projects:
 
 The service owns all SQLite write operations. The tray opens the activity database read-only for views, counts, statistics and exports.
 
+### 0.3.2.x storage migration work in progress
+
+The development working tree now contains the first ProgramData storage foundation:
+
+- live user activity is routed to `C:\ProgramData\DeskPulse\Users\<Windows-SID>\DeskPulse.db`;
+- the LocalSystem service resolves the active console user's SID from the session token;
+- startup without an interactive session falls back to `C:\ProgramData\DeskPulse\System\DeskPulse-System.db`;
+- the legacy Documents database is transferred with SQLite online backup, integrity validation, a retained pre-migration backup and rollback cleanup;
+- SID folders receive protected ACLs granting full control only to LocalSystem and administrators, with read-only access for the owning user;
+- uninstall preserves the new system and per-user database folders.
+
+This is not yet the complete multi-user architecture. Event-level scope/SID/session metadata, simultaneous-session routing, rule ownership separation and service-side administrative pipe authorization remain open.
+
+The migration foundation was runtime-tested on 2026-07-23 against the installed
+0.3.2.0 database. SQLite integrity and table counts were checked before and
+after migration, protected ACLs were confirmed, service restart retained the
+SID database, and uninstall/reinstall preserved it. The test identified and
+fixed migration-only SQLite connection pooling and Inno Setup directory
+ownership before the final successful run.
+
 ### 0.3.2.0 storage and security boundary
 
 The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.

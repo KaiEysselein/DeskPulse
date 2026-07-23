@@ -88,6 +88,12 @@ public sealed class DeskPulseWindowsService : ServiceBase
     {
         base.OnSessionChange(changeDescription);
         if (_monitor == null) return;
+        if (changeDescription.Reason == System.ServiceProcess.SessionChangeReason.SessionLogon ||
+            changeDescription.Reason == System.ServiceProcess.SessionChangeReason.ConsoleConnect ||
+            changeDescription.Reason == System.ServiceProcess.SessionChangeReason.RemoteConnect)
+        {
+            _monitor.ReloadSettings();
+        }
         var mapped = changeDescription.Reason switch
         {
             System.ServiceProcess.SessionChangeReason.SessionLogon => SessionSwitchReason.SessionLogon,

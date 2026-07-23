@@ -45,7 +45,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Dirs]
-Name: "{commonappdata}\DeskPulse"; Permissions: users-modify
+Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveruninstall
 
 [Files]
 Source: "..\publish\v0.3.2.0\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -64,8 +64,9 @@ Name: "{group}\Uninstall DeskPulse"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Tasks: desktopicon
 
 [Run]
-; Normalize/migrate the shared settings as the original interactive user before
-; the LocalSystem service starts. This guarantees an absolute Documents path.
+; Normalize the shared settings as the original interactive user before the
+; LocalSystem service starts. The service then migrates the live database into
+; its protected ProgramData SID folder.
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--initialize-settings"; Flags: runhidden waituntilterminated runasoriginaluser
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
 Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Service\{#ServiceExeName}"" start= auto DisplayName= ""DeskPulse Service"""; Flags: runhidden waituntilterminated
@@ -106,8 +107,11 @@ Type: files; Name: "{commonstartup}\DeskPulse.lnk"
 Type: files; Name: "{userstartup}\DeskPulse Tray.lnk"
 Type: files; Name: "{commonstartup}\DeskPulse Tray.lnk"
 
-; Remove application settings and service data, but preserve the database and user files in Documents\DeskPulse.
-Type: filesandordirs; Name: "{commonappdata}\DeskPulse"
+; Remove settings and transient service state. Preserve the ProgramData System
+; and Users database folders so uninstall cannot destroy recorded activity.
+Type: files; Name: "{commonappdata}\DeskPulse\settings.json"
+Type: files; Name: "{commonappdata}\DeskPulse\settings.json.tmp"
+Type: files; Name: "{commonappdata}\DeskPulse\critical-safety-pause.flag"
 Type: filesandordirs; Name: "{localappdata}\DeskPulse"
 Type: filesandordirs; Name: "{userappdata}\DeskPulse"
 

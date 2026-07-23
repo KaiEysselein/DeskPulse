@@ -288,7 +288,7 @@ public partial class SettingsForm : Form
 
     private void ConfigureFilteredFileActivityProcessesButton_Click(object? sender, EventArgs e)
     {
-        var databasePath = Path.Combine(_dataFolderTextBox.Text.Trim(), "DeskPulse.db");
+        var databasePath = AppSettings.Load().DatabaseFilePath;
         IReadOnlyList<FileActivityProcessSummary> summaries;
         try
         {
