@@ -65,13 +65,13 @@ public partial class ViewLogForm : Form
         }.ToString();
         if (_machineWide)
         {
-            Text = "DeskPulse Machine-wide Log (Administrator, read-only)";
+            Text = "DeskPulse - Machine-wide Log (Administrator, read-only)";
             createRuleButton.Visible = false;
             deleteButton.Visible = false;
         }
         else if (_systemOnly)
         {
-            Text = "DeskPulse System Log (read-only)";
+            Text = "DeskPulse - System Log (read-only)";
             createRuleButton.Visible = false;
             deleteButton.Visible = false;
         }

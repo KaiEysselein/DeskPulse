@@ -227,7 +227,7 @@ partial class ViewLogForm
         Controls.Add(topPanel);
         MinimumSize = new System.Drawing.Size(1000, 500);
         StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-        Text = "DeskPulse - View Log";
+        Text = "DeskPulse - Personal Log";
         topPanel.ResumeLayout(false);
         topPanel.PerformLayout();
         tabs.ResumeLayout(false);

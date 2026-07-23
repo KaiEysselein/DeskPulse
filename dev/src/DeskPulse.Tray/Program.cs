@@ -342,9 +342,9 @@ public sealed class TrayAppContext : ApplicationContext
         _safetyTimer.Start();
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
-        AddMenuCommand("View Log...", OpenViewLog);
-        AddMenuCommand("System Log (read-only)...", OpenSystemLog);
-        AddMenuCommand("Machine-wide Log (Administrator)...", OpenAdministratorLog);
+        AddMenuCommand("Personal Log...", OpenViewLog);
+        AddMenuCommand("System Log...", OpenSystemLog);
+        AddMenuCommand("Machine-wide Log...", OpenAdministratorLog);
         AddMenuCommand("Settings...", OpenSettings);
         AddMenuCommand("Administrator settings...", OpenAdministratorSettings);
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
