@@ -85,6 +85,12 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => a.Equals("--system-log", StringComparison.OrdinalIgnoreCase)))
+        {
+            Application.Run(new ViewLogForm(systemOnly: true));
+            return;
+        }
+
         var mutexName = $"Local\\DeskPulse.Tray.Session.{Process.GetCurrentProcess().SessionId}";
         _trayInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
@@ -337,6 +343,7 @@ public sealed class TrayAppContext : ApplicationContext
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
         AddMenuCommand("View Log...", OpenViewLog);
+        AddMenuCommand("System Log (read-only)...", OpenSystemLog);
         AddMenuCommand("Machine-wide Log (Administrator)...", OpenAdministratorLog);
         AddMenuCommand("Settings...", OpenSettings);
         AddMenuCommand("Administrator settings...", OpenAdministratorSettings);
@@ -451,6 +458,32 @@ public sealed class TrayAppContext : ApplicationContext
     private void OpenViewLog()
     {
         OpenSingleForm(new ViewLogForm(() => _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS")));
+    }
+
+    private static void OpenSystemLog()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--system-log",
+                UseShellExecute = true,
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open the system log.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 
     private void OpenSettings()

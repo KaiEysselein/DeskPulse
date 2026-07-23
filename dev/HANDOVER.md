@@ -186,6 +186,14 @@ separate short-lived process through Windows UAC and rejects an unelevated
 Ordinary **View Log...** remains bound only to the calling user's SID database.
 No database ACLs are broadened to implement the combined view.
 
+The tray also exposes **System Log (read-only)...** without UAC. It opens only
+`C:\ProgramData\DeskPulse\System\DeskPulse-System.db` through its existing
+read-only ACL and SQLite connection, supports paging, sorting, details and
+current-page export, and hides deletion and rule-creation controls. It runs in
+a separate unelevated process so it cannot be confused with the personal log
+window. The personal, system-only and administrator-combined views therefore
+retain distinct privilege and data boundaries.
+
 ### 0.3.2.0 storage and security boundary
 
 The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.

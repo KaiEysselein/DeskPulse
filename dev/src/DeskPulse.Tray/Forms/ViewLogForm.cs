@@ -33,6 +33,7 @@ public partial class ViewLogForm : Form
     private readonly string _connectionString;
     private readonly string _databaseFilePath;
     private readonly bool _machineWide;
+    private readonly bool _systemOnly;
     private readonly Action? _settingsChanged;
     private string _appSortColumn = "CreatedAt";
     private bool _appSortAscending;
@@ -41,15 +42,19 @@ public partial class ViewLogForm : Form
     private string _userSortColumn = "CreatedAt";
     private bool _userSortAscending;
 
-    public ViewLogForm(Action? settingsChanged = null, bool machineWide = false)
+    public ViewLogForm(
+        Action? settingsChanged = null,
+        bool machineWide = false,
+        bool systemOnly = false)
     {
         InitializeComponent();
         AppIcon.Apply(this);
 
         _settingsChanged = settingsChanged;
         _machineWide = machineWide;
+        _systemOnly = systemOnly;
         var settings = AppSettings.Load();
-        _databaseFilePath = machineWide
+        _databaseFilePath = machineWide || systemOnly
             ? StorageLayout.SystemDatabaseFilePath
             : settings.DatabaseFilePath;
         _connectionString = new SqliteConnectionStringBuilder
@@ -61,6 +66,12 @@ public partial class ViewLogForm : Form
         if (_machineWide)
         {
             Text = "DeskPulse Machine-wide Log (Administrator, read-only)";
+            createRuleButton.Visible = false;
+            deleteButton.Visible = false;
+        }
+        else if (_systemOnly)
+        {
+            Text = "DeskPulse System Log (read-only)";
             createRuleButton.Visible = false;
             deleteButton.Visible = false;
         }
