@@ -114,7 +114,7 @@ public partial class ViewLogForm : Form
             var alias = "source" + index.ToString(CultureInfo.InvariantCulture);
             using var attach = combined.CreateCommand();
             attach.CommandText = $"ATTACH DATABASE $path AS [{alias}];";
-            attach.Parameters.AddWithValue("$path", new Uri(Path.GetFullPath(databasePaths[index])).AbsoluteUri + "?mode=ro");
+            attach.Parameters.AddWithValue("$path", Path.GetFullPath(databasePaths[index]));
             attach.ExecuteNonQuery();
             aliases.Add(alias);
         }
@@ -127,6 +127,15 @@ public partial class ViewLogForm : Form
                 ? $"CREATE TEMP TABLE [{table}] (Id INTEGER, CreatedAt TEXT);"
                 : $"CREATE TEMP VIEW [{table}] AS {string.Join(" UNION ALL ", selects)};";
             view.ExecuteNonQuery();
+        }
+
+        // ATTACH URI read-only parameters are not interpreted consistently by
+        // the bundled Windows SQLite provider. Enforce read-only behavior for
+        // the entire combined connection after its temporary views are built.
+        using (var queryOnly = combined.CreateCommand())
+        {
+            queryOnly.CommandText = "PRAGMA query_only=ON;";
+            queryOnly.ExecuteNonQuery();
         }
 
         return combined;

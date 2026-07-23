@@ -173,7 +173,8 @@ separate short-lived process through Windows UAC and rejects an unelevated
 `--administrator-log` launch. The elevated window:
 
 - attaches the protected system database and every available SID database in
-  SQLite read-only mode;
+  one connection, then applies SQLite `query_only` mode after building the
+  temporary combined views (native Windows paths are used for `ATTACH`);
 - presents their File, App and User Activity records through the existing
   paging, sorting, grouping, detail and current-page export features;
 - includes Scope, Windows SID and Session ID in record details so each combined
