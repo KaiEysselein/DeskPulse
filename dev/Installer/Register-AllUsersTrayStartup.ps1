@@ -14,7 +14,11 @@ if (!(Test-Path -LiteralPath $TrayPath -PathType Leaf)) {
 }
 
 try {
-    $action = New-ScheduledTaskAction -Execute $TrayPath
+    $trayWorkingDirectory = [System.IO.Path]::GetDirectoryName($TrayPath)
+    $action = New-ScheduledTaskAction `
+        -Execute $TrayPath `
+        -Argument '--tray' `
+        -WorkingDirectory $trayWorkingDirectory
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $principal = New-ScheduledTaskPrincipal -GroupId $usersSid -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet `

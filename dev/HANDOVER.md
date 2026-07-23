@@ -109,6 +109,20 @@ The first two-user test exposed and corrected the legacy migration guard before
 final acceptance. The contaminated test SID database was removed and recreated
 cleanly; the original SID database and backups were unaffected.
 
+The final acceptance rerun found that the scheduled task action had lost the
+tray working directory, producing task result `1` for TestAccount. The
+registration script now sets:
+
+- executable: installed `DeskPulse.Tray.exe`;
+- argument: `--tray`;
+- working directory: the installed Tray folder;
+- principal: built-in Users, Limited;
+- multiple instances: Parallel.
+
+The installer was rebuilt and the live task now contains all three action
+values. Its PowerShell 5 registration path uses
+`[System.IO.Path]::GetDirectoryName` for compatibility.
+
 ### Named-pipe command authorization
 
 The service now resolves the connecting named-pipe client's process ID and
