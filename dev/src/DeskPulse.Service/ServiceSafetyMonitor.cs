@@ -43,7 +43,7 @@ internal sealed class ServiceSafetyMonitor : IDisposable
         while (!token.IsCancellationRequested)
         {
             await Task.Delay(1000, token);
-            var settings = AppSettings.Load();
+            var settings = AppSettings.LoadSystemSettings();
             process.Refresh();
             var nowCpu = process.TotalProcessorTime;
             var nowStamp = Stopwatch.GetTimestamp();

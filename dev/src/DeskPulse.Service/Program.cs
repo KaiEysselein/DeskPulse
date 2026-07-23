@@ -57,7 +57,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
         _monitor = new FileIoMonitor(false);
         _monitor.Start();
 
-        var startupSettings = AppSettings.Load();
+        var startupSettings = AppSettings.LoadSystemSettings();
         if (File.Exists(CriticalPauseMarker))
         {
             if (startupSettings.PauseLoggingAtStartupAfterSafetyTrigger)
