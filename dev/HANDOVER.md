@@ -170,6 +170,8 @@ rule set, including service start and stop events, in Administrator Settings.
 DeskPulse deliberately provides no combined or all-users log view:
 
 - **Personal Log...** remains bound only to the calling user's SID database;
+- Personal Log runs in its own unelevated `--personal-log` process, so closing
+  the window cannot terminate the background tray;
 - each SID folder grants read access only to its owning user, LocalSystem and
   administrators at the Windows ACL level;
 - DeskPulse does not expose another user's records through an administrator UI;
@@ -185,6 +187,11 @@ DeskPulse deliberately provides no combined or all-users log view:
 Closing the System Log ends its elevated process. This preserves clear
 per-user isolation while keeping shared service, installation and safeguard
 activity available to administrators.
+
+The installer starts the background tray explicitly with `--tray`; it never
+uses a log-window command as its post-install launch. Runtime regression
+testing confirmed that closing the separate Personal Log process leaves the
+original tray PID running.
 
 ### 0.3.2.0 storage and security boundary
 

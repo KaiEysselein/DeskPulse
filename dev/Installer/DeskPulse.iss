@@ -77,7 +77,7 @@ Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse ba
 Filename: "{sys}\sc.exe"; Parameters: "failure {#ServiceName} reset= 86400 actions= restart/5000/restart/15000/restart/60000"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "start {#ServiceName}"; Flags: runhidden waituntilterminated
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "{code:GetInstallLifecycleParameters}"; Flags: runhidden waituntilterminated runasoriginaluser
-Filename: "{app}\Tray\{#TrayExeName}"; Description: "Start DeskPulse Tray"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--tray"; Description: "Start DeskPulse Tray"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 ; These run before Inno Setup removes installed files.
 [UninstallRun]

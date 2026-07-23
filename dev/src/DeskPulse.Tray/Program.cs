@@ -85,6 +85,13 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => a.Equals("--personal-log", StringComparison.OrdinalIgnoreCase)))
+        {
+            Application.Run(new ViewLogForm(
+                () => _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS")));
+            return;
+        }
+
         var mutexName = $"Local\\DeskPulse.Tray.Session.{Process.GetCurrentProcess().SessionId}";
         _trayInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
@@ -448,9 +455,30 @@ public sealed class TrayAppContext : ApplicationContext
             MessageBox.Show(response, "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
-    private void OpenViewLog()
+    private static void OpenViewLog()
     {
-        OpenSingleForm(new ViewLogForm(() => _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS")));
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--personal-log",
+                UseShellExecute = true,
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open the personal log.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 
     private static void OpenSystemLog()
