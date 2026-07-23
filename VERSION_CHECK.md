@@ -11,6 +11,8 @@ Version **0.3.3.0** is the current release candidate. Historical version numbers
 - Installer: `dev\publish\v0.3.3.0\installer\DeskPulse_Setup_0.3.3.0.exe`
 - Permanent milestone folder: `releases\v0.3.3.0`
 - GitHub tag target: `v0.3.3.0`
+- Published product version commit: `2730f1648ab726ff3bbda7e04c0302c9ba430672`
+- Installer SHA-256: `6AB43A09F96F2CA30DDDEBEF0DC8EA8B2BD66F76CCF83DB57F08B79BA4BDF7FB`
 
 ## Release checks
 
