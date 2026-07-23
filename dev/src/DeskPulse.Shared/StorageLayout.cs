@@ -80,7 +80,7 @@ public static class StorageLayout
 
         var consoleSessionId = NativeMethods.WTSGetActiveConsoleSessionId();
         if (consoleSessionId == uint.MaxValue ||
-            !NativeMethods.WTSQueryUserToken(consoleSessionId, out var userToken))
+            !TryResolveSessionUser(checked((int)consoleSessionId), out windowsSid, out userName))
         {
             windowsSid = string.Empty;
             sessionId = -1;
@@ -88,11 +88,27 @@ public static class StorageLayout
             return false;
         }
 
+        sessionId = checked((int)consoleSessionId);
+        return true;
+    }
+
+    public static bool TryResolveSessionUser(
+        int sessionId,
+        out string windowsSid,
+        out string userName)
+    {
+        windowsSid = string.Empty;
+        userName = string.Empty;
+        if (sessionId < 0 ||
+            !NativeMethods.WTSQueryUserToken(checked((uint)sessionId), out var userToken))
+        {
+            return false;
+        }
+
         using (userToken)
         using (var interactiveIdentity = new WindowsIdentity(userToken.DangerousGetHandle()))
         {
             windowsSid = interactiveIdentity.User?.Value ?? string.Empty;
-            sessionId = checked((int)consoleSessionId);
             userName = interactiveIdentity.Name;
             return windowsSid.Length > 0;
         }

@@ -76,7 +76,25 @@ The next attribution/routing slice was also completed and runtime-tested on
 
 The installed upgrade passed schema, routing, restart and SQLite integrity
 checks for both the user and system databases. Simultaneous-session routing is
-still future work; the service currently follows the active console session.
+now implemented in the development baseline:
+
+- ETW file records resolve their owning process session and SID before choosing
+  a database writer;
+- the service keeps a protected writer per resolved SID and retains system
+  fallback for unattributable events;
+- program monitoring scans every resolvable interactive session rather than
+  only the active console session;
+- service session-change records use the Windows-supplied session ID;
+- database-changing named-pipe commands use the connecting client's process
+  session instead of whichever console session happens to be active;
+- the tray uses a session-local mutex so each Windows session can have one tray
+  instance without blocking trays in other sessions.
+
+Single-session installation, caller-routed pipe operations, duplicate-tray
+prevention, service restart and both-database integrity were verified on
+2026-07-23. A second simultaneous local/RDP login was not available on the test
+machine; final multi-session acceptance still requires two signed-in Windows
+sessions and confirmation that each SID database receives only its own events.
 
 ### 0.3.2.0 storage and security boundary
 

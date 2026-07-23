@@ -37,6 +37,7 @@ public sealed class FileIoMonitor : IDisposable
     private AppSettings _settings;
     private DeskPulseDatabase _database;
     private readonly DeskPulseDatabase _systemDatabase;
+    private readonly Dictionary<string, DeskPulseDatabase> _userDatabases = new(StringComparer.OrdinalIgnoreCase);
     private EventAttribution _activeAttribution;
     private ProgramActivityMonitor _programActivityMonitor;
     private TraceEventSession? _session;
@@ -56,10 +57,12 @@ public sealed class FileIoMonitor : IDisposable
         _systemDatabase.Initialize();
         (_database, _activeAttribution) = PrepareAndResolveUserDatabase(_settings);
         _database.Initialize();
+        if (_activeAttribution.Scope == EventScope.User)
+            _userDatabases[_activeAttribution.WindowsSid] = _database;
         _programActivityMonitor = new ProgramActivityMonitor(
             GetSettingsSnapshot,
-            GetDatabaseSnapshot,
-            GetActiveAttribution);
+            GetDatabaseForAttribution,
+            sessionId => ResolveSessionAttribution(sessionId));
 
         WriteDeskPulseProgramEvent("ServiceStarted", "DeskPulse service started", "DeskPulse background service startup completed");
         WriteUserEvent("DeskPulseServiceStarted", "DeskPulse service started", "DeskPulse background service startup detected", scope: EventScope.System);
@@ -88,33 +91,33 @@ public sealed class FileIoMonitor : IDisposable
 
     private void OnSessionSwitch(object sender, SessionSwitchEventArgs e) => HandleSessionSwitch(e.Reason);
 
-    public void HandleSessionSwitch(SessionSwitchReason reason)
+    public void HandleSessionSwitch(SessionSwitchReason reason, int? sessionId = null)
     {
         switch (reason)
         {
             case SessionSwitchReason.SessionLock:
-                WriteUserEvent("SessionLocked", "PC locked", "Windows session was locked");
+                WriteUserEvent("SessionLocked", "PC locked", "Windows session was locked", sessionId: sessionId);
                 break;
             case SessionSwitchReason.SessionUnlock:
-                WriteUserEvent("SessionUnlocked", "PC unlocked", "Windows session was unlocked");
+                WriteUserEvent("SessionUnlocked", "PC unlocked", "Windows session was unlocked", sessionId: sessionId);
                 break;
             case SessionSwitchReason.SessionLogon:
-                WriteUserEvent("SessionLogon", "User logged on", "Windows session logon detected");
+                WriteUserEvent("SessionLogon", "User logged on", "Windows session logon detected", sessionId: sessionId);
                 break;
             case SessionSwitchReason.SessionLogoff:
-                WriteUserEvent("SessionLogoff", "User logged off", "Windows session logoff detected");
+                WriteUserEvent("SessionLogoff", "User logged off", "Windows session logoff detected", sessionId: sessionId);
                 break;
             case SessionSwitchReason.ConsoleConnect:
-                WriteUserEvent("ConsoleConnect", "Console connected", "Console session connected");
+                WriteUserEvent("ConsoleConnect", "Console connected", "Console session connected", sessionId: sessionId);
                 break;
             case SessionSwitchReason.ConsoleDisconnect:
-                WriteUserEvent("ConsoleDisconnect", "Console disconnected", "Console session disconnected");
+                WriteUserEvent("ConsoleDisconnect", "Console disconnected", "Console session disconnected", sessionId: sessionId);
                 break;
             case SessionSwitchReason.RemoteConnect:
-                WriteUserEvent("RemoteConnect", "Remote session connected", "Remote session connected");
+                WriteUserEvent("RemoteConnect", "Remote session connected", "Remote session connected", sessionId: sessionId);
                 break;
             case SessionSwitchReason.RemoteDisconnect:
-                WriteUserEvent("RemoteDisconnect", "Remote session disconnected", "Remote session disconnected");
+                WriteUserEvent("RemoteDisconnect", "Remote session disconnected", "Remote session disconnected", sessionId: sessionId);
                 break;
         }
     }
@@ -185,7 +188,8 @@ public sealed class FileIoMonitor : IDisposable
         string eventDescription,
         string note,
         string? userNameOverride = null,
-        string scope = EventScope.User)
+        string scope = EventScope.User,
+        int? sessionId = null)
     {
         if (_loggingPaused)
             return;
@@ -198,16 +202,14 @@ public sealed class FileIoMonitor : IDisposable
 
             var attribution = scope == EventScope.System
                 ? EventAttribution.System
-                : GetActiveAttribution();
-            var database = attribution.Scope == EventScope.System
-                ? _systemDatabase
-                : GetDatabaseSnapshot();
+                : ResolveSessionAttribution(sessionId);
+            var database = GetDatabaseForAttribution(attribution);
 
             database.InsertUserEvent(new UserEventRecord
             {
                 EventTime = DateTime.Now,
                 EventDescription = eventDescription,
-                UserName = string.IsNullOrWhiteSpace(userNameOverride) ? Environment.UserName : userNameOverride.Trim(),
+                UserName = string.IsNullOrWhiteSpace(userNameOverride) ? attribution.UserName : userNameOverride.Trim(),
                 MachineName = Environment.MachineName,
                 ProcessName = AppInfo.AppName,
                 ProcessId = Environment.ProcessId,
@@ -309,14 +311,16 @@ public sealed class FileIoMonitor : IDisposable
             var (resolvedDatabase, attribution) = PrepareAndResolveUserDatabase(_settings);
             var databaseFilePath = resolvedDatabase.DatabaseFilePath;
 
-            if (!string.Equals(_database.DatabaseFilePath, databaseFilePath, StringComparison.OrdinalIgnoreCase))
+            if (_userDatabases.TryGetValue(attribution.WindowsSid, out var existingDatabase))
             {
-                _database.Dispose();
-                _database = resolvedDatabase;
+                resolvedDatabase.Dispose();
+                _database = existingDatabase;
             }
             else
             {
-                resolvedDatabase.Dispose();
+                _database = resolvedDatabase;
+                if (attribution.Scope == EventScope.User)
+                    _userDatabases[attribution.WindowsSid] = _database;
             }
 
             _activeAttribution = attribution;
@@ -395,6 +399,65 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
+    private DeskPulseDatabase GetDatabaseForAttribution(EventAttribution attribution)
+    {
+        if (attribution.Scope != EventScope.User || string.IsNullOrWhiteSpace(attribution.WindowsSid))
+            return _systemDatabase;
+
+        lock (_settingsLock)
+        {
+            if (_userDatabases.TryGetValue(attribution.WindowsSid, out var database))
+                return database;
+
+            StorageLayout.PrepareUserStorage(attribution.WindowsSid);
+            database = new DeskPulseDatabase(
+                StorageLayout.GetUserDatabaseFilePath(attribution.WindowsSid));
+            database.Initialize();
+            _userDatabases[attribution.WindowsSid] = database;
+            return database;
+        }
+    }
+
+    private EventAttribution ResolveProcessAttribution(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            var sessionId = process.SessionId;
+            if (StorageLayout.TryResolveSessionUser(
+                sessionId,
+                out var windowsSid,
+                out var userName))
+            {
+                return EventAttribution.User(windowsSid, sessionId, userName);
+            }
+        }
+        catch
+        {
+            // A process can exit between ETW delivery and identity resolution.
+        }
+
+        return EventAttribution.System;
+    }
+
+    private EventAttribution ResolveSessionAttribution(int? sessionId)
+    {
+        if (sessionId.HasValue)
+        {
+            if (StorageLayout.TryResolveSessionUser(
+                sessionId.Value,
+                out var windowsSid,
+                out var userName))
+            {
+                return EventAttribution.User(windowsSid, sessionId.Value, userName);
+            }
+
+            return EventAttribution.System;
+        }
+
+        return GetActiveAttribution();
+    }
+
     public T ExecuteDatabaseOperation<T>(Func<DeskPulseDatabase, T> operation)
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -407,6 +470,16 @@ public sealed class FileIoMonitor : IDisposable
         {
             return operation(_database);
         }
+    }
+
+    public T ExecuteDatabaseOperationForProcess<T>(
+        int processId,
+        Func<DeskPulseDatabase, T> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        var attribution = ResolveProcessAttribution(processId);
+        var database = GetDatabaseForAttribution(attribution);
+        return operation(database);
     }
 
     private void RunEtwSession()
@@ -603,13 +676,11 @@ public sealed class FileIoMonitor : IDisposable
         {
             var attribution = string.Equals(record.ActivityType, "Error", StringComparison.OrdinalIgnoreCase)
                 ? EventAttribution.System
-                : GetActiveAttribution();
+                : ResolveProcessAttribution(record.ProcessId);
             record.Scope = attribution.Scope;
             record.WindowsSid = attribution.WindowsSid;
             record.SessionId = attribution.SessionId;
-            var database = attribution.Scope == EventScope.System
-                ? _systemDatabase
-                : GetDatabaseSnapshot();
+            var database = GetDatabaseForAttribution(attribution);
             database.InsertActivityEvent(record);
         }
         catch (Exception ex)
@@ -896,6 +967,14 @@ public sealed class FileIoMonitor : IDisposable
             // Ignore shutdown errors.
         }
 
+        foreach (var database in _userDatabases.Values.Distinct())
+        {
+            if (ReferenceEquals(database, _database))
+                continue;
+
+            try { database.Dispose(); } catch { }
+        }
+
         try
         {
             if (!ReferenceEquals(_database, _systemDatabase))
@@ -912,8 +991,8 @@ public sealed class ProgramActivityMonitor : IDisposable
 {
     private readonly object _lock = new();
     private readonly Func<AppSettings> _getSettings;
-    private readonly Func<DeskPulseDatabase> _getDatabase;
-    private readonly Func<EventAttribution> _getAttribution;
+    private readonly Func<EventAttribution, DeskPulseDatabase> _getDatabase;
+    private readonly Func<int, EventAttribution> _resolveSessionAttribution;
     private readonly Dictionary<int, ProgramSnapshot> _knownProcesses = new();
     private System.Threading.Timer? _timer;
     private bool _disposed;
@@ -922,12 +1001,12 @@ public sealed class ProgramActivityMonitor : IDisposable
 
     public ProgramActivityMonitor(
         Func<AppSettings> getSettings,
-        Func<DeskPulseDatabase> getDatabase,
-        Func<EventAttribution> getAttribution)
+        Func<EventAttribution, DeskPulseDatabase> getDatabase,
+        Func<int, EventAttribution> resolveSessionAttribution)
     {
         _getSettings = getSettings;
         _getDatabase = getDatabase;
-        _getAttribution = getAttribution;
+        _resolveSessionAttribution = resolveSessionAttribution;
     }
 
     public void Start() => Resume();
@@ -960,7 +1039,7 @@ public sealed class ProgramActivityMonitor : IDisposable
 
             _knownProcesses.Clear();
 
-            foreach (var process in CaptureCurrentSessionProcesses(_getAttribution()))
+            foreach (var process in CaptureInteractiveSessionProcesses())
                 _knownProcesses[process.ProcessId] = process;
 
             _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -988,7 +1067,7 @@ public sealed class ProgramActivityMonitor : IDisposable
                 {
                     _knownProcesses.Clear();
 
-                    foreach (var process in CaptureCurrentSessionProcesses(_getAttribution()))
+                    foreach (var process in CaptureInteractiveSessionProcesses())
                         _knownProcesses[process.ProcessId] = process;
 
                     _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -1018,7 +1097,7 @@ public sealed class ProgramActivityMonitor : IDisposable
             if (!_getSettings().LogProgramActivity)
                 return;
 
-            var currentProcesses = CaptureCurrentSessionProcesses(_getAttribution())
+            var currentProcesses = CaptureInteractiveSessionProcesses()
                 .ToDictionary(process => process.ProcessId);
 
             List<ProgramSnapshot> startedProcesses;
@@ -1068,13 +1147,10 @@ public sealed class ProgramActivityMonitor : IDisposable
         }
     }
 
-    private static List<ProgramSnapshot> CaptureCurrentSessionProcesses(EventAttribution attribution)
+    private List<ProgramSnapshot> CaptureInteractiveSessionProcesses()
     {
         var result = new List<ProgramSnapshot>();
-        if (attribution.Scope != EventScope.User || !attribution.SessionId.HasValue)
-            return result;
-
-        var currentSessionId = attribution.SessionId.Value;
+        var sessionAttributions = new Dictionary<int, EventAttribution>();
 
         foreach (var process in Process.GetProcesses())
         {
@@ -1083,7 +1159,14 @@ public sealed class ProgramActivityMonitor : IDisposable
                 if (process.Id == Environment.ProcessId)
                     continue;
 
-                if (process.SessionId != currentSessionId)
+                var sessionId = process.SessionId;
+                if (!sessionAttributions.TryGetValue(sessionId, out var attribution))
+                {
+                    attribution = _resolveSessionAttribution(sessionId);
+                    sessionAttributions[sessionId] = attribution;
+                }
+
+                if (attribution.Scope != EventScope.User)
                     continue;
 
                 var processName = SafeGetProcessName(process);
@@ -1122,7 +1205,11 @@ public sealed class ProgramActivityMonitor : IDisposable
     {
         try
         {
-            _getDatabase().InsertProgramEvent(new ProgramEventRecord
+            _getDatabase(new EventAttribution(
+                snapshot.Scope,
+                snapshot.WindowsSid,
+                snapshot.SessionId,
+                snapshot.UserName)).InsertProgramEvent(new ProgramEventRecord
             {
                 EventTime = eventTime,
                 EventDescription = eventDescription,

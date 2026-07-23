@@ -11,6 +11,8 @@ namespace DeskPulse;
 
 internal static class Program
 {
+    private static Mutex? _trayInstanceMutex;
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -67,7 +69,25 @@ internal static class Program
             return;
         }
 
-        Application.Run(new TrayAppContext());
+        var mutexName = $"Local\\DeskPulse.Tray.Session.{Process.GetCurrentProcess().SessionId}";
+        _trayInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            _trayInstanceMutex.Dispose();
+            _trayInstanceMutex = null;
+            return;
+        }
+
+        try
+        {
+            Application.Run(new TrayAppContext());
+        }
+        finally
+        {
+            try { _trayInstanceMutex.ReleaseMutex(); } catch { }
+            _trayInstanceMutex.Dispose();
+            _trayInstanceMutex = null;
+        }
     }
 
     private static bool IsProcessElevated()
