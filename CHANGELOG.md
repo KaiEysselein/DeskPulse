@@ -2,6 +2,31 @@
 
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
+## 0.3.3.0 — 2026-07-23
+
+### Added
+
+- Added protected system and per-user ProgramData databases, settings and rule ownership keyed by Windows SID.
+- Added event scope, SID and Windows-session attribution with simultaneous-session routing.
+- Added service-side named-pipe client identity, installation-path and elevation authorization.
+- Added isolated current-user Log and Settings plus UAC-elevated System Log and System Settings and Maintenance.
+- Added an optional **Log folder openings** setting that preserves extensionless-file logging.
+- Added complete active-tab/date-range export with progress reporting.
+
+### Changed
+
+- The tray now groups ordinary actions under **Current User** and machine-wide actions under **Administrator**.
+- Current-user actions are named **Log...** and **Settings...**, with hover text identifying their scope.
+- Only one DeskPulse form may be open from the tray at a time.
+- Per-user maintenance targets only the verified caller's SID database; administrator maintenance targets only the protected system database.
+- The all-users scheduled tray task supports parallel Windows sessions and uses the installed tray working directory.
+
+### Fixed
+
+- Service startup now succeeds when no interactive console user is present.
+- Settings storage saves no longer attempt to rewrite a read-only parent SID-folder ACL.
+- Legacy single-user database migration is guarded so only the first SID receives historical data.
+
 ## 0.3.2.0 — 2026-07-22
 
 ### Added

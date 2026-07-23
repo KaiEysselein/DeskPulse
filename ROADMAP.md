@@ -1,53 +1,40 @@
 # DeskPulse Roadmap
 
-## Current release: 0.3.2.0
+## Current release: 0.3.3.0
 
-- Database-cleanup window-handling correction
-- Installation lifecycle activity logging
-- Transparent tray-state icons
-- Existing service resource safeguards and diagnostic tests
-- Unelevated General and Rules settings with a separate UAC-elevated Maintenance window
+- Protected system and per-user ProgramData databases and settings
+- SID, scope and Windows-session attribution
+- Simultaneous-session database and rule routing
+- Safe legacy database migration with backup and rollback
+- Service-side named-pipe client authorization
+- Isolated current-user and administrator system interfaces
+- All-users scheduled tray startup with one tray per session
+- Complete date-range export with progress
+- Optional folder-opening suppression
+- One DeskPulse form open from the tray at a time
 
 ## Planned
 
-### 0.3.2.x — Service-owned database migration and separation
-
-- Move the live database out of the user's Documents folder into service-owned `%ProgramData%\DeskPulse` storage.
-- Separate machine-wide records from per-user records keyed by Windows SID.
-- Migrate the existing database and settings with backup, validation and rollback.
-- Separate system and per-user rule ownership.
-- Authorize administrative named-pipe requests service-side using the client token and identity.
-- Keep 0.3.2.0 documented as the UI/process separation only; do not treat it as the completed data or security architecture.
-
-### Medium Feature — Multi-user architecture and all-user tray startup
-
-Consider optional installer support for starting DeskPulse Tray for every Windows user who logs on. Before implementation, resolve:
-
-- concurrent user-session behaviour;
-- one tray instance per user session;
-- shared versus per-user settings;
-- activity database path and ownership;
-- interaction with the LocalSystem service.
-
-Prefer an **At logon of any user** scheduled task over merely changing the current HKCU Run registration to HKLM.
-
-
 ### Calendar activity view
 
-Add a **Calendar** view under **View Log** with month, day and hourly drill-down.
+Add a Calendar view under Log with month, day and hourly drill-down.
 
-- Month cells show a selectable compact daily summary.
+- Month cells show compact selectable daily summaries.
 - Double-clicking a day opens hourly summaries.
-- Double-clicking an hour opens the existing log view filtered to that hour.
-- Calendar content may be selected by activity source or grouping, including file activity, file type, application, user activity and Explorer activity.
-- Aggregation must be performed efficiently in SQL by date and hour.
-- Selected dates and hours should be reusable for detailed logs, statistics and exports.
+- Double-clicking an hour opens the existing log filtered to that hour.
+- Aggregate efficiently in SQLite rather than loading raw rows.
 
-### Medium Feature — Pause-state model
+### Pause-state model
 
-Retain the planned distinction between:
+Distinguish:
 
 - **Pause for this session**, which resets after restart; and
-- **Pause indefinitely**, which persists until the user explicitly resumes logging.
+- **Pause indefinitely**, which persists until explicitly resumed.
 
-Persistent pause should remain the safety behaviour following a critical service-resource trigger where configured.
+Persistent pause remains available for critical service-resource safeguards.
+
+### Runtime regression coverage
+
+- Repeat two-user simultaneous-session acceptance after future routing changes.
+- Verify scheduled-task startup after clean installation and Windows sign-in.
+- Add automated coverage for single-window tray behavior where practical.

@@ -1,4 +1,4 @@
-# DeskPulse 0.3.2.0 Technical Development Handover
+# DeskPulse 0.3.3.0 Technical Development Handover
 
 ## Purpose and scope
 
@@ -8,7 +8,7 @@ Repository: https://github.com/KaiEysselein/DeskPulse
 
 ## Current release baseline
 
-DeskPulse **0.3.2.0** adds a focused administrator-settings process boundary to the accepted 0.3.1.0 baseline.
+DeskPulse **0.3.3.0** promotes the completed storage, attribution, authorization, multi-session and isolated user/system UI architecture developed after 0.3.2.0.
 
 Included changes since 0.3.0.0:
 
@@ -190,8 +190,20 @@ rule set, including service start and stop events, in Administrator Settings.
 
 DeskPulse deliberately provides no combined or all-users log view:
 
-- **Personal Log...** remains bound only to the calling user's SID database;
-- Personal Log runs in its own unelevated `--personal-log` process, so closing
+- the tray menu groups ordinary actions under **Current User** and elevated
+  machine-wide actions under **Administrator**;
+- **Current User** contains Log and Settings, including the
+  user-scoped Maintenance page;
+- Current-user Settings runs in its own unelevated `--personal-settings` process,
+  so its window and message loop are independent of the background tray;
+- **Administrator** contains System Log and System Settings and Maintenance;
+  hover text identifies those actions as requiring administrator approval
+  before Windows prompts;
+- both left- and right-clicking the tray icon open the same complete menu;
+- the tray permits only one DeskPulse form at a time; another Log, Settings,
+  System or About window is not opened until the active form closes;
+- **Log...** remains bound only to the calling user's SID database;
+- the current-user Log runs in its own unelevated `--personal-log` process, so closing
   the window cannot terminate the background tray;
 - each SID folder grants read access only to its owning user, LocalSystem and
   administrators at the Windows ACL level;
@@ -209,16 +221,25 @@ Closing the System Log ends its elevated process. This preserves clear
 per-user isolation while keeping shared service, installation and safeguard
 activity available to administrators.
 
+### Optional folder-opening suppression
+
+Current-user Settings includes **Log folder openings**, enabled by default for
+backward compatibility. When disabled, the service uses the directory flags
+on Windows ETW file-create events to omit directory opens and their matching
+write/close activity for that SID. It does not infer folders from a blank
+extension, so genuine extensionless files remain eligible for File Activity
+logging.
+
 The installer starts the background tray explicitly with `--tray`; it never
 uses a log-window command as its post-install launch. Runtime regression
-testing confirmed that closing the separate Personal Log process leaves the
+testing confirmed that closing the separate current-user Log process leaves the
 original tray PID running.
 
 ### Maintenance ownership
 
 Maintenance follows the same ownership boundary:
 
-- ordinary Settings includes **Personal Maintenance**, whose cleanup and clear
+- ordinary Settings includes **Maintenance**, whose cleanup and clear
   commands are routed by the verified tray process SID to that user's database;
 - the service loads rules for the requesting process SID, not whichever
   console session happens to be active;
@@ -236,7 +257,7 @@ Maintenance follows the same ownership boundary:
 DeskPulse provides no administrator maintenance path that enumerates, cleans
 or clears another user's personal database.
 
-### 0.3.2.0 storage and security boundary
+### Historical 0.3.2.0 storage and security boundary
 
 The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.
 
@@ -293,8 +314,8 @@ Safety limits are enforced service-side:
 After the service starts successfully, the installer records one User Activity event:
 
 - **DeskPulse installed** when no prior installed executable is detected.
-- **DeskPulse updated** when the detected prior version differs from 0.3.2.0.
-- **DeskPulse reinstalled** when 0.3.2.0 is installed over the same version.
+- **DeskPulse updated** when the detected prior version differs from 0.3.3.0.
+- **DeskPulse reinstalled** when 0.3.3.0 is installed over the same version.
 
 The installer invokes the tray in non-UI command mode. The tray retries the service named-pipe command for up to 15 seconds, and the service remains the sole SQLite writer. The record contains the installing user, machine, new version, and previous version where applicable. Existing user choices for these event types are not overwritten.
 
@@ -312,29 +333,29 @@ Get-ChildItem -Path . -Recurse -File | Unblock-File
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Installer\Build-Installer.ps1"
-Start-Process ".\publish\v0.3.2.0\installer\DeskPulse_Setup_0.3.2.0.exe"
+Start-Process ".\publish\v0.3.3.0\installer\DeskPulse_Setup_0.3.3.0.exe"
 ```
 
 The installer build copies the approved installer to:
 
 ```text
 D:\Kai\GitHub\DeskPulse\releases\current
-D:\Kai\GitHub\DeskPulse\releases\v0.3.2.0
+D:\Kai\GitHub\DeskPulse\releases\v0.3.3.0
 ```
 
 Release versions whose fourth component is zero are retained under their own release folder. The formal GitHub Release tag is:
 
 ```text
-v0.3.2.0
+v0.3.3.0
 ```
 
 ## Acceptance verification
 
 1. Build succeeds with zero errors.
-2. Publish outputs exist under `publish\v0.3.2.0\service` and `publish\v0.3.2.0\tray`.
-3. The installer is created as `DeskPulse_Setup_0.3.2.0.exe`.
+2. Publish outputs exist under `publish\v0.3.3.0\service` and `publish\v0.3.3.0\tray`.
+3. The installer is created as `DeskPulse_Setup_0.3.3.0.exe`.
 4. Installer upgrades the accepted 0.3.0.0 or 0.3.0.1 installation.
-5. Service and tray report version 0.3.2.0.
+5. Service and tray report version 0.3.3.0.
 6. Exactly one tray instance appears in the active user session.
 7. DeskPulse.Service starts automatically and remains responsive.
 8. File, App and User Activity records are written normally.
@@ -346,13 +367,13 @@ v0.3.2.0
 14. With restart persistence enabled, the critical pause survives service or Windows restart.
 15. **Resume Logging** clears the safety pause and restores monitoring.
 16. Diagnostic tests cannot exceed 50% CPU or 50% RAM and can be stopped manually.
-17. Installer is copied to both `releases\current` and `releases\v0.3.2.0`.
-18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.2.0 as current.
+17. Installer is copied to both `releases\current` and `releases\v0.3.3.0`.
+18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.3.0 as current.
 19. Ordinary Settings shows General and Rules only without requesting elevation.
 20. Administrator settings requests UAC, rejects an unelevated command-line launch, shows Maintenance only, and leaves no elevated DeskPulse process after closing.
 21. View Log remains open through the Save dialog and creates the selected Excel workbook.
 
-Build, publish and installer compilation passed on 2026-07-22. Installation, the administrator-settings flow and the corrected export flow were interactively confirmed. Database migration/splitting tests are not applicable to 0.3.2.0 and belong to 0.3.2.x.
+The 0.3.2.x storage and security acceptance was completed on 2026-07-23. Final 0.3.3.0 build and packaging results are recorded in the repository `VERSION_CHECK.md`; the newest single-window guard remains pending a short installed runtime confirmation.
 
 ## Planned medium feature — Calendar activity view
 

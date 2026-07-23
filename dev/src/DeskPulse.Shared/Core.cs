@@ -12,6 +12,7 @@ using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
+using Microsoft.Diagnostics.Tracing.Parsers.Kernel;
 using Microsoft.Diagnostics.Tracing.Session;
 using Microsoft.Win32;
 
@@ -20,7 +21,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.3.2.0";
+    public const string Version = "0.3.3.0";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -33,6 +34,7 @@ public sealed class FileIoMonitor : IDisposable
     private readonly object _settingsLock = new();
     private readonly object _monitoringStateLock = new();
     private readonly Dictionary<string, List<FileOpenInfo>> _openEventsByFile = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _ignoredDirectoryOpens = new(StringComparer.OrdinalIgnoreCase);
 
     private AppSettings _settings;
     private DeskPulseDatabase _database;
@@ -281,6 +283,7 @@ public sealed class FileIoMonitor : IDisposable
             lock (_openFilesLock)
             {
                 _openEventsByFile.Clear();
+                _ignoredDirectoryOpens.Clear();
             }
         }
 
@@ -583,7 +586,10 @@ public sealed class FileIoMonitor : IDisposable
                 KernelTraceEventParser.Keywords.FileIOInit
             );
 
-            session.Source.Kernel.FileIOCreate += data => HandleFileEvent("OPEN", data);
+            session.Source.Kernel.FileIOCreate += data => HandleFileEvent(
+                "OPEN",
+                data,
+                IsDirectoryOpen(data));
             session.Source.Kernel.FileIOWrite += data => HandleFileEvent("WRITE", data);
             session.Source.Kernel.FileIOClose += data => HandleFileEvent("CLOSE", data);
 
@@ -600,7 +606,7 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    private void HandleFileEvent(string operation, TraceEvent data)
+    private void HandleFileEvent(string operation, TraceEvent data, bool isDirectoryOpen = false)
     {
         if (_loggingPaused || _disposed)
             return;
@@ -621,20 +627,33 @@ public sealed class FileIoMonitor : IDisposable
         }
 
         var normalizedPath = PathUtilities.NormalizeEtwPath(rawFileName);
-
-        if (!ShouldMonitorFile(rawFileName, normalizedPath, operation, processName, processId))
-            return;
-
         var fullPath = GetSafeFullPath(normalizedPath);
 
         if (string.IsNullOrWhiteSpace(fullPath))
+            return;
+
+        var key = BuildOpenFileKey(fullPath, processId, processName);
+        if (operation == "OPEN" &&
+            isDirectoryOpen &&
+            !GetSettingsForAttribution(ResolveProcessAttribution(processId)).LogFolderOpenings)
+        {
+            RegisterIgnoredDirectoryOpen(key);
+            return;
+        }
+
+        if (operation == "WRITE" && IsIgnoredDirectoryOpen(key))
+            return;
+
+        if (operation == "CLOSE" && TryConsumeIgnoredDirectoryOpen(key))
+            return;
+
+        if (!ShouldMonitorFile(rawFileName, normalizedPath, operation, processName, processId))
             return;
 
         var folderPath = PathUtilities.GetFolderPath(fullPath);
         var fileNameOnly = PathUtilities.GetFileNameOnly(fullPath);
         var extension = PathUtilities.GetExtension(fullPath);
 
-        var key = BuildOpenFileKey(fullPath, processId, processName);
         var eventTime = DateTime.Now;
 
         if (operation == "OPEN")
@@ -724,6 +743,56 @@ public sealed class FileIoMonitor : IDisposable
                     ? "Close event logged, but matching open event was not found"
                     : "Close event logged with matched open/write session"
             });
+        }
+    }
+
+    private static bool IsDirectoryOpen(FileIOCreateTraceData data)
+    {
+        const uint fileDirectoryFile = 0x00000001;
+        const uint fileAttributeDirectory = 0x00000010;
+
+        try
+        {
+            return ((uint)data.CreateOptions & fileDirectoryFile) != 0 ||
+                   ((uint)data.FileAttributes & fileAttributeDirectory) != 0;
+        }
+        catch
+        {
+            // Some Windows FileIO/Create payload versions omit these optional
+            // fields. Treat those events as ordinary opens so one unsupported
+            // payload cannot terminate the ETW processing loop.
+            return false;
+        }
+    }
+
+    private void RegisterIgnoredDirectoryOpen(string key)
+    {
+        lock (_openFilesLock)
+        {
+            _ignoredDirectoryOpens.TryGetValue(key, out var count);
+            _ignoredDirectoryOpens[key] = count + 1;
+        }
+    }
+
+    private bool IsIgnoredDirectoryOpen(string key)
+    {
+        lock (_openFilesLock)
+            return _ignoredDirectoryOpens.ContainsKey(key);
+    }
+
+    private bool TryConsumeIgnoredDirectoryOpen(string key)
+    {
+        lock (_openFilesLock)
+        {
+            if (!_ignoredDirectoryOpens.TryGetValue(key, out var count))
+                return false;
+
+            if (count <= 1)
+                _ignoredDirectoryOpens.Remove(key);
+            else
+                _ignoredDirectoryOpens[key] = count - 1;
+
+            return true;
         }
     }
 
@@ -5225,6 +5294,9 @@ public sealed class AppSettings
     /// <summary>When false, file-system events attributed to Windows File Explorer are suppressed.</summary>
     public bool LogExplorerFileActivity { get; set; } = true;
 
+    /// <summary>When false, directory-handle open, write and close events are suppressed while extensionless files remain eligible.</summary>
+    public bool LogFolderOpenings { get; set; } = true;
+
     /// <summary>Process names whose File Activity events are excluded from new logging and rule-based housekeeping.</summary>
     public HashSet<string> FilteredFileActivityProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -5323,6 +5395,7 @@ public sealed class AppSettings
             PauseLoggingAtStartupAfterSafetyTrigger = PauseLoggingAtStartupAfterSafetyTrigger,
             LogProgramActivity = LogProgramActivity,
             LogExplorerFileActivity = LogExplorerFileActivity,
+            LogFolderOpenings = LogFolderOpenings,
             FilteredFileActivityProcesses = new HashSet<string>(FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase),
             TrackWindowsSystemActivity = TrackWindowsSystemActivity,
             LoggingRules = new List<string>(LoggingRules),
@@ -5538,6 +5611,7 @@ public sealed class AppSettings
         settings.IgnoreTempFolders = ReadBool(key, "IgnoreTempFolders", true);
         settings.StartWithWindows = ReadBool(key, "StartWithWindows", StartupTaskManager.IsEnabled());
         settings.LogProgramActivity = ReadBool(key, "LogProgramActivity", true);
+        settings.LogFolderOpenings = ReadBool(key, "LogFolderOpenings", true);
 
         var excludedFoldersText = ReadString(key, "ExcludedFolders", ToMultilineText(settings.ExcludedFolders));
         settings.ExcludedFolders = ParsePlainList(excludedFoldersText);
@@ -5681,6 +5755,7 @@ public sealed class AppSettings
             settings.IgnoreTempFolders = generalKey == null || ReadBool(generalKey, "IgnoreTempFolders", true);
             settings.StartWithWindows = generalKey != null && ReadBool(generalKey, "StartWithWindows", StartupTaskManager.IsEnabled());
             settings.LogProgramActivity = generalKey == null || ReadBool(generalKey, "LogProgramActivity", true);
+            settings.LogFolderOpenings = generalKey == null || ReadBool(generalKey, "LogFolderOpenings", true);
         }
 
         using (var rulesKey = rootKey.OpenSubKey("Rules"))

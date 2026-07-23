@@ -155,9 +155,18 @@ public static class StorageLayout
 
     public static void PrepareUserSettingsStorage(string windowsSid)
     {
-        PrepareUserStorage(windowsSid);
         var userSid = new SecurityIdentifier(ValidateSid(windowsSid));
-        var settingsFolder = Directory.CreateDirectory(GetUserSettingsFolder(userSid.Value));
+        var settingsFolderPath = GetUserSettingsFolder(userSid.Value);
+
+        // The service or installer creates this folder and applies its protected
+        // ACL. An ordinary user owns the Settings child but deliberately has
+        // read-only access to the parent SID folder, so a normal settings save
+        // must not try to rewrite the parent's security descriptor.
+        if (Directory.Exists(settingsFolderPath))
+            return;
+
+        PrepareUserStorage(userSid.Value);
+        var settingsFolder = Directory.CreateDirectory(settingsFolderPath);
 
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);

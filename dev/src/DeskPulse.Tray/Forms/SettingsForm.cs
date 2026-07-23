@@ -51,6 +51,7 @@ public partial class SettingsForm : Form
     private Button _saveSafetySettingsButton = null!;
     private Button _resetSafetyDefaultsButton = null!;
     private CheckBox _trackWindowsSystemActivityCheckBox = null!;
+    private CheckBox _logFolderOpeningsCheckBox = null!;
     private Button _configureFilteredFileActivityProcessesButton = null!;
     private Label _filteredFileActivityProcessesSummaryLabel = null!;
     private HashSet<string> _filteredFileActivityProcesses = new(StringComparer.OrdinalIgnoreCase);
@@ -232,8 +233,29 @@ public partial class SettingsForm : Form
         _storageGroupBox.Top = 448;
 
         _logProgramActivityCheckBox.Location = new System.Drawing.Point(18, 30);
+        _logProgramActivityCheckBox.Width = 350;
         _programActivityHintLabel.Location = new System.Drawing.Point(40, 54);
+        _programActivityHintLabel.Width = 350;
         _programActivityHintLabel.Height = 32;
+
+        _logFolderOpeningsCheckBox = new CheckBox
+        {
+            Text = "Log folder openings",
+            Left = 410,
+            Top = 30,
+            Width = 370,
+            Height = 22,
+            UseVisualStyleBackColor = true
+        };
+        var folderOpeningsHint = new Label
+        {
+            Left = 432,
+            Top = 54,
+            Width = 350,
+            Height = 34,
+            ForeColor = System.Drawing.SystemColors.GrayText,
+            Text = "Turn off to omit directory browsing. Extensionless files remain eligible."
+        };
 
         _configureFilteredFileActivityProcessesButton = new Button
         {
@@ -290,6 +312,8 @@ public partial class SettingsForm : Form
         };
 
         _behaviourHintLabel.Visible = false;
+        _behaviourGroupBox.Controls.Add(_logFolderOpeningsCheckBox);
+        _behaviourGroupBox.Controls.Add(folderOpeningsHint);
         _behaviourGroupBox.Controls.Add(_configureFilteredFileActivityProcessesButton);
         _behaviourGroupBox.Controls.Add(_filteredFileActivityProcessesSummaryLabel);
         _behaviourGroupBox.Controls.Add(processHint);
@@ -586,7 +610,7 @@ public partial class SettingsForm : Form
     {
         _personalMaintenanceTabPage = new TabPage
         {
-            Text = "Personal Maintenance",
+            Text = "Maintenance",
             BackColor = System.Drawing.SystemColors.Window,
             Padding = new Padding(16)
         };
@@ -595,7 +619,7 @@ public partial class SettingsForm : Form
         {
             Dock = DockStyle.Top,
             Height = 72,
-            Text = "Target: your personal DeskPulse database only.\r\n" +
+            Text = "Target: your DeskPulse database only.\r\n" +
                    AppSettings.Load().DatabaseFilePath +
                    "\r\nSystem records and other Windows users are never affected.",
             ForeColor = System.Drawing.SystemColors.GrayText
@@ -623,13 +647,13 @@ public partial class SettingsForm : Form
         }
 
         AddButton("Apply current rules...", CleanPersonalDatabaseWithCurrentRules);
-        AddButton("Clear personal File Activity...", () => ClearPersonalDatabaseTable(
-            "ActivityEvents", "all personal File Activity records"));
-        AddButton("Clear personal User Activity...", () => ClearPersonalDatabaseTable(
-            "UserEvents", "all personal User Activity records"));
-        AddButton("Clear personal App Activity...", () => ClearPersonalDatabaseTable(
-            "ProgramEvents", "all personal App Activity records"));
-        AddButton("Clear all personal activity...", ClearAllPersonalDatabaseTables);
+        AddButton("Clear File Activity...", () => ClearPersonalDatabaseTable(
+            "ActivityEvents", "all File Activity records"));
+        AddButton("Clear User Activity...", () => ClearPersonalDatabaseTable(
+            "UserEvents", "all User Activity records"));
+        AddButton("Clear App Activity...", () => ClearPersonalDatabaseTable(
+            "ProgramEvents", "all App Activity records"));
+        AddButton("Clear all activity...", ClearAllPersonalDatabaseTables);
 
         _personalMaintenanceTabPage.Controls.Add(buttons);
         _personalMaintenanceTabPage.Controls.Add(intro);
@@ -860,6 +884,7 @@ public partial class SettingsForm : Form
             StartWithWindows = _startWithWindowsCheckBox.Checked,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
             LogExplorerFileActivity = true,
+            LogFolderOpenings = _logFolderOpeningsCheckBox.Checked,
             FilteredFileActivityProcesses = new HashSet<string>(_filteredFileActivityProcesses, StringComparer.OrdinalIgnoreCase),
             TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked,
             LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
@@ -1102,6 +1127,7 @@ public partial class SettingsForm : Form
                 "DeskPulse Tray startup is managed for all Windows users by the installer.");
         }
         _logProgramActivityCheckBox.Checked = settings.LogProgramActivity;
+        _logFolderOpeningsCheckBox.Checked = settings.LogFolderOpenings;
         _filteredFileActivityProcesses = new HashSet<string>(settings.FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
         if (!settings.LogExplorerFileActivity)
             _filteredFileActivityProcesses.Add("explorer.exe");
@@ -1376,7 +1402,7 @@ public partial class SettingsForm : Form
             quietStartupLabel
         });
 
-        var behaviourGroup = CreateGroupBox("Application behaviour", 24, 196, 820, 150);
+        var behaviourGroup = CreateGroupBox("Application behaviour", 24, 196, 820, 184);
 
         _logProgramActivityCheckBox.Left = 18;
         _logProgramActivityCheckBox.Top = 32;
@@ -1394,10 +1420,10 @@ public partial class SettingsForm : Form
             40,
             62,
             740,
-            36);
+            22);
 
         var behaviourLabel = CreateHintLabel(
-            "DeskPulse keeps running from the tray icon. Left-click opens Export/Settings; right-click opens About/Exit.",
+            "DeskPulse keeps running from the tray icon. Left- or right-click the icon to open the DeskPulse menu.",
             18,
             106,
             760,
@@ -2300,29 +2326,29 @@ public partial class SettingsForm : Form
     {
         var confirm = MessageBox.Show(
             this,
-            "Target: your personal DeskPulse database only.\n\n" +
-            "Records that conflict with your current personal rules will be permanently removed. " +
+            "Target: your DeskPulse database only.\n\n" +
+            "Records that conflict with your current rules will be permanently removed. " +
             "System records and other users are not affected.\n\nContinue?",
-            "Clean Personal Database",
+            "Clean Current User Database",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);
         if (confirm != DialogResult.Yes)
             return;
 
         using var progressForm = new RuleCleanupProgressForm(
-            "Personal Database Housekeeping",
+            "Current User Database Housekeeping",
             "Applying your current rules",
             progress => ServicePipeClient.RunDatabaseHousekeepingAsync(progress).GetAwaiter().GetResult());
         if (progressForm.ShowDialog(this) == DialogResult.OK)
-            MessageBox.Show(this, "Personal database housekeeping completed.", "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "Current user database housekeeping completed.", "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private static void ClearPersonalDatabaseTable(string tableName, string description)
     {
         var confirm = MessageBox.Show(
-            "Target: your personal DeskPulse database only.\n\n" +
+            "Target: your DeskPulse database only.\n\n" +
             "This will permanently remove " + description + ". System records and other users are not affected.\n\nContinue?",
-            "Clear Personal Records",
+            "Clear Current User Records",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);
         if (confirm != DialogResult.Yes)
@@ -2331,12 +2357,12 @@ public partial class SettingsForm : Form
         try
         {
             var deleted = ServicePipeClient.ClearTableAsync(tableName).GetAwaiter().GetResult();
-            MessageBox.Show(deleted.ToString("N0", CultureInfo.InvariantCulture) + " personal record(s) removed.",
+            MessageBox.Show(deleted.ToString("N0", CultureInfo.InvariantCulture) + " record(s) removed.",
                 "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show("Personal records could not be cleared.\n\n" + ex.Message,
+            MessageBox.Show("Current user records could not be cleared.\n\n" + ex.Message,
                 "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -2344,9 +2370,9 @@ public partial class SettingsForm : Form
     private static void ClearAllPersonalDatabaseTables()
     {
         var confirm = MessageBox.Show(
-            "Target: your personal DeskPulse database only.\n\n" +
-            "This will permanently remove all of your personal activity. System records and other users are not affected.\n\nContinue?",
-            "Clear All Personal Activity",
+            "Target: your DeskPulse database only.\n\n" +
+            "This will permanently remove all activity from your database. System records and other users are not affected.\n\nContinue?",
+            "Clear All Current User Activity",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);
         if (confirm != DialogResult.Yes)
@@ -2355,12 +2381,12 @@ public partial class SettingsForm : Form
         try
         {
             var deleted = ServicePipeClient.ClearAllRecordsAsync().GetAwaiter().GetResult();
-            MessageBox.Show(deleted.ToString("N0", CultureInfo.InvariantCulture) + " personal record(s) removed.",
+            MessageBox.Show(deleted.ToString("N0", CultureInfo.InvariantCulture) + " record(s) removed.",
                 "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show("Personal records could not be cleared.\n\n" + ex.Message,
+            MessageBox.Show("Current user records could not be cleared.\n\n" + ex.Message,
                 "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -3104,6 +3130,7 @@ public partial class SettingsForm : Form
             PauseLoggingAtStartupAfterSafetyTrigger = existingSettings.PauseLoggingAtStartupAfterSafetyTrigger,
             LogProgramActivity = _logProgramActivityCheckBox.Checked,
             LogExplorerFileActivity = true,
+            LogFolderOpenings = _logFolderOpeningsCheckBox.Checked,
             FilteredFileActivityProcesses = new HashSet<string>(_filteredFileActivityProcesses, StringComparer.OrdinalIgnoreCase),
             TrackWindowsSystemActivity = _trackWindowsSystemActivityCheckBox.Checked,
             LoggingRules = fileActivityRules.Concat(appActivityRules).ToList(),
@@ -3117,10 +3144,24 @@ public partial class SettingsForm : Form
             ExportSheets = exportSheets
         };
 
-        if (_administratorMode)
-            settings.SaveSystemSettings();
-        else
-            settings.Save();
+        try
+        {
+            if (_administratorMode)
+                settings.SaveSystemSettings();
+            else
+                settings.Save();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not save the settings.\n\n" + ex.Message,
+                "Settings",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            DialogResult = DialogResult.None;
+            return false;
+        }
+
         _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS");
         _isDirty = false;
         DialogResult = DialogResult.None;

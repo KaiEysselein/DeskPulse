@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
@@ -666,26 +667,26 @@ public partial class ViewLogForm : Form
     }
 
 
-    private void ExportButton_Click(object? sender, EventArgs e)
+    private async void ExportButton_Click(object? sender, EventArgs e)
     {
         var grid = GetActiveGrid();
-        if (grid == null || grid.Rows.Count == 0)
+        var total = GetActiveTotal();
+        if (grid == null || total == 0)
         {
-            MessageBox.Show(this, "There are no records on the current page to export.", "Export current view", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "There are no records in the selected date range to export.", "Export log", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
         var sectionName = tabs.SelectedTab?.Text ?? "Log";
         var safeSectionName = string.Concat(sectionName.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch)).Replace(" ", "-");
-        var currentPage = GetActivePage() + 1;
 
         using var dialog = new SaveFileDialog
         {
-            Title = "Export current log view",
+            Title = "Export complete log view",
             Filter = "Excel Workbook (*.xlsx)|*.xlsx",
             DefaultExt = "xlsx",
             AddExtension = true,
-            FileName = $"DeskPulse-{safeSectionName}-{dateStart.Value:yyyyMMdd}-{dateEnd.Value:yyyyMMdd}-Page-{currentPage}.xlsx"
+            FileName = $"DeskPulse-{safeSectionName}-{dateStart.Value:yyyyMMdd}-{dateEnd.Value:yyyyMMdd}.xlsx"
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -694,42 +695,26 @@ public partial class ViewLogForm : Form
         try
         {
             Cursor = Cursors.WaitCursor;
-            statusLabel.Text = "Exporting the current tab and page...";
-            Application.DoEvents();
-
-            using var workbook = new XLWorkbook();
-            var worksheetName = sectionName.Length > 31 ? sectionName[..31] : sectionName;
-            var worksheet = workbook.Worksheets.Add(worksheetName);
-
+            var start = dateStart.Value.Date;
+            var endExclusive = dateEnd.Value.Date.AddDays(1);
             var exportedColumns = grid.Columns
                 .Cast<DataGridViewColumn>()
                 .Where(column => column.Visible && column is not DataGridViewButtonColumn)
                 .OrderBy(column => column.DisplayIndex)
+                .Select(column => column.HeaderText)
                 .ToList();
 
-            for (var columnIndex = 0; columnIndex < exportedColumns.Count; columnIndex++)
-            {
-                var cell = worksheet.Cell(1, columnIndex + 1);
-                cell.Value = exportedColumns[columnIndex].HeaderText;
-                cell.Style.Font.Bold = true;
-            }
+            SetLogExportInProgress(true);
+            var progress = new Progress<ExportProgressInfo>(UpdateLogExportProgress);
+            var exportedCount = await Task.Run(() => ExportCompleteLog(
+                dialog.FileName,
+                sectionName,
+                exportedColumns,
+                start,
+                endExclusive,
+                progress));
 
-            for (var rowIndex = 0; rowIndex < grid.Rows.Count; rowIndex++)
-            {
-                var gridRow = grid.Rows[rowIndex];
-                for (var columnIndex = 0; columnIndex < exportedColumns.Count; columnIndex++)
-                {
-                    var value = gridRow.Cells[exportedColumns[columnIndex].Index].Value;
-                    worksheet.Cell(rowIndex + 2, columnIndex + 1).Value = value?.ToString() ?? string.Empty;
-                }
-            }
-
-            worksheet.SheetView.FreezeRows(1);
-            worksheet.RangeUsed()?.SetAutoFilter();
-            worksheet.Columns().AdjustToContents(8, 60);
-            workbook.SaveAs(dialog.FileName);
-
-            statusLabel.Text = $"Exported {grid.Rows.Count:N0} record(s) from {sectionName}, page {currentPage:N0}.";
+            UpdateLogExportProgress(new ExportProgressInfo(100, $"Exported all {exportedCount:N0} record(s) from {sectionName}."));
             Process.Start(new ProcessStartInfo { FileName = dialog.FileName, UseShellExecute = true });
         }
         catch (Exception ex)
@@ -739,8 +724,101 @@ public partial class ViewLogForm : Form
         }
         finally
         {
+            SetLogExportInProgress(false);
             Cursor = Cursors.Default;
         }
+    }
+
+    private int ExportCompleteLog(
+        string fileName,
+        string sectionName,
+        IReadOnlyList<string> exportedColumns,
+        DateTime start,
+        DateTime endExclusive,
+        IProgress<ExportProgressInfo> progress)
+    {
+        progress.Report(new ExportProgressInfo(2, $"2%   Reading all records from {sectionName}"));
+        var entries = sectionName switch
+        {
+            "App Activity" => ReadAppEntries(start, endExclusive, 0, usePaging: false),
+            "User Activity" => ReadUserEntries(start, endExclusive, 0, usePaging: false),
+            _ => ReadFileEntries(start, endExclusive, 0, usePaging: false)
+        };
+
+        progress.Report(new ExportProgressInfo(8, $"8%   Preparing {entries.Count:N0} record(s)"));
+        using var workbook = new XLWorkbook();
+        var worksheetName = sectionName.Length > 31 ? sectionName[..31] : sectionName;
+        var worksheet = workbook.Worksheets.Add(worksheetName);
+
+        for (var columnIndex = 0; columnIndex < exportedColumns.Count; columnIndex++)
+        {
+            var cell = worksheet.Cell(1, columnIndex + 1);
+            cell.Value = exportedColumns[columnIndex];
+            cell.Style.Font.Bold = true;
+        }
+
+        var progressInterval = Math.Max(1, entries.Count / 200);
+        for (var rowIndex = 0; rowIndex < entries.Count; rowIndex++)
+        {
+            for (var columnIndex = 0; columnIndex < exportedColumns.Count; columnIndex++)
+            {
+                var value = GetExportCellValue(entries[rowIndex], exportedColumns[columnIndex]);
+                worksheet.Cell(rowIndex + 2, columnIndex + 1).Value = value?.ToString() ?? string.Empty;
+            }
+
+            if (rowIndex % progressInterval == 0 || rowIndex == entries.Count - 1)
+            {
+                var percent = 8 + (int)Math.Round(((rowIndex + 1) / (double)Math.Max(1, entries.Count)) * 82);
+                progress.Report(new ExportProgressInfo(percent, $"{percent}%  Writing record {rowIndex + 1:N0} of {entries.Count:N0}"));
+            }
+        }
+
+        progress.Report(new ExportProgressInfo(92, "92%  Formatting workbook"));
+        worksheet.SheetView.FreezeRows(1);
+        worksheet.RangeUsed()?.SetAutoFilter();
+        worksheet.Columns().AdjustToContents(8, 60);
+        progress.Report(new ExportProgressInfo(96, "96%  Saving workbook"));
+        workbook.SaveAs(fileName);
+        return entries.Count;
+    }
+
+    private void SetLogExportInProgress(bool inProgress)
+    {
+        exportButton.Enabled = !inProgress;
+        refreshButton.Enabled = !inProgress;
+        tabs.Enabled = !inProgress;
+        dateStart.Enabled = !inProgress;
+        dateEnd.Enabled = !inProgress;
+        exportProgressBar.Visible = inProgress;
+        if (inProgress)
+            exportProgressBar.Value = 0;
+    }
+
+    private void UpdateLogExportProgress(ExportProgressInfo progress)
+    {
+        exportProgressBar.Value = Math.Clamp(progress.Percent, exportProgressBar.Minimum, exportProgressBar.Maximum);
+        statusLabel.Text = progress.Message;
+    }
+
+    private static object GetExportCellValue(LogViewEntry entry, string columnName)
+    {
+        return columnName switch
+        {
+            "ID" => entry.Id,
+            "Date" => entry.Date,
+            "Time" => entry.Time,
+            "File" => entry.Subject,
+            "Extension" => entry.Fields.TryGetValue("Extension", out var extension) ? extension : "",
+            "Activity" => GetFileActivity(entry),
+            "Folder" => entry.Folder,
+            "App" => entry.App,
+            "Process ID" => entry.ProcessId,
+            "Path" => entry.Path,
+            "Event" => entry.Subject,
+            "User" => entry.App,
+            "Computer" => entry.Fields.TryGetValue("Computer", out var computer) ? computer : "",
+            _ => entry.Fields.TryGetValue(columnName, out var value) ? value : ""
+        };
     }
 
     private void ApplyPageSizeButton_Click(object? sender, EventArgs e)
@@ -1040,8 +1118,9 @@ public partial class ViewLogForm : Form
         }
     }
 
-    private List<LogViewEntry> ReadFileEntries(DateTime start, DateTime endExclusive, int page)
+    private List<LogViewEntry> ReadFileEntries(DateTime start, DateTime endExclusive, int page, bool usePaging = true)
     {
+        var pagingClause = usePaging ? "LIMIT $limit OFFSET $offset;" : "";
         var sql = $"""
             SELECT Id, CreatedAt, ActivityType, FullPath, FolderPath, FileName, Extension,
                    DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
@@ -1051,7 +1130,7 @@ public partial class ViewLogForm : Form
             FROM ActivityEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_fileSortColumn, _fileSortAscending)}
-            LIMIT $limit OFFSET $offset;
+            {pagingClause}
             """;
 
         return ReadEntries(sql, start, endExclusive, page, reader =>
@@ -1079,11 +1158,12 @@ public partial class ViewLogForm : Form
             return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
                 EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)),
                 file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);
-        });
+        }, usePaging);
     }
 
-    private List<LogViewEntry> ReadAppEntries(DateTime start, DateTime endExclusive, int page)
+    private List<LogViewEntry> ReadAppEntries(DateTime start, DateTime endExclusive, int page, bool usePaging = true)
     {
+        var pagingClause = usePaging ? "LIMIT $limit OFFSET $offset;" : "";
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, ProgramName,
                    ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note,
@@ -1091,7 +1171,7 @@ public partial class ViewLogForm : Form
             FROM ProgramEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_appSortColumn, _appSortAscending)}
-            LIMIT $limit OFFSET $offset;
+            {pagingClause}
             """;
 
         return ReadEntries(sql, start, endExclusive, page, reader =>
@@ -1105,11 +1185,12 @@ public partial class ViewLogForm : Form
                 ["Scope"] = ReadText(reader, 13), ["Windows SID"] = ReadText(reader, 14), ["Session ID"] = ReadText(reader, 15)
             };
             return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
-        });
+        }, usePaging);
     }
 
-    private List<LogViewEntry> ReadUserEntries(DateTime start, DateTime endExclusive, int page)
+    private List<LogViewEntry> ReadUserEntries(DateTime start, DateTime endExclusive, int page, bool usePaging = true)
     {
+        var pagingClause = usePaging ? "LIMIT $limit OFFSET $offset;" : "";
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, UserName,
                    MachineName, ProcessName, ProcessId, AppVersion, Note,
@@ -1117,7 +1198,7 @@ public partial class ViewLogForm : Form
             FROM UserEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_userSortColumn, _userSortAscending)}
-            LIMIT $limit OFFSET $offset;
+            {pagingClause}
             """;
 
         return ReadEntries(sql, start, endExclusive, page, reader =>
@@ -1130,7 +1211,7 @@ public partial class ViewLogForm : Form
                 ["Scope"] = ReadText(reader, 11), ["Windows SID"] = ReadText(reader, 12), ["Session ID"] = ReadText(reader, 13)
             };
             return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
-        });
+        }, usePaging);
     }
 
     private List<LogViewEntry> ReadEntries(string sql, DateTime start, DateTime endExclusive, int page, Func<SqliteDataReader, LogViewEntry> factory, bool usePaging = true, string? groupKey = null)

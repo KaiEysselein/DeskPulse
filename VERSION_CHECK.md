@@ -1,35 +1,31 @@
-# Version Check — 0.3.2.0
+# Version Check — 0.3.3.0
 
-Version **0.3.2.0** is the current release baseline. Historical version numbers in older changelog entries and archived verification records are intentionally preserved.
+Version **0.3.3.0** is the current release candidate. Historical version numbers in changelog entries and archived verification records are intentionally preserved.
 
-## Verified active references
+## Active references
 
-- `DeskPulse.Shared` AppInfo: `0.3.2.0`
-- `DeskPulse.Shared.csproj`: `0.3.2.0`
-- `DeskPulse.Service.csproj`: `0.3.2.0`
-- `DeskPulse.Tray.csproj`: `0.3.2.0`
-- Inno Setup installer and output filename: `0.3.2.0`
-- Publish folders: `dev\publish\v0.3.2.0\service` and `dev\publish\v0.3.2.0\tray`
-- Installer: `dev\publish\v0.3.2.0\installer\DeskPulse_Setup_0.3.2.0.exe`
-- Permanent milestone folder: `releases\v0.3.2.0`
-- GitHub tag target: `v0.3.2.0`
-- Active README, handovers, roadmap, release notes and changelog: `0.3.2.0`
+- `DeskPulse.Shared` AppInfo: `0.3.3.0`
+- Shared, service and tray project versions: `0.3.3.0`
+- Inno Setup installer and output filename: `0.3.3.0`
+- Publish folders: `dev\publish\v0.3.3.0\service` and `dev\publish\v0.3.3.0\tray`
+- Installer: `dev\publish\v0.3.3.0\installer\DeskPulse_Setup_0.3.3.0.exe`
+- Permanent milestone folder: `releases\v0.3.3.0`
+- GitHub tag target: `v0.3.3.0`
 
-## Verified release checks
+## Release checks
 
 - [x] Release build completes with zero warnings and zero errors.
-- [x] Self-contained service and tray publish outputs exist under `dev\publish\v0.3.2.0`.
-- [x] Inno Setup creates `DeskPulse_Setup_0.3.2.0.exe`.
-- [x] Matching installer copies exist under `releases\current` and `releases\v0.3.2.0`.
-- [x] Installed service and tray report 0.3.2.0.
-- [x] `DeskPulse.Service` runs automatically and one ordinary tray process runs in the interactive session.
-- [x] Ordinary Settings shows General and Rules only without requesting elevation.
-- [x] Administrator settings uses UAC, validates elevation, shows Maintenance only and ends with its window.
-- [x] View Log remains open through the Save dialog and creates an Excel workbook.
-- [x] The existing database, WAL/SHM files, backups and rule exports remain present after upgrade.
+- [x] Self-contained service and tray publish outputs exist under `dev\publish\v0.3.3.0`.
+- [x] Inno Setup creates `DeskPulse_Setup_0.3.3.0.exe`.
+- [x] Matching installer copies exist under `releases\current` and `releases\v0.3.3.0`.
+- [x] Published service and tray report version 0.3.3.0.
+- [x] ProgramData migration, ACL, schema and SQLite integrity passed during 0.3.2.x acceptance.
+- [x] SID/session routing and simultaneous-user isolation passed during 0.3.2.x acceptance.
+- [x] Named-pipe authorization and system/current-user maintenance boundaries passed.
+- [x] Current-user and system log/settings process isolation passed.
+- [x] Complete active-tab/date-range export passed with a 209,831-row runtime export.
+- [ ] Final single-window tray behavior receives a short installed runtime confirmation.
 
-## 0.3.2.0 scope boundary
+## Scope boundary
 
-The activity database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`. Version 0.3.2.0 did not move or split the database and did not complete service-side administrative authorization.
-
-The 0.3.2.x continuation covers ProgramData system/per-user databases, Windows-SID routing, safe migration and rollback, rule ownership separation, access controls and named-pipe client authorization.
+DeskPulse provides no combined all-users log. Current-user actions target only the calling user's SID database; administrator log and maintenance target only the protected system database.

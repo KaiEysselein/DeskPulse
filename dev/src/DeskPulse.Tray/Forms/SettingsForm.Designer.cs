@@ -386,7 +386,7 @@ partial class SettingsForm
         _behaviourHintLabel.Name = "_behaviourHintLabel";
         _behaviourHintLabel.Size = new System.Drawing.Size(760, 22);
         _behaviourHintLabel.TabIndex = 2;
-        _behaviourHintLabel.Text = "DeskPulse keeps running from the tray icon. Left-click opens Export/Settings; right-click opens About/Exit.";
+        _behaviourHintLabel.Text = "DeskPulse keeps running from the tray icon. Left- or right-click the icon to open the DeskPulse menu.";
 
         // _rulesTabPage
         _rulesTabPage.BackColor = System.Drawing.SystemColors.Window;

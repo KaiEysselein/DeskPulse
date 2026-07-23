@@ -22,6 +22,7 @@ partial class ViewLogForm
     private System.Windows.Forms.Label pageSizeLabel = null!;
     private System.Windows.Forms.NumericUpDown pageSizeInput = null!;
     private System.Windows.Forms.Button applyPageSizeButton = null!;
+    private System.Windows.Forms.ProgressBar exportProgressBar = null!;
     private System.Windows.Forms.Label groupByLabel = null!;
     private System.Windows.Forms.ComboBox groupByCombo = null!;
     private System.Windows.Forms.Label timeFormatLabel = null!;
@@ -63,6 +64,7 @@ partial class ViewLogForm
         pageSizeLabel = new System.Windows.Forms.Label();
         pageSizeInput = new System.Windows.Forms.NumericUpDown();
         applyPageSizeButton = new System.Windows.Forms.Button();
+        exportProgressBar = new System.Windows.Forms.ProgressBar();
         groupByLabel = new System.Windows.Forms.Label();
         groupByCombo = new System.Windows.Forms.ComboBox();
         timeFormatLabel = new System.Windows.Forms.Label();
@@ -169,6 +171,7 @@ partial class ViewLogForm
         pagingPanel.Controls.Add(pageSizeLabel);
         pagingPanel.Controls.Add(pageSizeInput);
         pagingPanel.Controls.Add(applyPageSizeButton);
+        pagingPanel.Controls.Add(exportProgressBar);
         pagingPanel.Dock = System.Windows.Forms.DockStyle.Bottom;
         pagingPanel.Height = 42;
         firstPageButton.Location = new System.Drawing.Point(12, 7);
@@ -209,6 +212,11 @@ partial class ViewLogForm
         applyPageSizeButton.Text = "Apply";
         applyPageSizeButton.UseVisualStyleBackColor = true;
         applyPageSizeButton.Click += ApplyPageSizeButton_Click;
+        exportProgressBar.Location = new System.Drawing.Point(590, 10);
+        exportProgressBar.Size = new System.Drawing.Size(518, 20);
+        exportProgressBar.Style = System.Windows.Forms.ProgressBarStyle.Continuous;
+        exportProgressBar.Visible = false;
+        exportProgressBar.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
         pageLabel.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
         pageLabel.Location = new System.Drawing.Point(845, 12);
         pageLabel.Size = new System.Drawing.Size(263, 20);
@@ -227,7 +235,7 @@ partial class ViewLogForm
         Controls.Add(topPanel);
         MinimumSize = new System.Drawing.Size(1000, 500);
         StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-        Text = "DeskPulse - Personal Log";
+        Text = "DeskPulse - Log (Current User)";
         topPanel.ResumeLayout(false);
         topPanel.PerformLayout();
         tabs.ResumeLayout(false);

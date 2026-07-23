@@ -1,33 +1,34 @@
-# DeskPulse 0.3.2.0
+# DeskPulse 0.3.3.0
 
-DeskPulse 0.3.2.0 introduces a focused separation between ordinary user settings and administrator maintenance tools.
+DeskPulse 0.3.3.0 completes the service-owned system/per-user storage, attribution and security architecture introduced after 0.3.2.0.
 
 ## Highlights
 
-- Ordinary **Settings...** shows only General and Rules and does not request elevation.
-- **Administrator settings...** starts a separate copy of DeskPulse through the standard Windows UAC prompt.
-- The administrator process validates elevation and shows only Maintenance.
-- Closing Administrator settings ends the elevated process and requires fresh UAC approval next time.
-- Fixed View Log export being interrupted when the native Save dialog took focus.
+- Protected system and per-user databases and settings under `%ProgramData%\DeskPulse`.
+- SID- and session-attributed file, application and user activity with simultaneous-session routing.
+- Service-side authorization for state-changing named-pipe commands.
+- **Current User** Log, Settings and Maintenance isolated from UAC-elevated System Log, Settings and Maintenance.
+- No combined all-users log and no administrator access path into another user's personal database.
+- Complete date-range exports with progress, independent of display-page size.
+- Optional suppression of folder-opening events.
+- One DeskPulse form open from the tray at a time.
 
 ## Upgrade
 
-The installer supports upgrading an existing DeskPulse installation. The activity database and exports under `Documents\DeskPulse` are preserved.
+The installer supports upgrading an existing DeskPulse installation. Legacy data is backed up, migrated with SQLite online backup and integrity validation, and retained for rollback.
 
-## Scope boundary and next work
+## Scope boundary
 
-0.3.2.0 separates the user and administrator settings processes, but deliberately keeps the existing single activity database under `Documents\DeskPulse`. It does not yet split machine-wide and per-user records or make the elevated UI a complete service security boundary.
-
-The 0.3.2.x continuation will implement service-owned `%ProgramData%\DeskPulse` databases, Windows-SID routing, safe migration and rollback, system/per-user rule ownership, and service-side named-pipe authorization.
+DeskPulse does not expose a combined or all-users activity view. Administrators can review and maintain only the system database; each user can access only their SID database.
 
 ## Installer
 
 Release asset:
 
 ```text
-DeskPulse_Setup_0.3.2.0.exe
+DeskPulse_Setup_0.3.3.0.exe
 ```
 
 ## Verification
 
-The local 0.3.2.0 build, publish and installer compilation passed on 2026-07-22. Installation, administrator-settings UAC behavior and the corrected View Log export flow were interactively confirmed.
+The 0.3.2.x storage, routing, authorization, settings, UI and export slices were interactively verified on 2026-07-23. The final 0.3.3.0 build and packaging results are recorded in `VERSION_CHECK.md`; the newest single-window guard remains pending a short runtime confirmation.

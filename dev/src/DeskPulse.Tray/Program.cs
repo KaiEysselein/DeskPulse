@@ -53,6 +53,12 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        if (args.Any(a => a.Equals("--personal-settings", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunSingleWindow("CurrentUser.Settings", () => new SettingsForm());
+            return;
+        }
+
         if (args.Any(a => a.Equals("--administrator-settings", StringComparison.OrdinalIgnoreCase)))
         {
             if (!IsProcessElevated())
@@ -65,7 +71,9 @@ internal static class Program
                 return;
             }
 
-            Application.Run(new SettingsForm(administratorMode: true));
+            RunSingleWindow(
+                "Administrator.Settings",
+                () => new SettingsForm(administratorMode: true));
             return;
         }
 
@@ -81,14 +89,18 @@ internal static class Program
                 return;
             }
 
-            Application.Run(new ViewLogForm(systemOnly: true));
+            RunSingleWindow(
+                "Administrator.SystemLog",
+                () => new ViewLogForm(systemOnly: true));
             return;
         }
 
         if (args.Any(a => a.Equals("--personal-log", StringComparison.OrdinalIgnoreCase)))
         {
-            Application.Run(new ViewLogForm(
-                () => _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS")));
+            RunSingleWindow(
+                "CurrentUser.Log",
+                () => new ViewLogForm(
+                    () => _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS")));
             return;
         }
 
@@ -117,6 +129,38 @@ internal static class Program
     {
         using var identity = WindowsIdentity.GetCurrent();
         return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    private static void RunSingleWindow(string windowKey, Func<Form> createForm)
+    {
+        var mutexName =
+            $"Local\\DeskPulse.Window.{windowKey}.Session.{Process.GetCurrentProcess().SessionId}";
+        using var windowMutex = new Mutex(initiallyOwned: false, mutexName);
+
+        var ownsMutex = false;
+        try
+        {
+            try
+            {
+                ownsMutex = windowMutex.WaitOne(0);
+            }
+            catch (AbandonedMutexException)
+            {
+                ownsMutex = true;
+            }
+
+            if (!ownsMutex)
+                return;
+
+            Application.Run(createForm());
+        }
+        finally
+        {
+            if (ownsMutex)
+            {
+                try { windowMutex.ReleaseMutex(); } catch { }
+            }
+        }
     }
 
 
@@ -328,6 +372,7 @@ public sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _pauseLoggingMenuItem;
     private bool _loggingPaused;
     private Form? _activeForm;
+    private Process? _activeExternalWindowProcess;
     private readonly System.Windows.Forms.Timer _focusLossTimer;
     private readonly System.Windows.Forms.Timer _safetyTimer;
 
@@ -343,14 +388,40 @@ public sealed class TrayAppContext : ApplicationContext
         _safetyTimer.Start();
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
-        AddMenuCommand("Personal Log...", OpenViewLog);
-        AddMenuCommand("System Log (Administrator)...", OpenSystemLog);
-        AddMenuCommand("Settings...", OpenSettings);
-        AddMenuCommand("Administrator settings...", OpenAdministratorSettings);
+
+        var personalMenu = new ToolStripMenuItem("Current User");
+        const string currentUserToolTip = "For the current Windows user.";
+        personalMenu.ToolTipText = currentUserToolTip;
+        var currentUserLogMenuItem = AddMenuCommand(personalMenu.DropDownItems, "Log...", OpenViewLog);
+        currentUserLogMenuItem.ToolTipText = currentUserToolTip;
+        personalMenu.DropDownItems.Add(new ToolStripSeparator());
+        var currentUserSettingsMenuItem = AddMenuCommand(personalMenu.DropDownItems, "Settings...", OpenSettings);
+        currentUserSettingsMenuItem.ToolTipText = currentUserToolTip;
+        _menu.Items.Add(personalMenu);
+
+        const string administratorToolTip = "Requires administrator approval.";
+        var administratorMenu = new ToolStripMenuItem("Administrator")
+        {
+            ToolTipText = administratorToolTip
+        };
+        var systemLogMenuItem = AddMenuCommand(
+            administratorMenu.DropDownItems,
+            "System Log...",
+            OpenSystemLog);
+        systemLogMenuItem.ToolTipText = administratorToolTip;
+        administratorMenu.DropDownItems.Add(new ToolStripSeparator());
+        var systemSettingsMenuItem = AddMenuCommand(
+            administratorMenu.DropDownItems,
+            "System Settings and Maintenance...",
+            OpenAdministratorSettings);
+        systemSettingsMenuItem.ToolTipText = administratorToolTip;
+        _menu.Items.Add(administratorMenu);
+        _menu.Items.Add(new ToolStripSeparator());
+
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
         _pauseLoggingMenuItem.Click += async (_, _) => await ToggleLoggingAsync();
         _menu.Items.Add(_pauseLoggingMenuItem);
-        _menu.Items.Add(new ToolStripSeparator());
+
         var serviceStatusItem = new ToolStripMenuItem("Service status");
         serviceStatusItem.Click += async (_, _) =>
         {
@@ -359,8 +430,12 @@ public sealed class TrayAppContext : ApplicationContext
             MessageBox.Show(await ServicePipeClient.GetStatusAsync(), "DeskPulse Service");
         };
         _menu.Items.Add(serviceStatusItem);
+        _menu.Items.Add(new ToolStripSeparator());
+
         AddMenuCommand("About", () => OpenSingleForm(new AboutForm()));
         AddMenuCommand("Quit DeskPulse", ExitThread);
+
+        _trayIcon.ContextMenuStrip = _menu;
         _trayIcon.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) _menu.Show(Cursor.Position); };
         _ = ServicePipeClient.SendAsync("TRAY_STARTED");
 
@@ -375,15 +450,19 @@ public sealed class TrayAppContext : ApplicationContext
     }
 
 
-    private void AddMenuCommand(string text, Action action)
+    private ToolStripMenuItem AddMenuCommand(string text, Action action)
+        => AddMenuCommand(_menu.Items, text, action);
+
+    private ToolStripMenuItem AddMenuCommand(ToolStripItemCollection items, string text, Action action)
     {
         var item = new ToolStripMenuItem(text);
         item.Click += (_, _) =>
         {
             _menu.Close();
-            _menu.BeginInvoke(new Action(action));
+            action();
         };
-        _menu.Items.Add(item);
+        items.Add(item);
+        return item;
     }
 
     private async Task ToggleLoggingAsync()
@@ -455,48 +534,54 @@ public sealed class TrayAppContext : ApplicationContext
             MessageBox.Show(response, "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
-    private static void OpenViewLog()
+    private void OpenViewLog()
     {
+        if (!CanOpenExternalWindow())
+            return;
+
         try
         {
             var executablePath = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executablePath))
                 throw new InvalidOperationException("DeskPulse could not determine its executable path.");
 
-            Process.Start(new ProcessStartInfo
+            TrackExternalWindow(Process.Start(new ProcessStartInfo
             {
                 FileName = executablePath,
                 Arguments = "--personal-log",
                 UseShellExecute = true,
                 WorkingDirectory = AppContext.BaseDirectory
-            });
+            }));
         }
         catch (Exception ex)
         {
             MessageBox.Show(
-                "DeskPulse could not open the personal log.\n\n" + ex.Message,
+                "DeskPulse could not open the current user's log.\n\n" + ex.Message,
                 "DeskPulse",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
     }
 
-    private static void OpenSystemLog()
+    private void OpenSystemLog()
     {
+        if (!CanOpenExternalWindow())
+            return;
+
         try
         {
             var executablePath = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executablePath))
                 throw new InvalidOperationException("DeskPulse could not determine its executable path.");
 
-            Process.Start(new ProcessStartInfo
+            TrackExternalWindow(Process.Start(new ProcessStartInfo
             {
                 FileName = executablePath,
                 Arguments = "--system-log",
                 UseShellExecute = true,
                 Verb = "runas",
                 WorkingDirectory = AppContext.BaseDirectory
-            });
+            }));
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -514,31 +599,52 @@ public sealed class TrayAppContext : ApplicationContext
 
     private void OpenSettings()
     {
-        var form = new SettingsForm();
-        form.FormClosed += (_, _) =>
-        {
-            if (form.DialogResult == DialogResult.OK)
-                _ = ServicePipeClient.SendAsync("RELOAD_SETTINGS");
-        };
-        OpenSingleForm(form);
-    }
+        if (!CanOpenExternalWindow())
+            return;
 
-    private static void OpenAdministratorSettings()
-    {
         try
         {
             var executablePath = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executablePath))
                 throw new InvalidOperationException("DeskPulse could not determine its executable path.");
 
-            Process.Start(new ProcessStartInfo
+            TrackExternalWindow(Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--personal-settings",
+                UseShellExecute = false,
+                WorkingDirectory = AppContext.BaseDirectory
+            }));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open settings for the current user.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private void OpenAdministratorSettings()
+    {
+        if (!CanOpenExternalWindow())
+            return;
+
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            TrackExternalWindow(Process.Start(new ProcessStartInfo
             {
                 FileName = executablePath,
                 Arguments = "--administrator-settings",
                 UseShellExecute = true,
                 Verb = "runas",
                 WorkingDirectory = AppContext.BaseDirectory
-            });
+            }));
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -556,6 +662,12 @@ public sealed class TrayAppContext : ApplicationContext
 
     private void OpenSingleForm(Form form)
     {
+        if (HasActiveExternalWindow())
+        {
+            form.Dispose();
+            return;
+        }
+
         if (_activeForm != null && !_activeForm.IsDisposed && _activeForm.GetType() == form.GetType())
         {
             form.Dispose();
@@ -584,6 +696,60 @@ public sealed class TrayAppContext : ApplicationContext
         form.FormClosed += (_, _) => _focusLossTimer.Stop();
         form.Show();
         RestoreAndActivate(form);
+    }
+
+    private bool CanOpenExternalWindow()
+    {
+        if (_activeForm != null && !_activeForm.IsDisposed && _activeForm.Visible)
+        {
+            RestoreAndActivate(_activeForm);
+            return false;
+        }
+
+        return !HasActiveExternalWindow();
+    }
+
+    private bool HasActiveExternalWindow()
+    {
+        if (_activeExternalWindowProcess == null)
+            return false;
+
+        try
+        {
+            if (!_activeExternalWindowProcess.HasExited)
+                return true;
+        }
+        catch
+        {
+            return true;
+        }
+
+        _activeExternalWindowProcess.Dispose();
+        _activeExternalWindowProcess = null;
+        return false;
+    }
+
+    private void TrackExternalWindow(Process? process)
+    {
+        if (process == null)
+            return;
+
+        _activeExternalWindowProcess = process;
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) =>
+        {
+            if (_menu.IsDisposed || !_menu.IsHandleCreated)
+                return;
+
+            _menu.BeginInvoke(new Action(() =>
+            {
+                if (!ReferenceEquals(_activeExternalWindowProcess, process))
+                    return;
+
+                _activeExternalWindowProcess.Dispose();
+                _activeExternalWindowProcess = null;
+            }));
+        };
     }
 
 
