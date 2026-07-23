@@ -193,6 +193,28 @@ uses a log-window command as its post-install launch. Runtime regression
 testing confirmed that closing the separate Personal Log process leaves the
 original tray PID running.
 
+### Maintenance ownership
+
+Maintenance follows the same ownership boundary:
+
+- ordinary Settings includes **Personal Maintenance**, whose cleanup and clear
+  commands are routed by the verified tray process SID to that user's database;
+- the service loads rules for the requesting process SID, not whichever
+  console session happens to be active;
+- Administrator Settings labels its page **System Maintenance** and targets
+  only `C:\ProgramData\DeskPulse\System\DeskPulse-System.db`;
+- system housekeeping, table clears, clear-all and historical repair use
+  separate `SYSTEM_*` service commands that require the installed tray,
+  elevation and local Administrators membership;
+- every destructive system maintenance operation first creates a consistent
+  SQLite backup under
+  `C:\ProgramData\DeskPulse\System\Backups\DeskPulse-System-before-maintenance-<timestamp>.db`;
+- confirmation text names the exact target and states that personal SID
+  databases are not affected.
+
+DeskPulse provides no administrator maintenance path that enumerates, cleans
+or clears another user's personal database.
+
 ### 0.3.2.0 storage and security boundary
 
 The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.

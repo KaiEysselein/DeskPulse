@@ -546,6 +546,20 @@ public sealed class FileIoMonitor : IDisposable
         return operation(database);
     }
 
+    public T ExecuteSystemDatabaseOperation<T>(Func<DeskPulseDatabase, T> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        lock (_settingsLock)
+        {
+            return operation(_systemDatabase);
+        }
+    }
+
+    public AppSettings GetSettingsForProcess(int processId)
+    {
+        return GetSettingsForAttribution(ResolveProcessAttribution(processId));
+    }
+
     private void RunEtwSession()
     {
         try
@@ -3453,6 +3467,27 @@ public sealed class DeskPulseDatabase : IDisposable
             return;
 
         ExecuteNonQuery(connection, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};");
+    }
+
+    public void BackupTo(string destinationFilePath)
+    {
+        lock (_dbLock)
+        {
+            var destinationFolder = Path.GetDirectoryName(destinationFilePath);
+            if (!string.IsNullOrWhiteSpace(destinationFolder))
+                Directory.CreateDirectory(destinationFolder);
+
+            using var source = new SqliteConnection(ConnectionString);
+            using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = destinationFilePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false
+            }.ToString());
+            source.Open();
+            destination.Open();
+            source.BackupDatabase(destination);
+        }
     }
 
     private static void EnsureAttributionColumns(SqliteConnection connection, string tableName)

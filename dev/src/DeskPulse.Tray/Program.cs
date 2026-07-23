@@ -703,7 +703,8 @@ public static class ServicePipeClient
 
     public static async Task<MaintenanceExclusionCleanupResult> RunDatabaseHousekeepingAsync(
         IProgress<ExportProgressInfo>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool systemDatabase = false)
     {
         try
         {
@@ -716,7 +717,9 @@ public static class ServicePipeClient
             using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
 
             progress?.Report(new ExportProgressInfo(10, "10%  Sending housekeeping request to Windows service"));
-            await writer.WriteLineAsync("CLEAN_DATABASE_CURRENT_RULES");
+            await writer.WriteLineAsync(systemDatabase
+                ? "SYSTEM_CLEAN_DATABASE_CURRENT_RULES"
+                : "CLEAN_DATABASE_CURRENT_RULES");
 
             while (true)
             {
@@ -832,9 +835,23 @@ public static class ServicePipeClient
         return ParseAffectedCount(await SendAsync("CLEAR_TABLE|" + tableName, TimeSpan.FromMinutes(10)));
     }
 
+    public static async Task<long> ClearSystemTableAsync(string tableName)
+    {
+        return ParseAffectedCount(await SendAsync(
+            "SYSTEM_CLEAR_TABLE|" + tableName,
+            TimeSpan.FromMinutes(10)));
+    }
+
     public static async Task<long> ClearAllRecordsAsync()
     {
         return ParseAffectedCount(await SendAsync("CLEAR_ALL_RECORDS", TimeSpan.FromMinutes(10)));
+    }
+
+    public static async Task<long> ClearAllSystemRecordsAsync()
+    {
+        return ParseAffectedCount(await SendAsync(
+            "SYSTEM_CLEAR_ALL_RECORDS",
+            TimeSpan.FromMinutes(10)));
     }
 
     private static long ParseAffectedCount(string response)

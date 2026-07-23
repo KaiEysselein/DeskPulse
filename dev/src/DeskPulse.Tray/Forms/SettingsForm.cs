@@ -37,6 +37,7 @@ public partial class SettingsForm : Form
     private Button _importRulesButton = null!;
     private Button _exportRulesButton = null!;
     private TabPage _maintenanceHousekeepingTabPage = null!;
+    private TabPage _personalMaintenanceTabPage = null!;
     private Button _cleanDatabaseWithRulesButton = null!;
     private Button _restartWindowsServiceButton = null!;
     private Label _windowsServiceStatusLabel = null!;
@@ -69,6 +70,7 @@ public partial class SettingsForm : Form
         ConfigureGeneralActivityLogging();
         ConfigureRuleImportExportButtons();
         ConfigureMaintenanceTab();
+        ConfigurePersonalMaintenanceTab();
 
         Text = administratorMode ? "DeskPulse Administrator Settings" : "DeskPulse Settings";
 
@@ -82,6 +84,7 @@ public partial class SettingsForm : Form
         {
             _settingsTabControl.TabPages.Add(_generalTabPage);
             _settingsTabControl.TabPages.Add(_rulesTabPage);
+            _settingsTabControl.TabPages.Add(_personalMaintenanceTabPage);
         }
         _settingsTabControl.SelectedIndexChanged += SettingsTabControl_SelectedIndexChanged;
 
@@ -204,7 +207,9 @@ public partial class SettingsForm : Form
     private void UpdateFooterForSelectedTab()
     {
         var isRulesTab = ReferenceEquals(_settingsTabControl.SelectedTab, _rulesTabPage);
-        var isMaintenanceTab = ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage);
+        var isMaintenanceTab =
+            ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage) ||
+            ReferenceEquals(_settingsTabControl.SelectedTab, _personalMaintenanceTabPage);
 
         _importRulesButton.Visible = isRulesTab && !_administratorMode;
         _exportRulesButton.Visible = isRulesTab && !_administratorMode;
@@ -387,7 +392,7 @@ public partial class SettingsForm : Form
     {
         _maintenanceHousekeepingTabPage = new TabPage
         {
-            Text = "Maintenance",
+            Text = "System Maintenance",
             BackColor = System.Drawing.SystemColors.Window,
             Padding = new Padding(16),
             AutoScroll = true
@@ -395,7 +400,7 @@ public partial class SettingsForm : Form
 
         var housekeepingGroup = new GroupBox
         {
-            Text = "Database housekeeping",
+            Text = "System database housekeeping",
             Left = 16,
             Top = 16,
             Width = 820,
@@ -410,8 +415,8 @@ public partial class SettingsForm : Form
             Top = 28,
             Width = 785,
             Height = 54,
-            Text = "Apply the current File, App, and User Activity rules and active logging filters to the entire database history. " +
-                   "Records that would not be logged under the current settings are permanently removed, after which the database is compacted."
+            Text = "Target: C:\\ProgramData\\DeskPulse\\System\\DeskPulse-System.db. Apply administrator-owned system rules to system history only. " +
+                   "A protected backup is created automatically before records are removed and the database is compacted."
         };
 
         _cleanDatabaseWithRulesButton = new Button
@@ -577,6 +582,59 @@ public partial class SettingsForm : Form
         _maintenanceHousekeepingTabPage.Controls.Add(safeguardGroup);
     }
 
+    private void ConfigurePersonalMaintenanceTab()
+    {
+        _personalMaintenanceTabPage = new TabPage
+        {
+            Text = "Personal Maintenance",
+            BackColor = System.Drawing.SystemColors.Window,
+            Padding = new Padding(16)
+        };
+
+        var intro = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 72,
+            Text = "Target: your personal DeskPulse database only.\r\n" +
+                   AppSettings.Load().DatabaseFilePath +
+                   "\r\nSystem records and other Windows users are never affected.",
+            ForeColor = System.Drawing.SystemColors.GrayText
+        };
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 120,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Padding = new Padding(0, 12, 0, 0)
+        };
+
+        void AddButton(string text, Action action)
+        {
+            var button = new Button
+            {
+                Text = text,
+                Width = 190,
+                Height = 34,
+                FlatStyle = FlatStyle.System
+            };
+            button.Click += (_, _) => action();
+            buttons.Controls.Add(button);
+        }
+
+        AddButton("Apply current rules...", CleanPersonalDatabaseWithCurrentRules);
+        AddButton("Clear personal File Activity...", () => ClearPersonalDatabaseTable(
+            "ActivityEvents", "all personal File Activity records"));
+        AddButton("Clear personal User Activity...", () => ClearPersonalDatabaseTable(
+            "UserEvents", "all personal User Activity records"));
+        AddButton("Clear personal App Activity...", () => ClearPersonalDatabaseTable(
+            "ProgramEvents", "all personal App Activity records"));
+        AddButton("Clear all personal activity...", ClearAllPersonalDatabaseTables);
+
+        _personalMaintenanceTabPage.Controls.Add(buttons);
+        _personalMaintenanceTabPage.Controls.Add(intro);
+    }
+
     private static Label CreateSafetyLabel(string text, int left, int top) => new()
     {
         Text = text, Left = left, Top = top, Width = 140, Height = 24
@@ -730,9 +788,10 @@ public partial class SettingsForm : Form
     {
         var confirm = MessageBox.Show(
             this,
-            "This will permanently remove every historical DeskPulse record that conflicts with the rules currently displayed in Settings.\n\n" +
+            "Target: C:\\ProgramData\\DeskPulse\\System\\DeskPulse-System.db\n\n" +
+            "This will permanently remove system records that conflict with the administrator-owned rules currently displayed.\n\n" +
             "The cleanup applies the current File and App Activity rules, Windows-system setting, and filtered File Activity applications, and then compacts the SQLite database.\n\n" +
-            "The current rules will also be saved before cleanup begins. Deleted records cannot be recovered unless you have a database backup.\n\nContinue?",
+            "The current rules will also be saved before cleanup begins. A protected system-database backup is created automatically before deletion.\n\nContinue?",
             "Clean Database With Current Rules",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);
@@ -752,7 +811,9 @@ public partial class SettingsForm : Form
         using var progressForm = new RuleCleanupProgressForm(
             "DeskPulse Database Housekeeping",
             "Applying current rules through the DeskPulse service",
-            progress => ServicePipeClient.RunDatabaseHousekeepingAsync(progress).GetAwaiter().GetResult());
+            progress => ServicePipeClient.RunDatabaseHousekeepingAsync(
+                progress,
+                systemDatabase: _administratorMode).GetAwaiter().GetResult());
 
         if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
             return;
@@ -1181,22 +1242,22 @@ public partial class SettingsForm : Form
         SetButtonToolTip(_maintenanceRemoveRegistrySettingsButton, "Deletes current-user DeskPulse registry settings, including preferences and logging rules. Does not delete the database, export, startup fallback log, or program files.");
     }
 
-    private void MaintenanceRefreshDatabaseButton_Click(object? sender, EventArgs e) => _maintenanceDatabaseInfoTextBox.Text = GetDatabaseOverviewForMaintenance(AppSettings.Load());
-    private void MaintenanceOpenDataFolderButton_Click(object? sender, EventArgs e) => OpenFolder(AppSettings.Load().DataFolderPath, "DeskPulse data folder");
+    private void MaintenanceRefreshDatabaseButton_Click(object? sender, EventArgs e) => _maintenanceDatabaseInfoTextBox.Text = GetDatabaseOverviewForMaintenance(StorageLayout.SystemDatabaseFilePath);
+    private void MaintenanceOpenDataFolderButton_Click(object? sender, EventArgs e) => OpenFolder(StorageLayout.SystemFolder, "DeskPulse system data folder");
     private void MaintenanceOpenProgramFolderButton_Click(object? sender, EventArgs e) => OpenFolder(AppContext.BaseDirectory, "DeskPulse program folder");
-    private void MaintenanceStatisticsViewComboBox_SelectedIndexChanged(object? sender, EventArgs e) => RefreshMaintenanceStatistics(AppSettings.Load());
-    private void MaintenanceStatisticsRefreshButton_Click(object? sender, EventArgs e) => RefreshMaintenanceStatistics(AppSettings.Load());
+    private void MaintenanceStatisticsViewComboBox_SelectedIndexChanged(object? sender, EventArgs e) => RefreshMaintenanceStatistics(StorageLayout.SystemDatabaseFilePath);
+    private void MaintenanceStatisticsRefreshButton_Click(object? sender, EventArgs e) => RefreshMaintenanceStatistics(StorageLayout.SystemDatabaseFilePath);
     private void MaintenanceAddFileExclusionButton_Click(object? sender, EventArgs e) => AddSelectedStatisticValueToExclusion("file");
     private void MaintenanceAddFolderExclusionButton_Click(object? sender, EventArgs e) => AddSelectedStatisticValueToExclusion("folder");
     private void MaintenanceAddProcessExclusionButton_Click(object? sender, EventArgs e) => AddSelectedStatisticValueToExclusion("process");
     private void MaintenanceDeleteExportButton_Click(object? sender, EventArgs e) => DeleteGeneratedFile(AppSettings.Load().ExcelExportFilePath, "Excel export file");
     private void MaintenanceDeleteStartupLogButton_Click(object? sender, EventArgs e) => DeleteGeneratedFile(Path.Combine(Path.GetTempPath(), "DeskPulse-startup.log"), "startup fallback log");
     private void MaintenanceRepairHistoricalDataButton_Click(object? sender, EventArgs e) => RepairHistoricalData();
-    private void MaintenanceRemoveUnwantedDataButton_Click(object? sender, EventArgs e) => RemoveExcludedPastRecords(AppSettings.Load());
-    private void MaintenanceDeleteFileActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable(AppSettings.Load(), "ActivityEvents", "all file open/write/close activity records");
-    private void MaintenanceDeleteUserActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable(AppSettings.Load(), "UserEvents", "all user/session records");
-    private void MaintenanceDeleteProgramActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable(AppSettings.Load(), "ProgramEvents", "all program start/close activity records");
-    private void MaintenanceDeleteAllActivityButton_Click(object? sender, EventArgs e) => ClearAllDatabaseTables(AppSettings.Load());
+    private void MaintenanceRemoveUnwantedDataButton_Click(object? sender, EventArgs e) => RemoveExcludedPastRecords(AppSettings.LoadSystemSettings());
+    private void MaintenanceDeleteFileActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable("ActivityEvents", "all system-scoped file activity records");
+    private void MaintenanceDeleteUserActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable("UserEvents", "all system service, installation, and safeguard records");
+    private void MaintenanceDeleteProgramActivityButton_Click(object? sender, EventArgs e) => ClearDatabaseTable("ProgramEvents", "all system-scoped program records");
+    private void MaintenanceDeleteAllActivityButton_Click(object? sender, EventArgs e) => ClearAllDatabaseTables();
     private void MaintenanceBrowseRuleButton_Click(object? sender, EventArgs e) => BrowseForLoggingRulePath();
     private void MaintenanceAddRuleButton_Click(object? sender, EventArgs e) => AddManualLoggingRuleEntry();
     private void ManualRuleTypeRadioButton_CheckedChanged(object? sender, EventArgs e)
@@ -1208,7 +1269,7 @@ public partial class SettingsForm : Form
     private void MaintenanceMoveRuleDownButton_Click(object? sender, EventArgs e) => MoveSelectedExclusionRuleRow(_loggingRulesGridView, 1);
     private void MaintenanceRemoveRuleButton_Click(object? sender, EventArgs e) => RemoveSelectedLoggingRuleRow();
     private void MaintenanceDuplicateRuleButton_Click(object? sender, EventArgs e) => DuplicateSelectedLoggingRuleRow();
-    private void MaintenanceRemovePastRecordsButton_Click(object? sender, EventArgs e) => RemoveExcludedPastRecords(AppSettings.Load());
+    private void MaintenanceRemovePastRecordsButton_Click(object? sender, EventArgs e) => RemoveExcludedPastRecords(AppSettings.LoadSystemSettings());
     private void MaintenanceShowActiveExtensionsButton_Click(object? sender, EventArgs e) => ShowActiveExtensions();
     private void MaintenanceShowStartupStatusButton_Click(object? sender, EventArgs e) => ShowStartupStatus();
     private void MaintenanceRemoveRegistrySettingsButton_Click(object? sender, EventArgs e) => RemoveRegistrySettings();
@@ -1458,16 +1519,16 @@ public partial class SettingsForm : Form
     }
 
 
-    private static string GetDatabaseOverviewForMaintenance(AppSettings settings)
+    private static string GetDatabaseOverviewForMaintenance(string databasePath)
     {
         try
         {
-            using var database = new DeskPulseDatabase(settings.DatabaseFilePath, readOnly: true);
+            using var database = new DeskPulseDatabase(databasePath, readOnly: true);
             var overview = database.GetMaintenanceOverview();
 
             return
                 "Database path:" + Environment.NewLine +
-                settings.DatabaseFilePath + Environment.NewLine + Environment.NewLine +
+                databasePath + Environment.NewLine + Environment.NewLine +
                 "Database size: " + FormatBytes(overview.DatabaseBytes) + Environment.NewLine +
                 "WAL size: " + FormatBytes(overview.WalBytes) + Environment.NewLine +
                 "SHM size: " + FormatBytes(overview.ShmBytes) + Environment.NewLine +
@@ -1483,14 +1544,14 @@ public partial class SettingsForm : Form
         }
     }
 
-    private void RefreshMaintenanceStatistics(AppSettings settings)
+    private void RefreshMaintenanceStatistics(string databasePath)
     {
         if (_statisticsGrid == null || _statisticsViewComboBox == null)
             return;
 
         try
         {
-            using var database = new DeskPulseDatabase(settings.DatabaseFilePath, readOnly: true);
+            using var database = new DeskPulseDatabase(databasePath, readOnly: true);
 
             var view = _statisticsViewComboBox.SelectedItem?.ToString() ?? "Top 100 full paths";
             var rows = database.GetTopMaintenanceStatistics(view);
@@ -2126,8 +2187,9 @@ public partial class SettingsForm : Form
         }
 
         var confirm = MessageBox.Show(
-            "This will permanently delete existing DeskPulse records that match the current exclusion lists.\n\n" +
-            "Deleted data cannot be recovered from DeskPulse unless you have a backup of the SQLite database.\n\n" +
+            "Target: C:\\ProgramData\\DeskPulse\\System\\DeskPulse-System.db\n\n" +
+            "This will permanently delete system records that match the administrator-owned exclusion lists.\n\n" +
+            "A protected system-database backup is created automatically before deletion.\n\n" +
             "This action can delete:\n" +
             "- file activity records whose exact file path matches an excluded file\n" +
             "- file activity records whose folder/path matches an excluded folder\n" +
@@ -2148,7 +2210,8 @@ public partial class SettingsForm : Form
             progress =>
             {
                 progress.Report(new ExportProgressInfo(8, "8%   Sending cleanup request to DeskPulse service"));
-                return ServicePipeClient.RunDatabaseHousekeepingAsync().GetAwaiter().GetResult();
+                return ServicePipeClient.RunDatabaseHousekeepingAsync(
+                    systemDatabase: true).GetAwaiter().GetResult();
             });
 
         if (progressForm.ShowDialog(this) != DialogResult.OK || progressForm.Result == null)
@@ -2169,9 +2232,10 @@ public partial class SettingsForm : Form
     private void RepairHistoricalData()
     {
         var confirm = MessageBox.Show(
-            "DeskPulse will scan existing File Activity records and repair only recognized, recoverable data-format problems.\n\n" +
+            "Target: C:\\ProgramData\\DeskPulse\\System\\DeskPulse-System.db\n\n" +
+            "DeskPulse will scan system-scoped File Activity records and repair only recognized, recoverable data-format problems.\n\n" +
             "The current repair corrects mapped-drive LanmanRedirector paths and refreshes the related folder, file name, extension, and legacy item fields. Unrecognized or uncertain values are left unchanged.\n\n" +
-            "A database backup is recommended before any maintenance operation.\n\nContinue?",
+            "A protected system-database backup is created automatically before repair.\n\nContinue?",
             "Repair Historical Data",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Information);
@@ -2195,14 +2259,15 @@ public partial class SettingsForm : Form
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
 
-        _maintenanceDatabaseInfoTextBox.Text = GetDatabaseOverviewForMaintenance(AppSettings.Load());
+        _maintenanceDatabaseInfoTextBox.Text = GetDatabaseOverviewForMaintenance(StorageLayout.SystemDatabaseFilePath);
     }
 
-    private static void ClearDatabaseTable(AppSettings settings, string tableName, string description)
+    private static void ClearDatabaseTable(string tableName, string description)
     {
         var confirm = MessageBox.Show(
-            "This will permanently remove " + description + " from the DeskPulse database.\n\n" +
-            "The database file and table structure will be kept.\n\n" +
+            "Target: C:\\ProgramData\\DeskPulse\\System\\DeskPulse-System.db\n\n" +
+            "This will permanently remove " + description + " from the System database.\n\n" +
+            "A protected backup is created automatically. The database file and table structure will be kept.\n\n" +
             "Continue?",
             "Clear DeskPulse Records",
             MessageBoxButtons.YesNo,
@@ -2213,7 +2278,7 @@ public partial class SettingsForm : Form
 
         try
         {
-            var deleted = ServicePipeClient.ClearTableAsync(tableName).GetAwaiter().GetResult();
+            var deleted = ServicePipeClient.ClearSystemTableAsync(tableName).GetAwaiter().GetResult();
 
             MessageBox.Show(
                 deleted.ToString("N0", CultureInfo.InvariantCulture) + " " + description + " removed.",
@@ -2231,12 +2296,82 @@ public partial class SettingsForm : Form
         }
     }
 
-    private static void ClearAllDatabaseTables(AppSettings settings)
+    private void CleanPersonalDatabaseWithCurrentRules()
     {
         var confirm = MessageBox.Show(
-            "This will permanently remove all DeskPulse activity records from the database.\n\n" +
-            "It clears file activity, user/session activity, and program activity records.\n" +
-            "The database file and table structure will be kept.\n\n" +
+            this,
+            "Target: your personal DeskPulse database only.\n\n" +
+            "Records that conflict with your current personal rules will be permanently removed. " +
+            "System records and other users are not affected.\n\nContinue?",
+            "Clean Personal Database",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes)
+            return;
+
+        using var progressForm = new RuleCleanupProgressForm(
+            "Personal Database Housekeeping",
+            "Applying your current rules",
+            progress => ServicePipeClient.RunDatabaseHousekeepingAsync(progress).GetAwaiter().GetResult());
+        if (progressForm.ShowDialog(this) == DialogResult.OK)
+            MessageBox.Show(this, "Personal database housekeeping completed.", "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private static void ClearPersonalDatabaseTable(string tableName, string description)
+    {
+        var confirm = MessageBox.Show(
+            "Target: your personal DeskPulse database only.\n\n" +
+            "This will permanently remove " + description + ". System records and other users are not affected.\n\nContinue?",
+            "Clear Personal Records",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes)
+            return;
+
+        try
+        {
+            var deleted = ServicePipeClient.ClearTableAsync(tableName).GetAwaiter().GetResult();
+            MessageBox.Show(deleted.ToString("N0", CultureInfo.InvariantCulture) + " personal record(s) removed.",
+                "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Personal records could not be cleared.\n\n" + ex.Message,
+                "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static void ClearAllPersonalDatabaseTables()
+    {
+        var confirm = MessageBox.Show(
+            "Target: your personal DeskPulse database only.\n\n" +
+            "This will permanently remove all of your personal activity. System records and other users are not affected.\n\nContinue?",
+            "Clear All Personal Activity",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes)
+            return;
+
+        try
+        {
+            var deleted = ServicePipeClient.ClearAllRecordsAsync().GetAwaiter().GetResult();
+            MessageBox.Show(deleted.ToString("N0", CultureInfo.InvariantCulture) + " personal record(s) removed.",
+                "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Personal records could not be cleared.\n\n" + ex.Message,
+                "DeskPulse", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static void ClearAllDatabaseTables()
+    {
+        var confirm = MessageBox.Show(
+            "Target: C:\\ProgramData\\DeskPulse\\System\\DeskPulse-System.db\n\n" +
+            "This will permanently remove all system activity records from the System database.\n\n" +
+            "It clears system-scoped file, service/session, installation, safeguard, and program records.\n" +
+            "A protected backup is created automatically. The database file and table structure will be kept.\n\n" +
             "Continue?",
             "Clear All DeskPulse Records",
             MessageBoxButtons.YesNo,
@@ -2247,7 +2382,7 @@ public partial class SettingsForm : Form
 
         try
         {
-            var deleted = ServicePipeClient.ClearAllRecordsAsync().GetAwaiter().GetResult();
+            var deleted = ServicePipeClient.ClearAllSystemRecordsAsync().GetAwaiter().GetResult();
 
             MessageBox.Show(
                 deleted.ToString("N0", CultureInfo.InvariantCulture) + " total records removed.",

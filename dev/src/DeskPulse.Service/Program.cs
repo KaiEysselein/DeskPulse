@@ -129,14 +129,20 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 if (authorizationError != null)
                 {
                     await writer.WriteLineAsync(
-                        commandName is "CLEAN_DATABASE_CURRENT_RULES" or "REPAIR_HISTORICAL_DATA"
+                        commandName is "CLEAN_DATABASE_CURRENT_RULES" or
+                            "SYSTEM_CLEAN_DATABASE_CURRENT_RULES" or
+                            "REPAIR_HISTORICAL_DATA"
                             ? "RESULT|ERROR|" + authorizationError
                             : "ERROR|" + authorizationError);
                     continue;
                 }
                 if (command.Equals("CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
                 {
-                    await RunDatabaseHousekeepingStreamingAsync(writer, clientProcessId);
+                    await RunDatabaseHousekeepingStreamingAsync(writer, clientProcessId, systemDatabase: false);
+                }
+                else if (command.Equals("SYSTEM_CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
+                {
+                    await RunDatabaseHousekeepingStreamingAsync(writer, clientProcessId, systemDatabase: true);
                 }
                 else if (command.Equals("REPAIR_HISTORICAL_DATA", StringComparison.OrdinalIgnoreCase))
                 {
@@ -260,10 +266,14 @@ public sealed class DeskPulseWindowsService : ServiceBase
             "PAUSE_LOGGING" or "RESUME_LOGGING" or "RELOAD_SETTINGS" or
             "INSTALL_LIFECYCLE" or "START_LOAD_TEST" or "STOP_LOAD_TEST" or
             "DELETE_RECORDS" or "CLEAR_TABLE" or "CLEAR_ALL_RECORDS" or
+            "SYSTEM_CLEAR_TABLE" or "SYSTEM_CLEAR_ALL_RECORDS" or
             "TRAY_STARTED" or "TRAY_STOPPED" or
-            "CLEAN_DATABASE_CURRENT_RULES" or "REPAIR_HISTORICAL_DATA";
+            "CLEAN_DATABASE_CURRENT_RULES" or "SYSTEM_CLEAN_DATABASE_CURRENT_RULES" or
+            "REPAIR_HISTORICAL_DATA";
         var requiresAdministrator = commandName is
-            "START_LOAD_TEST" or "STOP_LOAD_TEST" or "REPAIR_HISTORICAL_DATA";
+            "START_LOAD_TEST" or "STOP_LOAD_TEST" or "REPAIR_HISTORICAL_DATA" or
+            "SYSTEM_CLEAR_TABLE" or "SYSTEM_CLEAR_ALL_RECORDS" or
+            "SYSTEM_CLEAN_DATABASE_CURRENT_RULES";
 
         if (!requiresKnownTray)
             return null;
@@ -396,6 +406,8 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "DELETE_RECORDS": return DeleteSelectedRecords(command, clientProcessId);
             case "CLEAR_TABLE": return ClearTable(command, clientProcessId);
             case "CLEAR_ALL_RECORDS": return ClearAllRecords(clientProcessId);
+            case "SYSTEM_CLEAR_TABLE": return ClearSystemTable(command);
+            case "SYSTEM_CLEAR_ALL_RECORDS": return ClearAllSystemRecords();
             case "TRAY_STARTED": _monitor.WriteUserEvent("DeskPulseTrayStarted", "DeskPulse started (possible login)", "DeskPulse tray application started; this may coincide with a Windows user login", sessionId: GetProcessSessionId(clientProcessId)); return "OK";
             case "TRAY_STOPPED": _monitor.WriteUserEvent("DeskPulseTrayStopped", "DeskPulse tray stopped", "DeskPulse tray application closed", sessionId: GetProcessSessionId(clientProcessId)); return "OK";
             default: return "Unknown command.";
@@ -531,6 +543,51 @@ public sealed class DeskPulseWindowsService : ServiceBase
         return ExecuteDatabaseWrite(clientProcessId, database => database.ClearAllRecords());
     }
 
+    private string ClearSystemTable(string command)
+    {
+        var parts = command.Split('|', 2);
+        if (parts.Length != 2)
+            return "ERROR|Invalid system clear-table request.";
+        var tableName = NormalizeActivityTable(parts[1]);
+        if (tableName == null)
+            return "ERROR|Unknown activity table.";
+        return ExecuteSystemDatabaseWrite(database => database.ClearTableRecords(tableName));
+    }
+
+    private string ClearAllSystemRecords() =>
+        ExecuteSystemDatabaseWrite(database => database.ClearAllRecords());
+
+    private string ExecuteSystemDatabaseWrite(Func<DeskPulseDatabase, long> action)
+    {
+        if (_monitor == null)
+            return "ERROR|Service monitor is not running.";
+        try
+        {
+            var result = _monitor.ExecuteSystemDatabaseOperation(database =>
+            {
+                CreateSystemMaintenanceBackup(database);
+                return action(database);
+            });
+            return "OK|" + result.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+        {
+            return "ERROR|" + SanitizePipeMessage(ex.Message);
+        }
+    }
+
+    private static string CreateSystemMaintenanceBackup(DeskPulseDatabase database)
+    {
+        var backupFolder = Path.Combine(StorageLayout.SystemFolder, "Backups");
+        var backupPath = Path.Combine(
+            backupFolder,
+            "DeskPulse-System-before-maintenance-" +
+            DateTime.Now.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture) +
+            ".db");
+        database.BackupTo(backupPath);
+        return backupPath;
+    }
+
     private string ExecuteDatabaseWrite(int clientProcessId, Func<DeskPulseDatabase, long> action)
     {
         if (_monitor == null)
@@ -591,8 +648,11 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 _monitor.PauseLogging();
 
             var progress = new InlineProgress<ExportProgressInfo>(SendProgress);
-            var result = _monitor.ExecuteDatabaseOperationForProcess(clientProcessId, database =>
-                database.RepairHistoricalData(progress, CancellationToken.None));
+            var result = _monitor.ExecuteSystemDatabaseOperation(database =>
+            {
+                CreateSystemMaintenanceBackup(database);
+                return database.RepairHistoricalData(progress, CancellationToken.None);
+            });
 
             await writer.WriteLineAsync("RESULT|OK|" +
                 result.ActivityRecordsRepaired.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -609,7 +669,10 @@ public sealed class DeskPulseWindowsService : ServiceBase
     }
 
 
-    private async Task RunDatabaseHousekeepingStreamingAsync(StreamWriter writer, int clientProcessId)
+    private async Task RunDatabaseHousekeepingStreamingAsync(
+        StreamWriter writer,
+        int clientProcessId,
+        bool systemDatabase)
     {
         if (_monitor == null)
         {
@@ -636,10 +699,18 @@ public sealed class DeskPulseWindowsService : ServiceBase
             if (!wasPaused)
                 _monitor.PauseLogging();
 
-            var settings = AppSettings.Load();
+            var settings = systemDatabase
+                ? AppSettings.LoadSystemSettings()
+                : _monitor.GetSettingsForProcess(clientProcessId);
             var progress = new InlineProgress<ExportProgressInfo>(SendProgress);
-            var result = _monitor.ExecuteDatabaseOperationForProcess(clientProcessId, database =>
-                database.CleanDatabaseWithCurrentRules(settings, progress, CancellationToken.None));
+            var result = systemDatabase
+                ? _monitor.ExecuteSystemDatabaseOperation(database =>
+                {
+                    CreateSystemMaintenanceBackup(database);
+                    return database.CleanDatabaseWithCurrentRules(settings, progress, CancellationToken.None);
+                })
+                : _monitor.ExecuteDatabaseOperationForProcess(clientProcessId, database =>
+                    database.CleanDatabaseWithCurrentRules(settings, progress, CancellationToken.None));
 
             await writer.WriteLineAsync(string.Join("|",
                 "RESULT",
