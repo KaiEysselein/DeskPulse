@@ -144,8 +144,9 @@ Settings are now separated by ownership:
   only that caller SID's cached rules;
 - file and program events are evaluated against the rules belonging to the
   process/session SID;
-- system-scoped service and lifecycle events bypass per-user rules, so an
-  ordinary user cannot suppress system records;
+- system-scoped service and lifecycle events are evaluated only against the
+  protected system rule set, so an ordinary user cannot suppress them through
+  per-user rules;
 - a fresh SID receives independent defaults and resolves its default data path
   through the SID's registered Windows profile rather than the LocalSystem
   profile.
@@ -157,9 +158,16 @@ properties, the owning user could write its Settings child folder, and its
 database remained read-only. A settings backup was retained at
 `Documents\DeskPulse Backups\DeskPulse-settings-before-split-2026-07-23.json`.
 
-An administrator UI for configurable system-wide logging rules and a combined
-authorized machine-wide database view remain separate backlog work. Current
-system lifecycle events follow a non-suppressible service policy.
+Administrator Settings now includes an editable **Rules → System Events** page.
+Its enabled event rules persist as
+`SystemUserActivityRuleSettings` in the protected system settings file.
+Ordinary Settings shows the same effective rules on a
+**System Rules (read-only)** page, with editing and import/export actions
+unavailable. Existing system settings files without the new property load the
+complete safe default rule set, including service start and stop events.
+
+The authorized combined machine-wide database view remains separate backlog
+work.
 
 ### 0.3.2.0 storage and security boundary
 

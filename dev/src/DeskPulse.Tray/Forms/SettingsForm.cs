@@ -24,6 +24,8 @@ public partial class SettingsForm : Form
     private ActivityRuleEditor _fileActivityRuleEditor = null!;
     private ActivityRuleEditor _userActivityRuleEditor = null!;
     private ActivityRuleEditor _appActivityRuleEditor = null!;
+    private ActivityRuleEditor? _systemUserActivityRuleEditor;
+    private TabPage? _systemRulesTabPage;
     private TextBox _manualLoggingRuleTextBox = null!;
     private RadioButton _manualRuleFolderRadioButton = null!;
     private RadioButton _manualRuleFileRadioButton = null!;
@@ -65,6 +67,7 @@ public partial class SettingsForm : Form
         InitializeComponent();
         AppIcon.Apply(this);
         ConfigureActivityRuleTabs();
+        _rulesSubTabControl.SelectedIndexChanged += (_, _) => UpdateFooterForSelectedTab();
         ConfigureGeneralActivityLogging();
         ConfigureRuleImportExportButtons();
         ConfigureMaintenanceTab();
@@ -74,6 +77,7 @@ public partial class SettingsForm : Form
         _settingsTabControl.TabPages.Clear();
         if (administratorMode)
         {
+            _settingsTabControl.TabPages.Add(_rulesTabPage);
             _settingsTabControl.TabPages.Add(_maintenanceHousekeepingTabPage);
         }
         else
@@ -85,7 +89,9 @@ public partial class SettingsForm : Form
 
         ConfigureSettingsFooterButtons();
 
-        var settings = AppSettings.Load();
+        var settings = administratorMode
+            ? AppSettings.LoadSystemSettings()
+            : AppSettings.Load();
         LoadDesignerSettings(settings);
         LoadRuleSettings(settings);
 
@@ -201,9 +207,10 @@ public partial class SettingsForm : Form
     {
         var isRulesTab = ReferenceEquals(_settingsTabControl.SelectedTab, _rulesTabPage);
         var isMaintenanceTab = ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage);
+        var isReadOnlySystemRules = ReferenceEquals(_rulesSubTabControl.SelectedTab, _systemRulesTabPage);
 
-        _importRulesButton.Visible = isRulesTab;
-        _exportRulesButton.Visible = isRulesTab;
+        _importRulesButton.Visible = isRulesTab && !_administratorMode && !isReadOnlySystemRules;
+        _exportRulesButton.Visible = isRulesTab && !_administratorMode && !isReadOnlySystemRules;
 
         _saveButton.Visible = !isMaintenanceTab;
         _saveAndCloseButton.Visible = !isMaintenanceTab;
@@ -337,9 +344,30 @@ public partial class SettingsForm : Form
         appPage.Controls.Add(_appActivityRuleEditor);
         userPage.Controls.Add(_userActivityRuleEditor);
 
-        _rulesSubTabControl.TabPages.Add(filePage);
-        _rulesSubTabControl.TabPages.Add(appPage);
-        _rulesSubTabControl.TabPages.Add(userPage);
+        if (_administratorMode)
+        {
+            userPage.Text = "System Events";
+            _rulesSubTabControl.TabPages.Add(userPage);
+        }
+        else
+        {
+            _rulesSubTabControl.TabPages.Add(filePage);
+            _rulesSubTabControl.TabPages.Add(appPage);
+            _rulesSubTabControl.TabPages.Add(userPage);
+
+            _systemRulesTabPage = new TabPage("System Rules (read-only)")
+            {
+                BackColor = System.Drawing.SystemColors.Window,
+                Padding = new Padding(8)
+            };
+            _systemUserActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.User)
+            {
+                Dock = DockStyle.Fill
+            };
+            _systemUserActivityRuleEditor.SetReadOnly();
+            _systemRulesTabPage.Controls.Add(_systemUserActivityRuleEditor);
+            _rulesSubTabControl.TabPages.Add(_systemRulesTabPage);
+        }
     }
 
     private void ConfigureRuleImportExportButtons()
@@ -620,7 +648,7 @@ public partial class SettingsForm : Form
 
         try
         {
-            var settings = AppSettings.Load();
+            var settings = AppSettings.LoadSystemSettings();
             settings.ServiceSafetyWarningCpuPercent = (double)_safetyWarningCpuNumeric.Value;
             settings.ServiceSafetyCriticalCpuPercent = (double)_safetyCriticalCpuNumeric.Value;
             settings.ServiceSafetyWarningMemoryPercent = (double)_safetyWarningMemoryNumeric.Value;
@@ -767,7 +795,9 @@ public partial class SettingsForm : Form
             return null;
         }
 
-        var existingSettings = AppSettings.Load();
+        var existingSettings = _administratorMode
+            ? AppSettings.LoadSystemSettings()
+            : AppSettings.Load();
         var exportSheets = existingSettings.ExportSheets.Count > 0
             ? existingSettings.ExportSheets
             : ExportSheetOption.GetDefaultOptions();
@@ -1048,6 +1078,11 @@ public partial class SettingsForm : Form
 
         _fileActivityRuleEditor.LoadRuleSettings(fileRuleSettings);
         _userActivityRuleEditor.LoadRuleSettings(settings.UserActivityRuleSettings);
+        if (_systemUserActivityRuleEditor != null)
+        {
+            _systemUserActivityRuleEditor.LoadRuleSettings(
+                AppSettings.LoadSystemSettings().UserActivityRuleSettings);
+        }
         _appActivityRuleEditor.LoadRuleSettings(appRuleSettings);
         _trackWindowsSystemActivityCheckBox.Checked = settings.TrackWindowsSystemActivity;
         _fileActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetFileRules(), !settings.TrackWindowsSystemActivity);
@@ -2906,7 +2941,9 @@ public partial class SettingsForm : Form
             return false;
         }
 
-        var existingSettings = AppSettings.Load();
+        var existingSettings = _administratorMode
+            ? AppSettings.LoadSystemSettings()
+            : AppSettings.Load();
         var exportSheets = existingSettings.ExportSheets.Count > 0
             ? existingSettings.ExportSheets
             : ExportSheetOption.GetDefaultOptions();
@@ -3501,6 +3538,29 @@ internal sealed class ActivityRuleEditor : UserControl
     {
         _userRules = (rules ?? Array.Empty<ActivityRuleSetting>()).Select(r => r.Clone()).ToList();
         RenderRules();
+    }
+
+    public void SetReadOnly()
+    {
+        _grid.ReadOnly = true;
+        _grid.AllowUserToDeleteRows = false;
+        foreach (var button in Controls
+                     .Cast<Control>()
+                     .SelectMany(GetDescendants)
+                     .OfType<Button>())
+        {
+            button.Enabled = false;
+        }
+    }
+
+    private static IEnumerable<Control> GetDescendants(Control control)
+    {
+        foreach (Control child in control.Controls)
+        {
+            yield return child;
+            foreach (var descendant in GetDescendants(child))
+                yield return descendant;
+        }
     }
 
     public void SetWindowsDefaultRules(IEnumerable<ActivityRuleSetting> rules, bool active)

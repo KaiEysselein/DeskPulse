@@ -39,6 +39,7 @@ public sealed class FileIoMonitor : IDisposable
     private readonly DeskPulseDatabase _systemDatabase;
     private readonly Dictionary<string, DeskPulseDatabase> _userDatabases = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, AppSettings> _userSettings = new(StringComparer.OrdinalIgnoreCase);
+    private AppSettings _systemSettings;
     private EventAttribution _activeAttribution;
     private ProgramActivityMonitor _programActivityMonitor;
     private TraceEventSession? _session;
@@ -54,6 +55,7 @@ public sealed class FileIoMonitor : IDisposable
         _settings = AppSettings.Load();
         _settings.EnsureSystemSettingsInitialized();
         _settings = AppSettings.Load();
+        _systemSettings = AppSettings.LoadSystemSettings();
 
         StorageLayout.PrepareSystemStorage();
         _systemDatabase = new DeskPulseDatabase(StorageLayout.SystemDatabaseFilePath);
@@ -200,7 +202,17 @@ public sealed class FileIoMonitor : IDisposable
             var attribution = scope == EventScope.System
                 ? EventAttribution.System
                 : ResolveSessionAttribution(sessionId);
-            if (attribution.Scope == EventScope.User)
+            if (attribution.Scope == EventScope.System)
+            {
+                if (!LoggingRulesEngine.IsUserActivityMonitored(
+                    eventType,
+                    eventDescription,
+                    _systemSettings.UserActivityRules))
+                {
+                    return;
+                }
+            }
+            else
             {
                 var settings = GetSettingsForAttribution(attribution);
                 if (!LoggingRulesEngine.IsUserActivityMonitored(
@@ -315,6 +327,7 @@ public sealed class FileIoMonitor : IDisposable
         lock (_settingsLock)
         {
             _settings = AppSettings.Load();
+            _systemSettings = AppSettings.LoadSystemSettings();
 
             var (resolvedDatabase, attribution) = PrepareAndResolveUserDatabase(_settings);
             var databaseFilePath = resolvedDatabase.DatabaseFilePath;
@@ -386,6 +399,7 @@ public sealed class FileIoMonitor : IDisposable
 
         lock (_settingsLock)
         {
+            _systemSettings = AppSettings.LoadSystemSettings();
             var settings = AppSettings.LoadForSid(attribution.WindowsSid);
             _userSettings[attribution.WindowsSid] = settings;
             if (string.Equals(
@@ -5108,6 +5122,8 @@ public sealed class SystemAppSettings
     public int ServiceSafetyWarningSustainedSeconds { get; set; } = 5;
     public int ServiceSafetyCriticalSustainedSeconds { get; set; } = 10;
     public bool PauseLoggingAtStartupAfterSafetyTrigger { get; set; } = true;
+    public List<ActivityRuleSetting> SystemUserActivityRuleSettings { get; set; } =
+        AppSettings.ToRuleSettings(AppSettings.GetDefaultUserActivityRules());
 
     public static SystemAppSettings From(AppSettings settings) => new()
     {
@@ -5117,7 +5133,8 @@ public sealed class SystemAppSettings
         ServiceSafetyCriticalMemoryPercent = settings.ServiceSafetyCriticalMemoryPercent,
         ServiceSafetyWarningSustainedSeconds = settings.ServiceSafetyWarningSustainedSeconds,
         ServiceSafetyCriticalSustainedSeconds = settings.ServiceSafetyCriticalSustainedSeconds,
-        PauseLoggingAtStartupAfterSafetyTrigger = settings.PauseLoggingAtStartupAfterSafetyTrigger
+        PauseLoggingAtStartupAfterSafetyTrigger = settings.PauseLoggingAtStartupAfterSafetyTrigger,
+        SystemUserActivityRuleSettings = settings.UserActivityRuleSettings.Select(rule => rule.Clone()).ToList()
     };
 
     public void ApplyTo(AppSettings settings)
@@ -5129,6 +5146,14 @@ public sealed class SystemAppSettings
         settings.ServiceSafetyWarningSustainedSeconds = ServiceSafetyWarningSustainedSeconds;
         settings.ServiceSafetyCriticalSustainedSeconds = ServiceSafetyCriticalSustainedSeconds;
         settings.PauseLoggingAtStartupAfterSafetyTrigger = PauseLoggingAtStartupAfterSafetyTrigger;
+    }
+
+    public void ApplyRulesTo(AppSettings settings)
+    {
+        settings.UserActivityRuleSettings =
+            (SystemUserActivityRuleSettings ?? AppSettings.ToRuleSettings(AppSettings.GetDefaultUserActivityRules()))
+            .Select(rule => rule.Clone())
+            .ToList();
     }
 }
 
@@ -5337,6 +5362,30 @@ public sealed class AppSettings
             migrated.SaveForSid(windowsSid);
             ApplySystemSettings(migrated);
             return migrated;
+        }
+    }
+
+    public static AppSettings LoadSystemSettings()
+    {
+        lock (SettingsFileLock)
+        {
+            var settings = new AppSettings();
+            NormalizeSharedSettings(settings);
+            try
+            {
+                if (!File.Exists(StorageLayout.SystemSettingsFilePath))
+                    return settings;
+                var system = JsonSerializer.Deserialize<SystemAppSettings>(
+                    File.ReadAllText(StorageLayout.SystemSettingsFilePath),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                system?.ApplyTo(settings);
+                system?.ApplyRulesTo(settings);
+            }
+            catch
+            {
+                // Retain safe defaults if protected system settings cannot be read.
+            }
+            return settings;
         }
     }
 
@@ -5691,7 +5740,7 @@ public sealed class AppSettings
         }
     }
 
-    private static List<ActivityRuleSetting> ToRuleSettings(IEnumerable<string> rules)
+    public static List<ActivityRuleSetting> ToRuleSettings(IEnumerable<string> rules)
     {
         return (rules ?? Array.Empty<string>())
             .Select(ActivityRuleSetting.FromRuleText)
@@ -5790,6 +5839,8 @@ public sealed class AppSettings
         {
             "DeskPulseStarted",
             "DeskPulseStopped",
+            "DeskPulseServiceStarted",
+            "DeskPulseServiceStopped",
             "DeskPulseInstalled",
             "DeskPulseUpdated",
             "DeskPulseReinstalled",
