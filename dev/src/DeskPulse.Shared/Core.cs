@@ -52,9 +52,9 @@ public sealed class FileIoMonitor : IDisposable
 
     public FileIoMonitor(bool subscribeToInteractiveSessionEvents = false)
     {
-        _settings = AppSettings.Load();
+        _settings = LoadAvailableSettings();
         _settings.EnsureSystemSettingsInitialized();
-        _settings = AppSettings.Load();
+        _settings = LoadAvailableSettings();
         _systemSettings = AppSettings.LoadSystemSettings();
 
         StorageLayout.PrepareSystemStorage();
@@ -326,7 +326,7 @@ public sealed class FileIoMonitor : IDisposable
     {
         lock (_settingsLock)
         {
-            _settings = AppSettings.Load();
+            _settings = LoadAvailableSettings();
             _systemSettings = AppSettings.LoadSystemSettings();
 
             var (resolvedDatabase, attribution) = PrepareAndResolveUserDatabase(_settings);
@@ -386,6 +386,13 @@ public sealed class FileIoMonitor : IDisposable
         {
             return _settings.Clone();
         }
+    }
+
+    private static AppSettings LoadAvailableSettings()
+    {
+        return StorageLayout.TryResolveCurrentOrInteractiveUserSid(out var windowsSid)
+            ? AppSettings.LoadForSid(windowsSid)
+            : AppSettings.LoadSystemSettings();
     }
 
     public void ReloadSettingsForProcess(int processId)

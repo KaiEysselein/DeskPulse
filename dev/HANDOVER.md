@@ -123,6 +123,13 @@ The installer was rebuilt and the live task now contains all three action
 values. Its PowerShell 5 registration path uses
 `[System.IO.Path]::GetDirectoryName` for compatibility.
 
+The same final switch test exposed a service-start race while Windows had no
+active console user between sessions. `FileIoMonitor` now loads protected
+system settings and routes to the System database when no interactive SID can
+be resolved, instead of throwing from `AppSettings.Load()`. Session changes
+reload user settings when a SID becomes available again. The corrected build
+was installed and the service started successfully.
+
 ### Named-pipe command authorization
 
 The service now resolves the connecting named-pipe client's process ID and
