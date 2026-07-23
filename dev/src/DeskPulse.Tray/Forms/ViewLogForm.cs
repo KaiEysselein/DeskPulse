@@ -32,6 +32,7 @@ public partial class ViewLogForm : Form
     private int _userTotal;
     private readonly string _connectionString;
     private readonly string _databaseFilePath;
+    private readonly bool _machineWide;
     private readonly Action? _settingsChanged;
     private string _appSortColumn = "CreatedAt";
     private bool _appSortAscending;
@@ -40,26 +41,35 @@ public partial class ViewLogForm : Form
     private string _userSortColumn = "CreatedAt";
     private bool _userSortAscending;
 
-    public ViewLogForm(Action? settingsChanged = null)
+    public ViewLogForm(Action? settingsChanged = null, bool machineWide = false)
     {
         InitializeComponent();
         AppIcon.Apply(this);
 
         _settingsChanged = settingsChanged;
+        _machineWide = machineWide;
         var settings = AppSettings.Load();
-        _databaseFilePath = settings.DatabaseFilePath;
+        _databaseFilePath = machineWide
+            ? StorageLayout.SystemDatabaseFilePath
+            : settings.DatabaseFilePath;
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = settings.DatabaseFilePath,
+            DataSource = _databaseFilePath,
             Mode = SqliteOpenMode.ReadOnly,
             Cache = SqliteCacheMode.Shared
         }.ToString();
+        if (_machineWide)
+        {
+            Text = "DeskPulse Machine-wide Log (Administrator, read-only)";
+            createRuleButton.Visible = false;
+            deleteButton.Visible = false;
+        }
 
         _pageSize = LoadPageSize();
         _use12HourTime = LoadUse12HourTime();
         timeFormatCombo.SelectedItem = _use12HourTime ? "12-hour" : "24-hour";
         pageSizeInput.Value = Math.Clamp(_pageSize, (int)pageSizeInput.Minimum, (int)pageSizeInput.Maximum);
-        dateStart.Value = DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
+        dateStart.Value = GetFirstRecordedDate();
         dateEnd.Value = DateTime.Today;
         ConfigureGrids();
         tabs.SelectedIndexChanged += (_, _) =>
@@ -74,6 +84,80 @@ public partial class ViewLogForm : Form
             groupByLabel.Visible = groupByCombo.Visible = tabs.SelectedTab?.Text == "File Activity";
             RefreshLog();
         };
+    }
+
+    private SqliteConnection OpenReadConnection()
+    {
+        if (!_machineWide)
+        {
+            var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            return connection;
+        }
+
+        var combined = new SqliteConnection("Data Source=:memory:");
+        combined.Open();
+        var databasePaths = new List<string>();
+        if (File.Exists(StorageLayout.SystemDatabaseFilePath))
+            databasePaths.Add(StorageLayout.SystemDatabaseFilePath);
+        if (Directory.Exists(StorageLayout.UsersFolder))
+        {
+            databasePaths.AddRange(Directory.EnumerateFiles(
+                StorageLayout.UsersFolder,
+                "DeskPulse.db",
+                SearchOption.AllDirectories));
+        }
+
+        var aliases = new List<string>();
+        for (var index = 0; index < databasePaths.Count; index++)
+        {
+            var alias = "source" + index.ToString(CultureInfo.InvariantCulture);
+            using var attach = combined.CreateCommand();
+            attach.CommandText = $"ATTACH DATABASE $path AS [{alias}];";
+            attach.Parameters.AddWithValue("$path", new Uri(Path.GetFullPath(databasePaths[index])).AbsoluteUri + "?mode=ro");
+            attach.ExecuteNonQuery();
+            aliases.Add(alias);
+        }
+
+        foreach (var table in new[] { "ActivityEvents", "ProgramEvents", "UserEvents" })
+        {
+            var selects = aliases.Select(alias => $"SELECT * FROM [{alias}].[{table}]").ToArray();
+            using var view = combined.CreateCommand();
+            view.CommandText = selects.Length == 0
+                ? $"CREATE TEMP TABLE [{table}] (Id INTEGER, CreatedAt TEXT);"
+                : $"CREATE TEMP VIEW [{table}] AS {string.Join(" UNION ALL ", selects)};";
+            view.ExecuteNonQuery();
+        }
+
+        return combined;
+    }
+
+    private DateTime GetFirstRecordedDate()
+    {
+        if (!_machineWide)
+            return DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
+
+        try
+        {
+            using var connection = OpenReadConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT MIN(CreatedAt)
+                FROM (
+                    SELECT CreatedAt FROM ActivityEvents
+                    UNION ALL SELECT CreatedAt FROM ProgramEvents
+                    UNION ALL SELECT CreatedAt FROM UserEvents
+                );
+                """;
+            var value = Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var date)
+                ? date.Date
+                : DateTime.Today;
+        }
+        catch
+        {
+            return DateTime.Today;
+        }
     }
 
     private void TodayOnlyButton_Click(object? sender, EventArgs e)
@@ -493,13 +577,7 @@ public partial class ViewLogForm : Form
     private ConflictingRecordIds FindConflictingRecordIds(LogRuleCategory category, ActivityRuleSetting rule)
     {
         var result = new ConflictingRecordIds();
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = _databaseFilePath,
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Shared
-        }.ToString());
-        connection.Open();
+        using var connection = OpenReadConnection();
         using (var busy = connection.CreateCommand()) { busy.CommandText = "PRAGMA busy_timeout=5000;"; busy.ExecuteNonQuery(); }
 
         if (category == LogRuleCategory.File)
@@ -1028,7 +1106,8 @@ public partial class ViewLogForm : Form
             SELECT Id, CreatedAt, ActivityType, FullPath, FolderPath, FileName, Extension,
                    DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
                    LastWriteDate, LastWriteTime, WriteCount, SizeAtLastWrite, DateClosed,
-                   TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note
+                   TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note,
+                   Scope, WindowsSid, SessionId
             FROM ActivityEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_fileSortColumn, _fileSortAscending)}
@@ -1053,7 +1132,8 @@ public partial class ViewLogForm : Form
                 ["Last Write Date"] = ReadText(reader, 12), ["Last Write Time"] = ReadText(reader, 13),
                 ["Write Count"] = ReadText(reader, 14), ["Size At Last Write"] = ReadText(reader, 15),
                 ["Date Closed"] = ReadText(reader, 16), ["Time Closed"] = ReadText(reader, 17), ["Size At Closing"] = ReadText(reader, 18),
-                ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22)
+                ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22),
+                ["Scope"] = ReadText(reader, 23), ["Windows SID"] = ReadText(reader, 24), ["Session ID"] = ReadText(reader, 25)
             };
 
             return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
@@ -1066,7 +1146,8 @@ public partial class ViewLogForm : Form
     {
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, ProgramName,
-                   ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note
+                   ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note,
+                   Scope, WindowsSid, SessionId
             FROM ProgramEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_appSortColumn, _appSortAscending)}
@@ -1080,7 +1161,8 @@ public partial class ViewLogForm : Form
                 ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
                 ["Event"] = ReadText(reader, 4), ["App"] = ReadText(reader, 5), ["Process ID"] = ReadText(reader, 6),
                 ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
-                ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12)
+                ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12),
+                ["Scope"] = ReadText(reader, 13), ["Windows SID"] = ReadText(reader, 14), ["Session ID"] = ReadText(reader, 15)
             };
             return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
         });
@@ -1090,7 +1172,8 @@ public partial class ViewLogForm : Form
     {
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, UserName,
-                   MachineName, ProcessName, ProcessId, AppVersion, Note
+                   MachineName, ProcessName, ProcessId, AppVersion, Note,
+                   Scope, WindowsSid, SessionId
             FROM UserEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_userSortColumn, _userSortAscending)}
@@ -1103,7 +1186,8 @@ public partial class ViewLogForm : Form
             {
                 ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
                 ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
-                ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10)
+                ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10),
+                ["Scope"] = ReadText(reader, 11), ["Windows SID"] = ReadText(reader, 12), ["Session ID"] = ReadText(reader, 13)
             };
             return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
         });
@@ -1112,8 +1196,7 @@ public partial class ViewLogForm : Form
     private List<LogViewEntry> ReadEntries(string sql, DateTime start, DateTime endExclusive, int page, Func<SqliteDataReader, LogViewEntry> factory, bool usePaging = true, string? groupKey = null)
     {
         var result = new List<LogViewEntry>();
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        using var connection = OpenReadConnection();
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.Parameters.AddWithValue("$start", start.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
@@ -1139,8 +1222,7 @@ public partial class ViewLogForm : Form
             _ => throw new ArgumentOutOfRangeException(nameof(tableName))
         };
 
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        using var connection = OpenReadConnection();
         using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {allowedTable} WHERE CreatedAt >= $start AND CreatedAt < $end;";
         command.Parameters.AddWithValue("$start", start.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
@@ -1194,8 +1276,7 @@ public partial class ViewLogForm : Form
 
     private int CountFileGroups(DateTime start, DateTime endExclusive)
     {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        using var connection = OpenReadConnection();
         using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM (SELECT {FileGroupExpression()} AS GroupKey FROM ActivityEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey);";
         AddDateParameters(command, start, endExclusive);
@@ -1205,8 +1286,7 @@ public partial class ViewLogForm : Form
     private List<FileLogGroup> ReadFileGroups(DateTime start, DateTime endExclusive, int page)
     {
         var result = new List<FileLogGroup>();
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        using var connection = OpenReadConnection();
         using var command = connection.CreateCommand();
         command.CommandText = $"SELECT {FileGroupExpression()} AS GroupKey, COUNT(*) AS RecordCount, MAX(CreatedAt) AS Latest FROM ActivityEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey ORDER BY Latest DESC, GroupKey ASC LIMIT $limit OFFSET $offset;";
         AddDateParameters(command, start, endExclusive);
@@ -1223,7 +1303,8 @@ public partial class ViewLogForm : Form
             SELECT Id, CreatedAt, ActivityType, FullPath, FolderPath, FileName, Extension,
                    DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
                    LastWriteDate, LastWriteTime, WriteCount, SizeAtLastWrite, DateClosed,
-                   TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note
+                   TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note,
+                   Scope, WindowsSid, SessionId
             FROM ActivityEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end AND {FileGroupExpression()} = $groupKey
             {BuildOrderBy(_fileSortColumn, _fileSortAscending)};
@@ -1248,7 +1329,8 @@ public partial class ViewLogForm : Form
             ["Last Write Date"] = ReadText(reader, 12), ["Last Write Time"] = ReadText(reader, 13),
             ["Write Count"] = ReadText(reader, 14), ["Size At Last Write"] = ReadText(reader, 15),
             ["Date Closed"] = ReadText(reader, 16), ["Time Closed"] = ReadText(reader, 17), ["Size At Closing"] = ReadText(reader, 18),
-            ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22)
+            ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22),
+            ["Scope"] = ReadText(reader, 23), ["Windows SID"] = ReadText(reader, 24), ["Session ID"] = ReadText(reader, 25)
         };
         return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
             EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)), file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);

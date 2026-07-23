@@ -69,6 +69,22 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => a.Equals("--administrator-log", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!IsProcessElevated())
+            {
+                MessageBox.Show(
+                    "The machine-wide log must be opened through the DeskPulse tray menu and approved through Windows User Account Control.",
+                    "DeskPulse Machine-wide Log",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            Application.Run(new ViewLogForm(machineWide: true));
+            return;
+        }
+
         var mutexName = $"Local\\DeskPulse.Tray.Session.{Process.GetCurrentProcess().SessionId}";
         _trayInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
@@ -321,6 +337,7 @@ public sealed class TrayAppContext : ApplicationContext
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
         AddMenuCommand("View Log...", OpenViewLog);
+        AddMenuCommand("Machine-wide Log (Administrator)...", OpenAdministratorLog);
         AddMenuCommand("Settings...", OpenSettings);
         AddMenuCommand("Administrator settings...", OpenAdministratorSettings);
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
@@ -472,6 +489,37 @@ public sealed class TrayAppContext : ApplicationContext
         {
             MessageBox.Show(
                 "DeskPulse could not open Administrator settings.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private static void OpenAdministratorLog()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--administrator-log",
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // The user cancelled the Windows UAC prompt.
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open the machine-wide log.\n\n" + ex.Message,
                 "DeskPulse",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);

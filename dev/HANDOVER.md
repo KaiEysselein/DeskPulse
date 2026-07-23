@@ -166,8 +166,24 @@ Ordinary Settings shows the same effective rules on a
 unavailable. Existing system settings files without the new property load the
 complete safe default rule set, including service start and stop events.
 
-The authorized combined machine-wide database view remains separate backlog
-work.
+### Authorized machine-wide log
+
+The tray now exposes **Machine-wide Log (Administrator)...**. It launches a
+separate short-lived process through Windows UAC and rejects an unelevated
+`--administrator-log` launch. The elevated window:
+
+- attaches the protected system database and every available SID database in
+  SQLite read-only mode;
+- presents their File, App and User Activity records through the existing
+  paging, sorting, grouping, detail and current-page export features;
+- includes Scope, Windows SID and Session ID in record details so each combined
+  result retains its provenance;
+- hides record deletion and rule-creation controls, preventing ambiguous
+  cross-database mutations;
+- closes the elevated process when the machine-wide log window closes.
+
+Ordinary **View Log...** remains bound only to the calling user's SID database.
+No database ACLs are broadened to implement the combined view.
 
 ### 0.3.2.0 storage and security boundary
 
