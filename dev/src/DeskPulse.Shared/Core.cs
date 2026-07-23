@@ -4890,9 +4890,13 @@ public static class StartupTaskManager
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "DeskPulse.Tray";
     private const string LegacyTaskName = "DeskPulse";
+    private const string MachineTaskName = "DeskPulse Tray";
 
     public static bool IsEnabled()
     {
+        if (IsMachineWideEnabled())
+            return true;
+
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
@@ -4908,6 +4912,19 @@ public static class StartupTaskManager
     public static void SetEnabled(bool enabled)
     {
         RemoveLegacyCurrentUserStartupEntries();
+
+        if (IsMachineWideEnabled())
+        {
+            using var existingKey = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
+            existingKey?.DeleteValue(RunValueName, throwOnMissingValue: false);
+            existingKey?.DeleteValue("DeskPulse", throwOnMissingValue: false);
+            if (!enabled)
+            {
+                throw new InvalidOperationException(
+                    "Tray startup is managed for all Windows users by the DeskPulse installer.");
+            }
+            return;
+        }
 
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
             ?? throw new InvalidOperationException("DeskPulse could not open the current-user Windows startup registry key.");
@@ -4928,6 +4945,31 @@ public static class StartupTaskManager
 
         key.SetValue(RunValueName, $"\"{executablePath}\"", RegistryValueKind.String);
         key.DeleteValue("DeskPulse", throwOnMissingValue: false);
+    }
+
+    public static bool IsMachineWideEnabled()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Query /TN \"{MachineTaskName}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+            if (process == null)
+                return false;
+
+            process.WaitForExit(5000);
+            return process.HasExited && process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void RemoveLegacyCurrentUserStartupEntries()

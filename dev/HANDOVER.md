@@ -92,9 +92,21 @@ now implemented in the development baseline:
 
 Single-session installation, caller-routed pipe operations, duplicate-tray
 prevention, service restart and both-database integrity were verified on
-2026-07-23. A second simultaneous local/RDP login was not available on the test
-machine; final multi-session acceptance still requires two signed-in Windows
-sessions and confirmation that each SID database receives only its own events.
+2026-07-23. A second standard local account was subsequently tested in parallel:
+
+- the installer-created `DeskPulse Tray` scheduled task launched the tray
+  automatically and unelevated at that user's logon;
+- one tray ran in each Windows session;
+- the second SID database contained only records attributed to that SID and its
+  session IDs;
+- the legacy Documents database migration is now guarded so only the first SID
+  can receive the former single-user history;
+- the standard user's Administrator settings action correctly invoked Windows
+  UAC for administrator credentials.
+
+The first two-user test exposed and corrected the legacy migration guard before
+final acceptance. The contaminated test SID database was removed and recreated
+cleanly; the original SID database and backups were unaffected.
 
 ### 0.3.2.0 storage and security boundary
 

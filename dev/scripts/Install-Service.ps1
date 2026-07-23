@@ -30,13 +30,9 @@ sc.exe description 'DeskPulse.Service' 'DeskPulse background monitoring service.
 sc.exe failure 'DeskPulse.Service' reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
 Start-Service 'DeskPulse.Service'
 
-$startup = [Environment]::GetFolderPath('Startup')
-$shortcutPath = Join-Path $startup 'DeskPulse Tray.lnk'
-$shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = "$trayInstall\DeskPulse.Tray.exe"
-$shortcut.WorkingDirectory = $trayInstall
-$shortcut.Save()
+& (Join-Path $root 'Installer\Register-AllUsersTrayStartup.ps1') `
+    -TrayPath (Join-Path $trayInstall 'DeskPulse.Tray.exe') `
+    -ErrorLogPath (Join-Path $programData 'scheduled-task-registration-error.log')
 
 Start-Process "$trayInstall\DeskPulse.Tray.exe"
-Write-Host 'DeskPulse service installed and one tray startup shortcut created.' -ForegroundColor Green
+Write-Host 'DeskPulse service installed and all-user tray logon task created.' -ForegroundColor Green

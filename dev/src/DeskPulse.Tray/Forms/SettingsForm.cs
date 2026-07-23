@@ -1013,6 +1013,14 @@ public partial class SettingsForm : Form
     private void LoadDesignerSettings(AppSettings settings)
     {
         _startWithWindowsCheckBox.Checked = settings.StartWithWindows || StartupTaskManager.IsEnabled();
+        if (StartupTaskManager.IsMachineWideEnabled())
+        {
+            _startWithWindowsCheckBox.Checked = true;
+            _startWithWindowsCheckBox.Enabled = false;
+            _buttonToolTip.SetToolTip(
+                _startWithWindowsCheckBox,
+                "DeskPulse Tray startup is managed for all Windows users by the installer.");
+        }
         _logProgramActivityCheckBox.Checked = settings.LogProgramActivity;
         _filteredFileActivityProcesses = new HashSet<string>(settings.FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
         if (!settings.LogExplorerFileActivity)
@@ -2275,11 +2283,14 @@ public partial class SettingsForm : Form
     private static void ShowStartupStatus()
     {
         var enabled = StartupTaskManager.IsEnabled();
+        var machineWide = StartupTaskManager.IsMachineWideEnabled();
 
         MessageBox.Show(
-            "Current-user tray startup: " + (enabled ? "Enabled" : "Not detected") + Environment.NewLine +
-            "Registry location: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" + Environment.NewLine +
-            "Value name: DeskPulse.Tray" + Environment.NewLine +
+            "Tray startup: " + (enabled ? "Enabled" : "Not detected") + Environment.NewLine +
+            "Mode: " + (machineWide ? "All users (scheduled task)" : "Current user (registry)") + Environment.NewLine +
+            (machineWide
+                ? "Scheduled task: DeskPulse Tray"
+                : "Registry: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\DeskPulse.Tray") + Environment.NewLine +
             "The DeskPulse Windows service starts independently as an automatic service.",
             "DeskPulse Startup Status",
             MessageBoxButtons.OK,

@@ -194,6 +194,19 @@ public static class StorageMigration
             return;
         }
 
+        // The Documents database belongs to the first SID migrated from the
+        // former single-user layout. Never seed a later Windows user with that
+        // first user's history.
+        if (Directory.Exists(StorageLayout.UsersFolder) &&
+            Directory.EnumerateFiles(
+                    StorageLayout.UsersFolder,
+                    "DeskPulse.db",
+                    SearchOption.AllDirectories)
+                .Any(path => !PathsEqual(path, targetDatabaseFilePath)))
+        {
+            return;
+        }
+
         var temporaryDatabaseFilePath = targetDatabaseFilePath + ".migrating";
         var backupDatabaseFilePath = legacyDatabaseFilePath + ".pre-programdata-migration.bak";
 

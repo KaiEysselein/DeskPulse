@@ -50,9 +50,11 @@ Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveru
 [Files]
 Source: "..\publish\v0.3.2.0\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\publish\v0.3.2.0\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "Register-AllUsersTrayStartup.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [InstallDelete]
-; Remove startup shortcuts from older builds. Tray autostart is now stored in the current user HKCU Run key.
+; Remove startup shortcuts from older builds. Tray autostart now uses a
+; machine-wide scheduled task triggered at logon of any user.
 Type: files; Name: "{userstartup}\DeskPulse.lnk"
 Type: files; Name: "{userstartup}\DeskPulse Tray.lnk"
 Type: files; Name: "{commonstartup}\DeskPulse.lnk"
@@ -68,7 +70,8 @@ Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Tasks: d
 ; LocalSystem service starts. The service then migrates the live database into
 ; its protected ProgramData SID folder.
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--initialize-settings"; Flags: runhidden waituntilterminated runasoriginaluser
-Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--disable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\Register-AllUsersTrayStartup.ps1"" -TrayPath ""{app}\Tray\{#TrayExeName}"" -ErrorLogPath ""{commonappdata}\DeskPulse\scheduled-task-registration-error.log"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Service\{#ServiceExeName}"" start= auto DisplayName= ""DeskPulse Service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse background monitoring service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "failure {#ServiceName} reset= 86400 actions= restart/5000/restart/15000/restart/60000"; Flags: runhidden waituntilterminated
@@ -78,7 +81,7 @@ Filename: "{app}\Tray\{#TrayExeName}"; Description: "Start DeskPulse Tray"; Flag
 
 ; These run before Inno Setup removes installed files.
 [UninstallRun]
-; Remove the original interactive user's tray autostart registry entry before stopping the tray.
+; Remove any original-user startup registry entry before stopping the tray.
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--disable-startup"; Flags: runhidden waituntilterminated; RunOnceId: "DisableDeskPulseTrayStartup"
 
 ; Stop the tray first so its executable, database and settings are not locked.
@@ -112,6 +115,7 @@ Type: files; Name: "{commonstartup}\DeskPulse Tray.lnk"
 Type: files; Name: "{commonappdata}\DeskPulse\settings.json"
 Type: files; Name: "{commonappdata}\DeskPulse\settings.json.tmp"
 Type: files; Name: "{commonappdata}\DeskPulse\critical-safety-pause.flag"
+Type: files; Name: "{commonappdata}\DeskPulse\scheduled-task-registration-error.log"
 Type: filesandordirs; Name: "{localappdata}\DeskPulse"
 Type: filesandordirs; Name: "{userappdata}\DeskPulse"
 
