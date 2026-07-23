@@ -108,6 +108,25 @@ The first two-user test exposed and corrected the legacy migration guard before
 final acceptance. The contaminated test SID database was removed and recreated
 cleanly; the original SID database and backups were unaffected.
 
+### Named-pipe command authorization
+
+The service now resolves the connecting named-pipe client's process ID and
+token before accepting state-changing commands:
+
+- mutating user commands are accepted only from the installed
+  `DeskPulse.Tray.exe` under protected Program Files;
+- database commands continue to target the verified client's SID database;
+- diagnostic load control and historical repair additionally require an
+  elevated token and local Administrators membership;
+- read-only service status remains available to authenticated local clients;
+- identity or privilege failures return an explicit pipe error without running
+  the command.
+
+Runtime verification on 2026-07-23 confirmed that direct PowerShell clients
+could read status but could not delete records, start diagnostic load or invoke
+historical repair. The installed unelevated tray remained authorized for its
+expected per-user and installation-lifecycle commands.
+
 ### 0.3.2.0 storage and security boundary
 
 The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.
@@ -137,6 +156,9 @@ Default safeguard values:
 | Critical | 45% | 45% | 10 seconds |
 
 ## Diagnostic safeguard tests
+
+Run these commands from an elevated administrator terminal; the service rejects
+diagnostic load control from an unelevated client.
 
 ```powershell
 & "C:\Program Files\DeskPulse\Tray\DeskPulse.Tray.exe" --test-service-cpu 40 60

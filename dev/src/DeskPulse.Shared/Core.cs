@@ -4918,11 +4918,6 @@ public static class StartupTaskManager
             using var existingKey = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
             existingKey?.DeleteValue(RunValueName, throwOnMissingValue: false);
             existingKey?.DeleteValue("DeskPulse", throwOnMissingValue: false);
-            if (!enabled)
-            {
-                throw new InvalidOperationException(
-                    "Tray startup is managed for all Windows users by the DeskPulse installer.");
-            }
             return;
         }
 

@@ -6,6 +6,8 @@ using System.Text;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
+using Microsoft.Win32.SafeHandles;
 using Microsoft.Win32;
 
 namespace DeskPulse;
@@ -122,6 +124,16 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 var command = (await reader.ReadLineAsync())?.Trim() ?? "";
                 var clientProcessId = GetClientProcessId(pipe);
+                var commandName = command.Split('|', 2)[0].Trim().ToUpperInvariant();
+                var authorizationError = AuthorizeCommand(commandName, clientProcessId);
+                if (authorizationError != null)
+                {
+                    await writer.WriteLineAsync(
+                        commandName is "CLEAN_DATABASE_CURRENT_RULES" or "REPAIR_HISTORICAL_DATA"
+                            ? "RESULT|ERROR|" + authorizationError
+                            : "ERROR|" + authorizationError);
+                    continue;
+                }
                 if (command.Equals("CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
                 {
                     await RunDatabaseHousekeepingStreamingAsync(writer, clientProcessId);
@@ -199,11 +211,164 @@ public sealed class DeskPulseWindowsService : ServiceBase
 
     private static class NativeMethods
     {
+        internal const uint ProcessQueryLimitedInformation = 0x1000;
+        internal const uint TokenQuery = 0x0008;
+        internal const int TokenElevation = 20;
+
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetNamedPipeClientProcessId(
             Microsoft.Win32.SafeHandles.SafePipeHandle pipe,
             out uint clientProcessId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern IntPtr OpenProcess(
+            uint desiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+            uint processId);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool OpenProcessToken(
+            IntPtr processHandle,
+            uint desiredAccess,
+            out SafeAccessTokenHandle tokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetTokenInformation(
+            SafeAccessTokenHandle tokenHandle,
+            int tokenInformationClass,
+            out TokenElevationInfo tokenInformation,
+            int tokenInformationLength,
+            out int returnLength);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenElevationInfo
+    {
+        public int TokenIsElevated;
+    }
+
+    private static string? AuthorizeCommand(string commandName, int clientProcessId)
+    {
+        var requiresKnownTray = commandName is
+            "PAUSE_LOGGING" or "RESUME_LOGGING" or "RELOAD_SETTINGS" or
+            "INSTALL_LIFECYCLE" or "START_LOAD_TEST" or "STOP_LOAD_TEST" or
+            "DELETE_RECORDS" or "CLEAR_TABLE" or "CLEAR_ALL_RECORDS" or
+            "TRAY_STARTED" or "TRAY_STOPPED" or
+            "CLEAN_DATABASE_CURRENT_RULES" or "REPAIR_HISTORICAL_DATA";
+        var requiresAdministrator = commandName is
+            "START_LOAD_TEST" or "STOP_LOAD_TEST" or "REPAIR_HISTORICAL_DATA";
+
+        if (!requiresKnownTray)
+            return null;
+
+        if (!TryGetClientSecurity(
+            clientProcessId,
+            out var executablePath,
+            out var isAdministrator,
+            out var isElevated))
+        {
+            return "The service could not verify the requesting process.";
+        }
+
+        if (!IsExpectedTrayExecutable(executablePath))
+            return "The requesting executable is not the installed DeskPulse Tray.";
+
+        if (requiresAdministrator && (!isAdministrator || !isElevated))
+            return "This operation requires an elevated local administrator.";
+
+        return null;
+    }
+
+    private static bool TryGetClientSecurity(
+        int processId,
+        out string executablePath,
+        out bool isAdministrator,
+        out bool isElevated)
+    {
+        executablePath = string.Empty;
+        isAdministrator = false;
+        isElevated = false;
+        if (processId <= 0)
+            return false;
+
+        try
+        {
+            using (var process = Process.GetProcessById(processId))
+                executablePath = process.MainModule?.FileName ?? string.Empty;
+        }
+        catch
+        {
+            return false;
+        }
+
+        var processHandle = NativeMethods.OpenProcess(
+            NativeMethods.ProcessQueryLimitedInformation,
+            false,
+            checked((uint)processId));
+        if (processHandle == IntPtr.Zero)
+            return false;
+
+        try
+        {
+            if (!NativeMethods.OpenProcessToken(
+                processHandle,
+                NativeMethods.TokenQuery,
+                out var tokenHandle))
+            {
+                return false;
+            }
+
+            using (tokenHandle)
+            using (var identity = new WindowsIdentity(tokenHandle.DangerousGetHandle()))
+            {
+                isAdministrator = identity.Groups?.Any(group =>
+                    group is SecurityIdentifier sid &&
+                    sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)) == true;
+                if (!NativeMethods.GetTokenInformation(
+                    tokenHandle,
+                    NativeMethods.TokenElevation,
+                    out var elevation,
+                    Marshal.SizeOf<TokenElevationInfo>(),
+                    out _))
+                {
+                    return false;
+                }
+
+                isElevated = elevation.TokenIsElevated != 0;
+                return !string.IsNullOrWhiteSpace(executablePath);
+            }
+        }
+        finally
+        {
+            NativeMethods.CloseHandle(processHandle);
+        }
+    }
+
+    private static bool IsExpectedTrayExecutable(string executablePath)
+    {
+        try
+        {
+            var expectedPath = Path.GetFullPath(Path.Combine(
+                AppContext.BaseDirectory,
+                "..",
+                "Tray",
+                "DeskPulse.Tray.exe"));
+            return string.Equals(
+                Path.GetFullPath(executablePath),
+                expectedPath,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private string HandleCommand(string command, int clientProcessId)
