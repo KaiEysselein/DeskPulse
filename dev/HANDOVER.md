@@ -161,38 +161,30 @@ database remained read-only. A settings backup was retained at
 Administrator Settings now includes an editable **Rules → System Events** page.
 Its enabled event rules persist as
 `SystemUserActivityRuleSettings` in the protected system settings file.
-Ordinary Settings shows the same effective rules on a
-**System Rules (read-only)** page, with editing and import/export actions
-unavailable. Existing system settings files without the new property load the
-complete safe default rule set, including service start and stop events.
+Ordinary Settings exposes only the calling user's rules. Existing system
+settings files without the system-rule property load the complete safe default
+rule set, including service start and stop events, in Administrator Settings.
 
-### Authorized machine-wide log
+### Isolated personal and administrator system logs
 
-The tray now exposes **Machine-wide Log (Administrator)...**. It launches a
-separate short-lived process through Windows UAC and rejects an unelevated
-`--administrator-log` launch. The elevated window:
+DeskPulse deliberately provides no combined or all-users log view:
 
-- attaches the protected system database and every available SID database in
-  one connection, then applies SQLite `query_only` mode after building the
-  temporary combined views (native Windows paths are used for `ATTACH`);
-- presents their File, App and User Activity records through the existing
-  paging, sorting, grouping, detail and current-page export features;
-- includes Scope, Windows SID and Session ID in record details so each combined
-  result retains its provenance;
-- hides record deletion and rule-creation controls, preventing ambiguous
-  cross-database mutations;
-- closes the elevated process when the machine-wide log window closes.
+- **Personal Log...** remains bound only to the calling user's SID database;
+- each SID folder grants read access only to its owning user, LocalSystem and
+  administrators at the Windows ACL level;
+- DeskPulse does not expose another user's records through an administrator UI;
+- **System Log (Administrator)...** launches a separate short-lived process
+  through Windows UAC and rejects an unelevated `--system-log` launch;
+- the System Log opens only
+  `C:\ProgramData\DeskPulse\System\DeskPulse-System.db` read-only, supports
+  paging, sorting, details and current-page export, and hides deletion and
+  rule-creation controls;
+- the System folder ACL grants access only to LocalSystem and administrators,
+  removing the former ordinary Users read permission.
 
-Ordinary **View Log...** remains bound only to the calling user's SID database.
-No database ACLs are broadened to implement the combined view.
-
-The tray also exposes **System Log (read-only)...** without UAC. It opens only
-`C:\ProgramData\DeskPulse\System\DeskPulse-System.db` through its existing
-read-only ACL and SQLite connection, supports paging, sorting, details and
-current-page export, and hides deletion and rule-creation controls. It runs in
-a separate unelevated process so it cannot be confused with the personal log
-window. The personal, system-only and administrator-combined views therefore
-retain distinct privilege and data boundaries.
+Closing the System Log ends its elevated process. This preserves clear
+per-user isolation while keeping shared service, installation and safeguard
+activity available to administrators.
 
 ### 0.3.2.0 storage and security boundary
 

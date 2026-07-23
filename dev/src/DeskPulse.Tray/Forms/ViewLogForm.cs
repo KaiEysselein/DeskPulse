@@ -32,7 +32,6 @@ public partial class ViewLogForm : Form
     private int _userTotal;
     private readonly string _connectionString;
     private readonly string _databaseFilePath;
-    private readonly bool _machineWide;
     private readonly bool _systemOnly;
     private readonly Action? _settingsChanged;
     private string _appSortColumn = "CreatedAt";
@@ -44,17 +43,15 @@ public partial class ViewLogForm : Form
 
     public ViewLogForm(
         Action? settingsChanged = null,
-        bool machineWide = false,
         bool systemOnly = false)
     {
         InitializeComponent();
         AppIcon.Apply(this);
 
         _settingsChanged = settingsChanged;
-        _machineWide = machineWide;
         _systemOnly = systemOnly;
         var settings = AppSettings.Load();
-        _databaseFilePath = machineWide || systemOnly
+        _databaseFilePath = systemOnly
             ? StorageLayout.SystemDatabaseFilePath
             : settings.DatabaseFilePath;
         _connectionString = new SqliteConnectionStringBuilder
@@ -63,13 +60,7 @@ public partial class ViewLogForm : Form
             Mode = SqliteOpenMode.ReadOnly,
             Cache = SqliteCacheMode.Shared
         }.ToString();
-        if (_machineWide)
-        {
-            Text = "DeskPulse - Machine-wide Log (Administrator, read-only)";
-            createRuleButton.Visible = false;
-            deleteButton.Visible = false;
-        }
-        else if (_systemOnly)
+        if (_systemOnly)
         {
             Text = "DeskPulse - System Log (read-only)";
             createRuleButton.Visible = false;
@@ -99,85 +90,14 @@ public partial class ViewLogForm : Form
 
     private SqliteConnection OpenReadConnection()
     {
-        if (!_machineWide)
-        {
-            var connection = new SqliteConnection(_connectionString);
-            connection.Open();
-            return connection;
-        }
-
-        var combined = new SqliteConnection("Data Source=:memory:");
-        combined.Open();
-        var databasePaths = new List<string>();
-        if (File.Exists(StorageLayout.SystemDatabaseFilePath))
-            databasePaths.Add(StorageLayout.SystemDatabaseFilePath);
-        if (Directory.Exists(StorageLayout.UsersFolder))
-        {
-            databasePaths.AddRange(Directory.EnumerateFiles(
-                StorageLayout.UsersFolder,
-                "DeskPulse.db",
-                SearchOption.AllDirectories));
-        }
-
-        var aliases = new List<string>();
-        for (var index = 0; index < databasePaths.Count; index++)
-        {
-            var alias = "source" + index.ToString(CultureInfo.InvariantCulture);
-            using var attach = combined.CreateCommand();
-            attach.CommandText = $"ATTACH DATABASE $path AS [{alias}];";
-            attach.Parameters.AddWithValue("$path", Path.GetFullPath(databasePaths[index]));
-            attach.ExecuteNonQuery();
-            aliases.Add(alias);
-        }
-
-        foreach (var table in new[] { "ActivityEvents", "ProgramEvents", "UserEvents" })
-        {
-            var selects = aliases.Select(alias => $"SELECT * FROM [{alias}].[{table}]").ToArray();
-            using var view = combined.CreateCommand();
-            view.CommandText = selects.Length == 0
-                ? $"CREATE TEMP TABLE [{table}] (Id INTEGER, CreatedAt TEXT);"
-                : $"CREATE TEMP VIEW [{table}] AS {string.Join(" UNION ALL ", selects)};";
-            view.ExecuteNonQuery();
-        }
-
-        // ATTACH URI read-only parameters are not interpreted consistently by
-        // the bundled Windows SQLite provider. Enforce read-only behavior for
-        // the entire combined connection after its temporary views are built.
-        using (var queryOnly = combined.CreateCommand())
-        {
-            queryOnly.CommandText = "PRAGMA query_only=ON;";
-            queryOnly.ExecuteNonQuery();
-        }
-
-        return combined;
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        return connection;
     }
 
     private DateTime GetFirstRecordedDate()
     {
-        if (!_machineWide)
-            return DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
-
-        try
-        {
-            using var connection = OpenReadConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT MIN(CreatedAt)
-                FROM (
-                    SELECT CreatedAt FROM ActivityEvents
-                    UNION ALL SELECT CreatedAt FROM ProgramEvents
-                    UNION ALL SELECT CreatedAt FROM UserEvents
-                );
-                """;
-            var value = Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-            return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var date)
-                ? date.Date
-                : DateTime.Today;
-        }
-        catch
-        {
-            return DateTime.Today;
-        }
+        return DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
     }
 
     private void TodayOnlyButton_Click(object? sender, EventArgs e)

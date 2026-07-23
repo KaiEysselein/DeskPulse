@@ -126,9 +126,22 @@ public static class StorageLayout
     {
         Directory.CreateDirectory(RootFolder);
         var systemFolder = Directory.CreateDirectory(SystemFolder);
-        SetStorageAcl(
-            systemFolder,
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null));
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[]
+        {
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)
+        })
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                sid,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
+        systemFolder.SetAccessControl(security);
     }
 
     public static void PrepareUserStorage(string windowsSid)

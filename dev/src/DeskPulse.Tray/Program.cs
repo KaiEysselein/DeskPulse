@@ -69,24 +69,18 @@ internal static class Program
             return;
         }
 
-        if (args.Any(a => a.Equals("--administrator-log", StringComparison.OrdinalIgnoreCase)))
+        if (args.Any(a => a.Equals("--system-log", StringComparison.OrdinalIgnoreCase)))
         {
             if (!IsProcessElevated())
             {
                 MessageBox.Show(
-                    "The machine-wide log must be opened through the DeskPulse tray menu and approved through Windows User Account Control.",
-                    "DeskPulse Machine-wide Log",
+                    "The System Log must be opened through the DeskPulse tray menu and approved through Windows User Account Control.",
+                    "DeskPulse System Log",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
             }
 
-            Application.Run(new ViewLogForm(machineWide: true));
-            return;
-        }
-
-        if (args.Any(a => a.Equals("--system-log", StringComparison.OrdinalIgnoreCase)))
-        {
             Application.Run(new ViewLogForm(systemOnly: true));
             return;
         }
@@ -343,8 +337,7 @@ public sealed class TrayAppContext : ApplicationContext
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
         AddMenuCommand("Personal Log...", OpenViewLog);
-        AddMenuCommand("System Log...", OpenSystemLog);
-        AddMenuCommand("Machine-wide Log...", OpenAdministratorLog);
+        AddMenuCommand("System Log (Administrator)...", OpenSystemLog);
         AddMenuCommand("Settings...", OpenSettings);
         AddMenuCommand("Administrator settings...", OpenAdministratorSettings);
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
@@ -473,8 +466,13 @@ public sealed class TrayAppContext : ApplicationContext
                 FileName = executablePath,
                 Arguments = "--system-log",
                 UseShellExecute = true,
+                Verb = "runas",
                 WorkingDirectory = AppContext.BaseDirectory
             });
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // The user cancelled the Windows UAC prompt.
         }
         catch (Exception ex)
         {
@@ -522,37 +520,6 @@ public sealed class TrayAppContext : ApplicationContext
         {
             MessageBox.Show(
                 "DeskPulse could not open Administrator settings.\n\n" + ex.Message,
-                "DeskPulse",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
-    private static void OpenAdministratorLog()
-    {
-        try
-        {
-            var executablePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(executablePath))
-                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = executablePath,
-                Arguments = "--administrator-log",
-                UseShellExecute = true,
-                Verb = "runas",
-                WorkingDirectory = AppContext.BaseDirectory
-            });
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            // The user cancelled the Windows UAC prompt.
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                "DeskPulse could not open the machine-wide log.\n\n" + ex.Message,
                 "DeskPulse",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);

@@ -12,13 +12,13 @@
 - Resolve the interactive user's Windows SID explicitly instead of deriving paths from the LocalSystem service profile.
 - Create the system and SID-specific directories with explicit access limited to `SYSTEM`, administrators and authorized users.
 - Preserve the service as the sole SQLite writer and grant the tray only the access required for read-only views, statistics and exports.
-- Allow ordinary users to view, print and export system-database records, but never modify or remove those records.
-- Provide an explicitly authorized administrative machine-wide view for combining system records with permitted per-user records without weakening database permissions.
+- Allow only an explicitly elevated administrator System Log to view and export system-database records; ordinary users must not receive system-database access.
+- Do not provide a combined or all-users activity view; keep every user's activity isolated to that user's DeskPulse account view.
 - Separate machine-wide service settings from per-user settings and activity data.
 - Keep system-wide logging rules service-owned and editable only through an explicitly authorized administrative interface.
 - Allow each user to create, edit, enable and disable only the rules associated with that user's SID.
 - Prevent per-user rules from suppressing, modifying, rerouting or deleting system-wide events and records.
-- Show system-wide rules to ordinary users as read-only when they need visibility into what DeskPulse records.
+- Keep system-wide rules in Administrator Settings rather than exposing them in ordinary user Settings.
 - Keep the normal tray process unelevated and provide an **Administrator settings...** action that opens a separate, short-lived process through the standard Windows UAC `runas` flow.
 - Expose system rules, system database configuration, retention, cleanup, service safeguards and authorized machine-wide views only in the elevated administrator window.
 - End administrator access when the elevated window closes and require fresh UAC approval whenever it is opened again.

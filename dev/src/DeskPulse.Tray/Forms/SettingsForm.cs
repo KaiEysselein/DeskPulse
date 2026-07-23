@@ -24,8 +24,6 @@ public partial class SettingsForm : Form
     private ActivityRuleEditor _fileActivityRuleEditor = null!;
     private ActivityRuleEditor _userActivityRuleEditor = null!;
     private ActivityRuleEditor _appActivityRuleEditor = null!;
-    private ActivityRuleEditor? _systemUserActivityRuleEditor;
-    private TabPage? _systemRulesTabPage;
     private TextBox _manualLoggingRuleTextBox = null!;
     private RadioButton _manualRuleFolderRadioButton = null!;
     private RadioButton _manualRuleFileRadioButton = null!;
@@ -207,10 +205,9 @@ public partial class SettingsForm : Form
     {
         var isRulesTab = ReferenceEquals(_settingsTabControl.SelectedTab, _rulesTabPage);
         var isMaintenanceTab = ReferenceEquals(_settingsTabControl.SelectedTab, _maintenanceHousekeepingTabPage);
-        var isReadOnlySystemRules = ReferenceEquals(_rulesSubTabControl.SelectedTab, _systemRulesTabPage);
 
-        _importRulesButton.Visible = isRulesTab && !_administratorMode && !isReadOnlySystemRules;
-        _exportRulesButton.Visible = isRulesTab && !_administratorMode && !isReadOnlySystemRules;
+        _importRulesButton.Visible = isRulesTab && !_administratorMode;
+        _exportRulesButton.Visible = isRulesTab && !_administratorMode;
 
         _saveButton.Visible = !isMaintenanceTab;
         _saveAndCloseButton.Visible = !isMaintenanceTab;
@@ -354,19 +351,6 @@ public partial class SettingsForm : Form
             _rulesSubTabControl.TabPages.Add(filePage);
             _rulesSubTabControl.TabPages.Add(appPage);
             _rulesSubTabControl.TabPages.Add(userPage);
-
-            _systemRulesTabPage = new TabPage("System Rules (read-only)")
-            {
-                BackColor = System.Drawing.SystemColors.Window,
-                Padding = new Padding(8)
-            };
-            _systemUserActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.User)
-            {
-                Dock = DockStyle.Fill
-            };
-            _systemUserActivityRuleEditor.SetReadOnly();
-            _systemRulesTabPage.Controls.Add(_systemUserActivityRuleEditor);
-            _rulesSubTabControl.TabPages.Add(_systemRulesTabPage);
         }
     }
 
@@ -1078,11 +1062,6 @@ public partial class SettingsForm : Form
 
         _fileActivityRuleEditor.LoadRuleSettings(fileRuleSettings);
         _userActivityRuleEditor.LoadRuleSettings(settings.UserActivityRuleSettings);
-        if (_systemUserActivityRuleEditor != null)
-        {
-            _systemUserActivityRuleEditor.LoadRuleSettings(
-                AppSettings.LoadSystemSettings().UserActivityRuleSettings);
-        }
         _appActivityRuleEditor.LoadRuleSettings(appRuleSettings);
         _trackWindowsSystemActivityCheckBox.Checked = settings.TrackWindowsSystemActivity;
         _fileActivityRuleEditor.SetWindowsDefaultRules(WindowsDefaultExclusions.GetFileRules(), !settings.TrackWindowsSystemActivity);
@@ -3538,29 +3517,6 @@ internal sealed class ActivityRuleEditor : UserControl
     {
         _userRules = (rules ?? Array.Empty<ActivityRuleSetting>()).Select(r => r.Clone()).ToList();
         RenderRules();
-    }
-
-    public void SetReadOnly()
-    {
-        _grid.ReadOnly = true;
-        _grid.AllowUserToDeleteRows = false;
-        foreach (var button in Controls
-                     .Cast<Control>()
-                     .SelectMany(GetDescendants)
-                     .OfType<Button>())
-        {
-            button.Enabled = false;
-        }
-    }
-
-    private static IEnumerable<Control> GetDescendants(Control control)
-    {
-        foreach (Control child in control.Controls)
-        {
-            yield return child;
-            foreach (var descendant in GetDescendants(child))
-                yield return descendant;
-        }
     }
 
     public void SetWindowsDefaultRules(IEnumerable<ActivityRuleSetting> rules, bool active)
