@@ -6,7 +6,7 @@
 
 It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
 
-**Current version:** `0.3.3.1`
+**Current version:** `0.3.3.2`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
@@ -66,7 +66,7 @@ The uninstaller removes the application, service and startup registration while 
 
 ## 0.3.3 release boundary
 
-Version 0.3.3.1 is a patch release that keeps standalone Log and Settings windows visible, fitted to the active screen and brought to the foreground. It retains the service-owned system/per-user storage and security architecture completed in 0.3.3.0.
+Version 0.3.3.2 is a tested tray and export reliability patch. It adds a dedicated Excel-export progress window, closes Log after successful export, restores reliable deferred tray-menu actions, prevents the Windows 11 hidden-icons flyout from covering the DeskPulse menu, and packages all runtime tray-state icons.
 
 ## Activity filtering
 

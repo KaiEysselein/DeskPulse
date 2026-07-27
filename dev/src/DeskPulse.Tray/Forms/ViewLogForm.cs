@@ -667,7 +667,7 @@ public partial class ViewLogForm : Form
     }
 
 
-    private async void ExportButton_Click(object? sender, EventArgs e)
+    private void ExportButton_Click(object? sender, EventArgs e)
     {
         var grid = GetActiveGrid();
         var total = GetActiveTotal();
@@ -692,6 +692,7 @@ public partial class ViewLogForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK)
             return;
 
+        var closeAfterSuccessfulExport = false;
         try
         {
             Cursor = Cursors.WaitCursor;
@@ -704,18 +705,31 @@ public partial class ViewLogForm : Form
                 .Select(column => column.HeaderText)
                 .ToList();
 
-            SetLogExportInProgress(true);
-            var progress = new Progress<ExportProgressInfo>(UpdateLogExportProgress);
-            var exportedCount = await Task.Run(() => ExportCompleteLog(
-                dialog.FileName,
+            using var progressForm = new ExcelExportProgressForm(
                 sectionName,
-                exportedColumns,
-                start,
-                endExclusive,
-                progress));
+                progress => ExportCompleteLog(
+                    dialog.FileName,
+                    sectionName,
+                    exportedColumns,
+                    start,
+                    endExclusive,
+                    progress));
 
-            UpdateLogExportProgress(new ExportProgressInfo(100, $"Exported all {exportedCount:N0} record(s) from {sectionName}."));
+            SetLogExportInProgress(true);
+            var result = progressForm.ShowDialog(this);
+            if (result != DialogResult.OK)
+            {
+                var exportError = progressForm.ExportError;
+                if (exportError != null)
+                    throw exportError;
+
+                return;
+            }
+
+            statusLabel.Text =
+                $"Exported all {progressForm.ExportedCount:N0} record(s) from {sectionName}.";
             Process.Start(new ProcessStartInfo { FileName = dialog.FileName, UseShellExecute = true });
+            closeAfterSuccessfulExport = true;
         }
         catch (Exception ex)
         {
@@ -727,6 +741,9 @@ public partial class ViewLogForm : Form
             SetLogExportInProgress(false);
             Cursor = Cursors.Default;
         }
+
+        if (closeAfterSuccessfulExport)
+            Close();
     }
 
     private int ExportCompleteLog(
@@ -789,15 +806,6 @@ public partial class ViewLogForm : Form
         tabs.Enabled = !inProgress;
         dateStart.Enabled = !inProgress;
         dateEnd.Enabled = !inProgress;
-        exportProgressBar.Visible = inProgress;
-        if (inProgress)
-            exportProgressBar.Value = 0;
-    }
-
-    private void UpdateLogExportProgress(ExportProgressInfo progress)
-    {
-        exportProgressBar.Value = Math.Clamp(progress.Percent, exportProgressBar.Minimum, exportProgressBar.Maximum);
-        statusLabel.Text = progress.Message;
     }
 
     private static object GetExportCellValue(LogViewEntry entry, string columnName)

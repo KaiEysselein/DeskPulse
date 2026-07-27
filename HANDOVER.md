@@ -2,16 +2,16 @@
 
 ## Current release
 
-The current DeskPulse patch release is **0.3.3.1**.
+The current DeskPulse patch release is **0.3.3.2**.
 
 - Repository: `https://github.com/KaiEysselein/DeskPulse`
-- GitHub release tag: `v0.3.3.1`
+- GitHub release tag: `v0.3.3.2`
 - Retained milestone folder: `releases\v0.3.3.0`
 - Current approved installer copy: `releases\current`
 - Active development source: `dev`
 - Detailed technical handover: `dev\HANDOVER.md`
 
-Version 0.3.3.1 fixes standalone Log and Settings windows appearing only in the taskbar on compact or highly scaled displays. It retains the architecture released in 0.3.3.0.
+Version 0.3.3.2 locks in the tested tray-menu dispatch, Windows 11 hidden-icons interaction, Excel-export progress/closure, and runtime tray-state icon fixes before Calendar development.
 
 ## Release scope
 
@@ -32,7 +32,7 @@ Version 0.3.3.1 fixes standalone Log and Settings windows appearing only in the 
 
 The underlying 0.3.2.x migration, ACL, schema, routing, simultaneous-session, scheduled-task, named-pipe authorization, split-settings, isolated-UI, maintenance and export slices were interactively verified on 2026-07-23. The exact evidence is recorded in `dev\docs\verification\STORAGE_ACCEPTANCE_0.3.2.x.md`.
 
-The final 0.3.3.1 build, publish, installer and installed-version results are recorded in `VERSION_CHECK.md`.
+The final 0.3.3.2 build, publish, installer and installed-version results are recorded in `VERSION_CHECK.md`.
 
 ## Release-retention policy
 
@@ -46,4 +46,4 @@ Release versions whose fourth component is zero are retained under `releases\v<v
 
 ## Release procedure
 
-Build and verify from `dev`. The approved patch installer must be present under `releases\current`; `releases\v0.3.3.0` remains the retained milestone baseline. The GitHub Release uses tag `v0.3.3.1`.
+Build and verify from `dev`. The approved patch installer must be present under `releases\current`; `releases\v0.3.3.0` remains the retained milestone baseline. The GitHub Release uses tag `v0.3.3.2`.

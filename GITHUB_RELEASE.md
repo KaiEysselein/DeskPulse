@@ -1,13 +1,14 @@
-# DeskPulse 0.3.3.1
+# DeskPulse 0.3.3.2
 
-DeskPulse 0.3.3.1 is a patch release for standalone Log and Settings window visibility.
+DeskPulse 0.3.3.2 locks in the tested tray-menu, export-progress and pause-icon fixes before Calendar development begins.
 
 ## Highlights
 
-- Current User Log and Settings now fit within the active screen's working area.
-- UAC-elevated System Log and System Settings receive the same visibility correction.
-- Standalone windows are centered, restored, activated and brought to the foreground after opening.
-- Compact screens and high display scaling no longer leave these windows accessible only through a taskbar icon.
+- Dedicated Excel-export progress windows for Current User and System Log.
+- Log closes after a successful export while remaining open on cancellation or failure.
+- Reliable first-click tray-menu dispatch after the menu closes.
+- Windows 11 hidden-icons flyout no longer covers the DeskPulse menu.
+- Normal, Paused and Warning runtime icons are packaged and installed correctly.
 
 ## Upgrade
 
@@ -22,9 +23,9 @@ DeskPulse does not expose a combined or all-users activity view. Administrators 
 Release asset:
 
 ```text
-DeskPulse_Setup_0.3.3.1.exe
+DeskPulse_Setup_0.3.3.2.exe
 ```
 
 ## Verification
 
-The 0.3.3.1 release build, packaging and installed executable verification are recorded in `VERSION_CHECK.md`.
+The 0.3.3.2 release build, packaging, installation and manual acceptance are recorded in `VERSION_CHECK.md`.

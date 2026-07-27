@@ -1,5 +1,5 @@
 #define MyAppName "DeskPulse"
-#define MyAppVersion "0.3.3.1"
+#define MyAppVersion "0.3.3.2"
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -16,7 +16,7 @@ DefaultDirName={autopf}\DeskPulse
 DefaultGroupName=DeskPulse
 DisableProgramGroupPage=yes
 
-OutputDir=..\publish\v0.3.3.1\installer
+OutputDir=..\publish\v0.3.3.2\installer
 OutputBaseFilename=DeskPulse_Setup_{#MyAppVersion}
 
 Compression=lzma2
@@ -48,8 +48,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveruninstall
 
 [Files]
-Source: "..\publish\v0.3.3.1\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\v0.3.3.1\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.3.2\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.3.2\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Register-AllUsersTrayStartup.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [InstallDelete]

@@ -21,7 +21,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.3.3.1";
+    public const string Version = "0.3.3.2";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }

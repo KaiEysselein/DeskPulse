@@ -2,6 +2,19 @@
 
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
+## 0.3.3.2 — 2026-07-27
+
+### Changed
+
+- Current-user and system Excel exports now show progress in a dedicated modal window.
+- The owning Log window closes after a successful export and remains open when export is cancelled or fails.
+
+### Fixed
+
+- Tray-menu commands are deferred until the context menu closes, restoring reliable first-click opening for every form and action.
+- The Windows 11 hidden-icons flyout is dismissed before the DeskPulse menu opens and can no longer cover it.
+- Normal, Paused and Warning tray-state icons are included in published and installed builds, allowing Pause Logging to display the correct icon.
+
 ## 0.3.3.1 — 2026-07-27
 
 ### Fixed

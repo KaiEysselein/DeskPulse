@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Windows.Forms;
@@ -422,6 +423,7 @@ public sealed class TrayAppContext : ApplicationContext
         _safetyTimer.Start();
         _focusLossTimer.Tick += (_, _) => CloseActiveFormIfFocusWasLost();
         _menu = new ContextMenuStrip();
+        _menu.Opened += (_, _) => KeepMenuAboveWindowsTray();
 
         var personalMenu = new ToolStripMenuItem("Current User");
         const string currentUserToolTip = "For the current Windows user.";
@@ -453,24 +455,27 @@ public sealed class TrayAppContext : ApplicationContext
         _menu.Items.Add(new ToolStripSeparator());
 
         _pauseLoggingMenuItem = new ToolStripMenuItem("Pause Logging");
-        _pauseLoggingMenuItem.Click += async (_, _) => await ToggleLoggingAsync();
+        _pauseLoggingMenuItem.Click += (_, _) => DispatchMenuAction(
+            () => _ = ToggleLoggingAsync());
         _menu.Items.Add(_pauseLoggingMenuItem);
 
         var serviceStatusItem = new ToolStripMenuItem("Service status");
-        serviceStatusItem.Click += async (_, _) =>
-        {
-            _menu.Close();
-            await Task.Yield();
-            MessageBox.Show(await ServicePipeClient.GetStatusAsync(), "DeskPulse Service");
-        };
+        serviceStatusItem.Click += (_, _) => DispatchMenuAction(
+            () => _ = ShowServiceStatusAsync());
         _menu.Items.Add(serviceStatusItem);
         _menu.Items.Add(new ToolStripSeparator());
 
         AddMenuCommand("About", () => OpenSingleForm(new AboutForm()));
         AddMenuCommand("Quit DeskPulse", ExitThread);
 
-        _trayIcon.ContextMenuStrip = _menu;
-        _trayIcon.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) _menu.Show(Cursor.Position); };
+        // Windows 11 keeps the hidden-icons flyout in its own topmost window.
+        // Dismiss that shell flyout before showing our menu or it can cover the
+        // DeskPulse commands after reclaiming foreground z-order.
+        _trayIcon.MouseUp += (_, e) =>
+        {
+            if (e.Button is MouseButtons.Left or MouseButtons.Right)
+                ShowTrayMenuAfterShellFlyoutCloses();
+        };
         _ = ServicePipeClient.SendAsync("TRAY_STARTED");
 
         var stateTimer = new System.Windows.Forms.Timer { Interval = 750 };
@@ -490,13 +495,58 @@ public sealed class TrayAppContext : ApplicationContext
     private ToolStripMenuItem AddMenuCommand(ToolStripItemCollection items, string text, Action action)
     {
         var item = new ToolStripMenuItem(text);
-        item.Click += (_, _) =>
-        {
-            _menu.Close();
-            action();
-        };
+        item.Click += (_, _) => DispatchMenuAction(action);
         items.Add(item);
         return item;
+    }
+
+    private void DispatchMenuAction(Action action)
+    {
+        _menu.Close();
+        _menu.BeginInvoke(action);
+    }
+
+    private void ShowTrayMenuAfterShellFlyoutCloses()
+    {
+        var menuLocation = Cursor.Position;
+        SendKeys.SendWait("{ESC}");
+
+        var showTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        showTimer.Tick += (_, _) =>
+        {
+            showTimer.Stop();
+            showTimer.Dispose();
+
+            if (_menu.IsDisposed)
+                return;
+
+            _menu.Show(menuLocation);
+            KeepMenuAboveWindowsTray();
+        };
+        showTimer.Start();
+    }
+
+    private void KeepMenuAboveWindowsTray()
+    {
+        if (!_menu.IsHandleCreated)
+            return;
+
+        NativeTrayMenuMethods.SetWindowPos(
+            _menu.Handle,
+            NativeTrayMenuMethods.TopMostWindow,
+            0,
+            0,
+            0,
+            0,
+            NativeTrayMenuMethods.DoNotMove |
+            NativeTrayMenuMethods.DoNotResize |
+            NativeTrayMenuMethods.DoNotActivate);
+    }
+
+    private async Task ShowServiceStatusAsync()
+    {
+        var status = await ServicePipeClient.GetStatusAsync();
+        MessageBox.Show(status, "DeskPulse Service");
     }
 
     private async Task ToggleLoggingAsync()
@@ -877,6 +927,25 @@ public sealed class TrayAppContext : ApplicationContext
             _ => _normalTrayIcon
         };
         _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
+    }
+
+    private static class NativeTrayMenuMethods
+    {
+        internal static readonly IntPtr TopMostWindow = new(-1);
+        internal const uint DoNotResize = 0x0001;
+        internal const uint DoNotMove = 0x0002;
+        internal const uint DoNotActivate = 0x0010;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SetWindowPos(
+            IntPtr windowHandle,
+            IntPtr insertAfter,
+            int x,
+            int y,
+            int width,
+            int height,
+            uint flags);
     }
 }
 
