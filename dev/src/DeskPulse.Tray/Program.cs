@@ -152,7 +152,9 @@ internal static class Program
             if (!ownsMutex)
                 return;
 
-            Application.Run(createForm());
+            var form = createForm();
+            form.Shown += (_, _) => ShowStandaloneWindow(form);
+            Application.Run(form);
         }
         finally
         {
@@ -161,6 +163,38 @@ internal static class Program
                 try { windowMutex.ReleaseMutex(); } catch { }
             }
         }
+    }
+
+    private static void ShowStandaloneWindow(Form form)
+    {
+        var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+        var maximumWidth = Math.Max(1, workingArea.Width);
+        var maximumHeight = Math.Max(1, workingArea.Height);
+
+        if (form.Width > maximumWidth || form.Height > maximumHeight)
+        {
+            // MinimumSize is a design-time preference. On compact or highly scaled
+            // displays it must not force the title bar and window controls off-screen.
+            form.MinimumSize = Size.Empty;
+            form.Size = new Size(
+                Math.Min(form.Width, maximumWidth),
+                Math.Min(form.Height, maximumHeight));
+        }
+
+        form.StartPosition = FormStartPosition.Manual;
+        form.Location = new Point(
+            workingArea.Left + Math.Max(0, (workingArea.Width - form.Width) / 2),
+            workingArea.Top + Math.Max(0, (workingArea.Height - form.Height) / 2));
+
+        if (form.WindowState == FormWindowState.Minimized)
+            form.WindowState = FormWindowState.Normal;
+
+        form.ShowInTaskbar = true;
+        form.BringToFront();
+        form.Activate();
+        form.TopMost = true;
+        form.TopMost = false;
+        form.Focus();
     }
 
 

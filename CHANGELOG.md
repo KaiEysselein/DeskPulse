@@ -2,6 +2,13 @@
 
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
+## 0.3.3.1 — 2026-07-27
+
+### Fixed
+
+- Standalone Current User Log, Current User Settings, System Log and System Settings windows now fit within the active screen's working area.
+- Standalone windows are explicitly centered, restored, activated and brought to the foreground after opening, preventing a taskbar-only window on compact or highly scaled displays.
+
 ## 0.3.3.0 — 2026-07-23
 
 ### Added

@@ -1,6 +1,6 @@
 # DeskPulse Roadmap
 
-## Current release: 0.3.3.0
+## Current release: 0.3.3.1
 
 - Protected system and per-user ProgramData databases and settings
 - SID, scope and Windows-session attribution

@@ -2,16 +2,16 @@
 
 ## Current release
 
-The current DeskPulse release candidate is **0.3.3.0**.
+The current DeskPulse patch release is **0.3.3.1**.
 
 - Repository: `https://github.com/KaiEysselein/DeskPulse`
-- GitHub release tag: `v0.3.3.0`
-- Retained release folder: `releases\v0.3.3.0`
+- GitHub release tag: `v0.3.3.1`
+- Retained milestone folder: `releases\v0.3.3.0`
 - Current approved installer copy: `releases\current`
 - Active development source: `dev`
 - Detailed technical handover: `dev\HANDOVER.md`
 
-Version 0.3.3.0 promotes the completed 0.3.2.x storage, attribution, authorization, multi-session and user/system UI work.
+Version 0.3.3.1 fixes standalone Log and Settings windows appearing only in the taskbar on compact or highly scaled displays. It retains the architecture released in 0.3.3.0.
 
 ## Release scope
 
@@ -32,11 +32,11 @@ Version 0.3.3.0 promotes the completed 0.3.2.x storage, attribution, authorizati
 
 The underlying 0.3.2.x migration, ACL, schema, routing, simultaneous-session, scheduled-task, named-pipe authorization, split-settings, isolated-UI, maintenance and export slices were interactively verified on 2026-07-23. The exact evidence is recorded in `dev\docs\verification\STORAGE_ACCEPTANCE_0.3.2.x.md`.
 
-The final 0.3.3.0 build, publish and installer results are recorded in `VERSION_CHECK.md`. The newest single-window tray guard remains pending a short runtime confirmation.
+The final 0.3.3.1 build, publish, installer and installed-version results are recorded in `VERSION_CHECK.md`.
 
 ## Release-retention policy
 
-Release versions whose fourth component is zero are retained under `releases\v<version>` and may receive a formal GitHub Release. Historical changelog entries and archived verification records remain unchanged.
+Release versions whose fourth component is zero are retained under `releases\v<version>`. Patch releases replace `releases\current` and are attached to their GitHub Release without replacing the retained milestone folder.
 
 ## Future work
 
@@ -46,4 +46,4 @@ Release versions whose fourth component is zero are retained under `releases\v<v
 
 ## Release procedure
 
-Build and verify from `dev`. The approved installer must be present under both `releases\current` and `releases\v0.3.3.0`. The formal GitHub Release uses tag `v0.3.3.0`.
+Build and verify from `dev`. The approved patch installer must be present under `releases\current`; `releases\v0.3.3.0` remains the retained milestone baseline. The GitHub Release uses tag `v0.3.3.1`.
