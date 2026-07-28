@@ -130,6 +130,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 {
                     await writer.WriteLineAsync(
                         commandName is "CLEAN_DATABASE_CURRENT_RULES" or
+                            "RELOAD_AND_CLEAN_DATABASE_CURRENT_RULES" or
                             "SYSTEM_CLEAN_DATABASE_CURRENT_RULES" or
                             "REPAIR_HISTORICAL_DATA"
                             ? "RESULT|ERROR|" + authorizationError
@@ -138,6 +139,11 @@ public sealed class DeskPulseWindowsService : ServiceBase
                 }
                 if (command.Equals("CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
                 {
+                    await RunDatabaseHousekeepingStreamingAsync(writer, clientProcessId, systemDatabase: false);
+                }
+                else if (command.Equals("RELOAD_AND_CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
+                {
+                    _monitor?.ReloadSettingsForProcess(clientProcessId);
                     await RunDatabaseHousekeepingStreamingAsync(writer, clientProcessId, systemDatabase: false);
                 }
                 else if (command.Equals("SYSTEM_CLEAN_DATABASE_CURRENT_RULES", StringComparison.OrdinalIgnoreCase))
@@ -268,7 +274,8 @@ public sealed class DeskPulseWindowsService : ServiceBase
             "DELETE_RECORDS" or "CLEAR_TABLE" or "CLEAR_ALL_RECORDS" or
             "SYSTEM_CLEAR_TABLE" or "SYSTEM_CLEAR_ALL_RECORDS" or
             "TRAY_STARTED" or "TRAY_STOPPED" or
-            "CLEAN_DATABASE_CURRENT_RULES" or "SYSTEM_CLEAN_DATABASE_CURRENT_RULES" or
+            "CLEAN_DATABASE_CURRENT_RULES" or "RELOAD_AND_CLEAN_DATABASE_CURRENT_RULES" or
+            "SYSTEM_CLEAN_DATABASE_CURRENT_RULES" or
             "REPAIR_HISTORICAL_DATA";
         var requiresAdministrator = commandName is
             "START_LOAD_TEST" or "STOP_LOAD_TEST" or "REPAIR_HISTORICAL_DATA" or

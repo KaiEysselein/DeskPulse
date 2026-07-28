@@ -970,10 +970,18 @@ public static class ServicePipeClient
     }
     public static Task<string> GetStatusAsync() => SendAsync("STATUS");
 
+    public static async Task ReloadSettingsAsync()
+    {
+        var response = await SendAsync("RELOAD_SETTINGS");
+        if (!response.Equals("OK", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("DeskPulse could not activate the saved rules. " + response);
+    }
+
     public static async Task<MaintenanceExclusionCleanupResult> RunDatabaseHousekeepingAsync(
         IProgress<ExportProgressInfo>? progress = null,
         CancellationToken cancellationToken = default,
-        bool systemDatabase = false)
+        bool systemDatabase = false,
+        bool reloadSettingsFirst = false)
     {
         try
         {
@@ -988,7 +996,9 @@ public static class ServicePipeClient
             progress?.Report(new ExportProgressInfo(10, "10%  Sending housekeeping request to Windows service"));
             await writer.WriteLineAsync(systemDatabase
                 ? "SYSTEM_CLEAN_DATABASE_CURRENT_RULES"
-                : "CLEAN_DATABASE_CURRENT_RULES");
+                : reloadSettingsFirst
+                    ? "RELOAD_AND_CLEAN_DATABASE_CURRENT_RULES"
+                    : "CLEAN_DATABASE_CURRENT_RULES");
 
             while (true)
             {

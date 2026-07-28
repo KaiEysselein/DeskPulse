@@ -22,8 +22,11 @@ public partial class ViewLogForm : Form
     private const string ViewSettingsRegistryPath = @"Software\DeskPulse";
     private int _pageSize = DefaultPageSize;
     private string _fileGroupBy = "None";
+    private string _appGroupBy = "None";
     private bool _use12HourTime;
     private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _expandedAppGroups = new(StringComparer.Ordinal);
+    private bool _updatingGroupByCombo;
 
     private int _appPage;
     private int _filePage;
@@ -37,8 +40,12 @@ public partial class ViewLogForm : Form
     private readonly Action? _settingsChanged;
     private string _appSortColumn = "CreatedAt";
     private bool _appSortAscending;
+    private string _appGroupSortColumn = "Latest";
+    private bool _appGroupSortAscending;
     private string _fileSortColumn = "CreatedAt";
     private bool _fileSortAscending;
+    private string _fileGroupSortColumn = "Latest";
+    private bool _fileGroupSortAscending;
     private string _userSortColumn = "CreatedAt";
     private bool _userSortAscending;
 
@@ -79,12 +86,12 @@ public partial class ViewLogForm : Form
         {
             UpdateSelectionButtons();
             UpdatePagingControls();
-            groupByLabel.Visible = groupByCombo.Visible = tabs.SelectedTab?.Text == "File Activity";
+            UpdateGroupByControls();
             UpdatePageStatus();
         };
         Load += (_, _) =>
         {
-            groupByLabel.Visible = groupByCombo.Visible = tabs.SelectedTab?.Text == "File Activity";
+            UpdateGroupByControls();
             RefreshLog();
         };
     }
@@ -168,16 +175,30 @@ public partial class ViewLogForm : Form
         if (column.SortMode == DataGridViewColumnSortMode.NotSortable)
             return;
 
-        var databaseColumn = GetDatabaseSortColumn(grid, column.HeaderText);
+        var databaseColumn = grid == gridFile && _fileGroupBy != "None"
+            ? GetFileGroupSortColumn(column.HeaderText)
+            : grid == gridApp && _appGroupBy != "None"
+                ? GetAppGroupSortColumn(column.HeaderText)
+                : GetDatabaseSortColumn(grid, column.HeaderText);
         if (databaseColumn == null)
             return;
 
         if (grid == gridApp)
         {
-            _appSortAscending = string.Equals(_appSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
-                ? !_appSortAscending
-                : true;
-            _appSortColumn = databaseColumn;
+            if (_appGroupBy != "None")
+            {
+                _appGroupSortAscending = string.Equals(_appGroupSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                    ? !_appGroupSortAscending
+                    : true;
+                _appGroupSortColumn = databaseColumn;
+            }
+            else
+            {
+                _appSortAscending = string.Equals(_appSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                    ? !_appSortAscending
+                    : true;
+                _appSortColumn = databaseColumn;
+            }
             _appPage = 0;
         }
         else if (grid == gridUser)
@@ -190,16 +211,51 @@ public partial class ViewLogForm : Form
         }
         else
         {
-            _fileSortAscending = string.Equals(_fileSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
-                ? !_fileSortAscending
-                : true;
-            _fileSortColumn = databaseColumn;
+            if (_fileGroupBy != "None")
+            {
+                _fileGroupSortAscending = string.Equals(_fileGroupSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                    ? !_fileGroupSortAscending
+                    : true;
+                _fileGroupSortColumn = databaseColumn;
+            }
+            else
+            {
+                _fileSortAscending = string.Equals(_fileSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                    ? !_fileSortAscending
+                    : true;
+                _fileSortColumn = databaseColumn;
+            }
             _filePage = 0;
         }
 
-        UpdateSortGlyphs(grid, column, GetSortAscending(grid));
+        UpdateSortGlyphs(
+            grid,
+            column,
+            grid == gridFile && _fileGroupBy != "None"
+                ? _fileGroupSortAscending
+                : grid == gridApp && _appGroupBy != "None"
+                    ? _appGroupSortAscending
+                    : GetSortAscending(grid));
         RefreshActiveTab();
     }
+
+    private static string? GetFileGroupSortColumn(string headerText) => headerText switch
+    {
+        "Date" => "Latest",
+        "Time" => "Latest",
+        "File" => "GroupKey",
+        "Extension" => "RecordCount",
+        _ => null
+    };
+
+    private static string? GetAppGroupSortColumn(string headerText) => headerText switch
+    {
+        "Date" => "Latest",
+        "Time" => "Latest",
+        "App" => "GroupKey",
+        "Process ID" => "RecordCount",
+        _ => null
+    };
 
     private string? GetDatabaseSortColumn(DataGridView grid, string headerText)
     {
@@ -497,7 +553,8 @@ public partial class ViewLogForm : Form
                     settings.Save();
 
                     progress.Report(new ExportProgressInfo(8, "8%   Sending cleanup request to DeskPulse service"));
-                    var result = ServicePipeClient.RunDatabaseHousekeepingAsync().GetAwaiter().GetResult();
+                    var result = ServicePipeClient.RunDatabaseHousekeepingAsync(
+                        reloadSettingsFirst: true).GetAwaiter().GetResult();
                     progress.Report(new ExportProgressInfo(98, "98%  Finalising cleaned database"));
                     return result;
                 });
@@ -508,6 +565,21 @@ public partial class ViewLogForm : Form
         else
         {
             settings.Save();
+            try
+            {
+                ServicePipeClient.ReloadSettingsAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "The rule was saved, but DeskPulse could not activate it in the running service.\n\n" +
+                    ex.Message,
+                    "Add rule to rules list",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
         }
 
         _settingsChanged?.Invoke();
@@ -839,10 +911,54 @@ public partial class ViewLogForm : Form
 
     private void GroupByCombo_SelectedIndexChanged(object? sender, EventArgs e)
     {
-        _fileGroupBy = groupByCombo.SelectedItem?.ToString() ?? "None";
-        _expandedFileGroups.Clear();
-        _filePage = 0;
+        if (_updatingGroupByCombo)
+            return;
+
+        var selected = groupByCombo.SelectedItem?.ToString() ?? "None";
+        if (tabs.SelectedTab?.Text == "App Activity")
+        {
+            _appGroupBy = selected;
+            _appGroupSortColumn = "Latest";
+            _appGroupSortAscending = false;
+            _expandedAppGroups.Clear();
+            _appPage = 0;
+        }
+        else
+        {
+            _fileGroupBy = selected;
+            _fileGroupSortColumn = "Latest";
+            _fileGroupSortAscending = false;
+            _expandedFileGroups.Clear();
+            _filePage = 0;
+        }
+
         if (IsHandleCreated) RefreshActiveTab();
+    }
+
+    private void UpdateGroupByControls()
+    {
+        var tabName = tabs.SelectedTab?.Text;
+        var supportsGrouping = tabName is "File Activity" or "App Activity";
+        groupByLabel.Visible = groupByCombo.Visible = supportsGrouping;
+        if (!supportsGrouping)
+            return;
+
+        var options = tabName == "App Activity"
+            ? new[] { "None", "Date", "Application", "Process ID", "Path" }
+            : new[] { "None", "Date", "File name", "Extension", "Folder", "Application", "Activity" };
+        var selected = tabName == "App Activity" ? _appGroupBy : _fileGroupBy;
+
+        _updatingGroupByCombo = true;
+        try
+        {
+            groupByCombo.Items.Clear();
+            groupByCombo.Items.AddRange(options);
+            groupByCombo.SelectedItem = options.Contains(selected, StringComparer.Ordinal) ? selected : "None";
+        }
+        finally
+        {
+            _updatingGroupByCombo = false;
+        }
     }
 
     private void TimeFormatCombo_SelectedIndexChanged(object? sender, EventArgs e)
@@ -992,7 +1108,7 @@ public partial class ViewLogForm : Form
         nextPageButton.Enabled = (page + 1) * _pageSize < total;
         lastPageButton.Enabled = (page + 1) * _pageSize < total;
         exportButton.Enabled = total > 0 && GetActiveGrid()?.Rows.Count > 0;
-        pageLabel.Text = tabs.SelectedTab?.Text == "File Activity" && _fileGroupBy != "None"
+        pageLabel.Text = IsActiveTabGrouped()
             ? $"Page {page + 1:N0} of {totalPages:N0} ({total:N0} groups)"
             : $"Page {page + 1:N0} of {totalPages:N0} ({total:N0} records)";
     }
@@ -1011,10 +1127,17 @@ public partial class ViewLogForm : Form
 
         var firstRecord = (page * _pageSize) + 1;
         var lastRecord = Math.Min(firstRecord + visibleRows - 1, total);
-        statusLabel.Text = tabs.SelectedTab?.Text == "File Activity" && _fileGroupBy != "None"
+        statusLabel.Text = IsActiveTabGrouped()
             ? $"Showing groups {firstRecord:N0} to {lastRecord:N0} of {total:N0}. Double-click a group to expand or collapse it."
             : $"Showing {firstRecord:N0} to {lastRecord:N0} of {total:N0} records.";
     }
+
+    private bool IsActiveTabGrouped() => tabs.SelectedTab?.Text switch
+    {
+        "File Activity" => _fileGroupBy != "None",
+        "App Activity" => _appGroupBy != "None",
+        _ => false
+    };
 
     private void RefreshActiveTab()
     {
@@ -1032,9 +1155,14 @@ public partial class ViewLogForm : Form
             switch (tabs.SelectedTab?.Text)
             {
                 case "App Activity":
-                    _appTotal = CountEntries("ProgramEvents", start, endExclusive);
+                    _appTotal = _appGroupBy == "None"
+                        ? CountEntries("ProgramEvents", start, endExclusive)
+                        : CountAppGroups(start, endExclusive);
                     _appPage = ClampPage(_appPage, _appTotal);
-                    PopulateAppGrid(ReadAppEntries(start, endExclusive, _appPage));
+                    if (_appGroupBy == "None")
+                        PopulateAppGrid(ReadAppEntries(start, endExclusive, _appPage));
+                    else
+                        PopulateAppGroups(ReadAppGroups(start, endExclusive, _appPage), start, endExclusive);
                     gridApp.ClearSelection();
                     break;
                 case "User Activity":
@@ -1094,17 +1222,20 @@ public partial class ViewLogForm : Form
 
             var endExclusive = end.AddDays(1);
             _fileTotal = _fileGroupBy == "None" ? CountEntries("ActivityEvents", start, endExclusive) : CountFileGroups(start, endExclusive);
-            _appTotal = CountEntries("ProgramEvents", start, endExclusive);
+            _appTotal = _appGroupBy == "None"
+                ? CountEntries("ProgramEvents", start, endExclusive)
+                : CountAppGroups(start, endExclusive);
             _userTotal = CountEntries("UserEvents", start, endExclusive);
             ClampAllPages();
 
             var fileEntries = _fileGroupBy == "None" ? ReadFileEntries(start, endExclusive, _filePage) : new List<LogViewEntry>();
             var fileGroups = _fileGroupBy == "None" ? new List<FileLogGroup>() : ReadFileGroups(start, endExclusive, _filePage);
-            var appEntries = ReadAppEntries(start, endExclusive, _appPage);
+            var appEntries = _appGroupBy == "None" ? ReadAppEntries(start, endExclusive, _appPage) : new List<LogViewEntry>();
+            var appGroups = _appGroupBy == "None" ? new List<AppLogGroup>() : ReadAppGroups(start, endExclusive, _appPage);
             var userEntries = ReadUserEntries(start, endExclusive, _userPage);
 
             if (_fileGroupBy == "None") PopulateFileGrid(fileEntries); else PopulateFileGroups(fileGroups, start, endExclusive);
-            PopulateAppGrid(appEntries);
+            if (_appGroupBy == "None") PopulateAppGrid(appEntries); else PopulateAppGroups(appGroups, start, endExclusive);
             PopulateUserGrid(userEntries);
 
             gridApp.ClearSelection();
@@ -1182,18 +1313,22 @@ public partial class ViewLogForm : Form
             {pagingClause}
             """;
 
-        return ReadEntries(sql, start, endExclusive, page, reader =>
+        return ReadEntries(sql, start, endExclusive, page, CreateAppEntry, usePaging);
+    }
+
+    private LogViewEntry CreateAppEntry(SqliteDataReader reader)
+    {
+        var fields = new Dictionary<string, string>
         {
-            var fields = new Dictionary<string, string>
-            {
-                ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
-                ["Event"] = ReadText(reader, 4), ["App"] = ReadText(reader, 5), ["Process ID"] = ReadText(reader, 6),
-                ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
-                ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12),
-                ["Scope"] = ReadText(reader, 13), ["Windows SID"] = ReadText(reader, 14), ["Session ID"] = ReadText(reader, 15)
-            };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5), ReadText(reader, 6), ReadText(reader, 7), fields);
-        }, usePaging);
+            ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
+            ["Event"] = ReadText(reader, 4), ["App"] = ReadText(reader, 5), ["Process ID"] = ReadText(reader, 6),
+            ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
+            ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12),
+            ["Scope"] = ReadText(reader, 13), ["Windows SID"] = ReadText(reader, 14), ["Session ID"] = ReadText(reader, 15)
+        };
+        return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2),
+            FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5),
+            ReadText(reader, 6), ReadText(reader, 7), fields);
     }
 
     private List<LogViewEntry> ReadUserEntries(DateTime start, DateTime endExclusive, int page, bool usePaging = true)
@@ -1303,6 +1438,70 @@ public partial class ViewLogForm : Form
         _ => "''"
     };
 
+    private string AppGroupExpression() => _appGroupBy switch
+    {
+        "Date" => "COALESCE(NULLIF(EventDate, ''), substr(CreatedAt, 1, 10))",
+        "Application" => "COALESCE(NULLIF(ProgramName, ''), '(unknown application)')",
+        "Process ID" => "COALESCE(CAST(ProcessId AS TEXT), '(unknown process)')",
+        "Path" => "COALESCE(NULLIF(FilePath, ''), '(unknown path)')",
+        _ => "''"
+    };
+
+    private int CountAppGroups(DateTime start, DateTime endExclusive)
+    {
+        using var connection = OpenReadConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM (SELECT {AppGroupExpression()} AS GroupKey FROM ProgramEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey);";
+        AddDateParameters(command, start, endExclusive);
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private List<AppLogGroup> ReadAppGroups(DateTime start, DateTime endExclusive, int page)
+    {
+        var result = new List<AppLogGroup>();
+        using var connection = OpenReadConnection();
+        using var command = connection.CreateCommand();
+        var groupSortColumn = _appGroupSortColumn is "GroupKey" or "RecordCount" or "Latest"
+            ? _appGroupSortColumn
+            : "Latest";
+        var groupSortDirection = _appGroupSortAscending ? "ASC" : "DESC";
+        command.CommandText = $"""
+            WITH AllGroups AS
+            (
+                SELECT {AppGroupExpression()} AS GroupKey,
+                       COUNT(*) AS RecordCount,
+                       MAX(CreatedAt) AS Latest
+                FROM ProgramEvents
+                WHERE CreatedAt >= $start AND CreatedAt < $end
+                GROUP BY GroupKey
+            )
+            SELECT GroupKey, RecordCount, Latest
+            FROM AllGroups
+            ORDER BY {groupSortColumn} {groupSortDirection}, GroupKey ASC
+            LIMIT $limit OFFSET $offset;
+            """;
+        AddDateParameters(command, start, endExclusive);
+        command.Parameters.AddWithValue("$limit", _pageSize);
+        command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            result.Add(new AppLogGroup(ReadText(reader, 0), Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture)));
+        return result;
+    }
+
+    private List<LogViewEntry> ReadAppGroupEntries(DateTime start, DateTime endExclusive, string key)
+    {
+        var sql = $"""
+            SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, ProgramName,
+                   ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note,
+                   Scope, WindowsSid, SessionId
+            FROM ProgramEvents
+            WHERE CreatedAt >= $start AND CreatedAt < $end AND {AppGroupExpression()} = $groupKey
+            {BuildOrderBy(_appSortColumn, _appSortAscending)};
+            """;
+        return ReadEntries(sql, start, endExclusive, 0, CreateAppEntry, false, key);
+    }
+
     private int CountFileGroups(DateTime start, DateTime endExclusive)
     {
         using var connection = OpenReadConnection();
@@ -1317,7 +1516,25 @@ public partial class ViewLogForm : Form
         var result = new List<FileLogGroup>();
         using var connection = OpenReadConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {FileGroupExpression()} AS GroupKey, COUNT(*) AS RecordCount, MAX(CreatedAt) AS Latest FROM ActivityEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey ORDER BY Latest DESC, GroupKey ASC LIMIT $limit OFFSET $offset;";
+        var groupSortColumn = _fileGroupSortColumn is "GroupKey" or "RecordCount" or "Latest"
+            ? _fileGroupSortColumn
+            : "Latest";
+        var groupSortDirection = _fileGroupSortAscending ? "ASC" : "DESC";
+        command.CommandText = $"""
+            WITH AllGroups AS
+            (
+                SELECT {FileGroupExpression()} AS GroupKey,
+                       COUNT(*) AS RecordCount,
+                       MAX(CreatedAt) AS Latest
+                FROM ActivityEvents
+                WHERE CreatedAt >= $start AND CreatedAt < $end
+                GROUP BY GroupKey
+            )
+            SELECT GroupKey, RecordCount, Latest
+            FROM AllGroups
+            ORDER BY {groupSortColumn} {groupSortDirection}, GroupKey ASC
+            LIMIT $limit OFFSET $offset;
+            """;
         AddDateParameters(command, start, endExclusive);
         command.Parameters.AddWithValue("$limit", _pageSize);
         command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
@@ -1416,6 +1633,35 @@ public partial class ViewLogForm : Form
         foreach (var e in entries) AddRow(gridApp, e, e.Id, e.Date, e.Time, e.App, e.ProcessId, e.Path);
     }
 
+    private void PopulateAppGroups(IEnumerable<AppLogGroup> groups, DateTime start, DateTime endExclusive)
+    {
+        gridApp.Rows.Clear();
+        foreach (var group in groups)
+        {
+            var expanded = _expandedAppGroups.Contains(group.Key);
+            var rowIndex = gridApp.Rows.Add("", "", "", $"{(expanded ? "▼" : "▶")} {group.Key}", $"{group.Count:N0} records", "", "");
+            var row = gridApp.Rows[rowIndex];
+            row.Tag = group;
+            row.DefaultCellStyle.Font = new System.Drawing.Font(gridApp.Font, System.Drawing.FontStyle.Bold);
+            row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
+            if (!expanded)
+                continue;
+
+            foreach (var entry in ReadAppGroupEntries(start, endExclusive, group.Key))
+            {
+                var childIndex = gridApp.Rows.Add(
+                    entry.Id,
+                    entry.Date,
+                    entry.Time,
+                    "    " + entry.App,
+                    entry.ProcessId,
+                    entry.Path,
+                    "Details");
+                gridApp.Rows[childIndex].Tag = entry;
+            }
+        }
+    }
+
     private void PopulateUserGrid(IEnumerable<LogViewEntry> entries)
     {
         gridUser.Rows.Clear();
@@ -1444,6 +1690,12 @@ public partial class ViewLogForm : Form
             RefreshActiveTab();
             return;
         }
+        if (grid == gridApp && row.Tag is AppLogGroup appGroup)
+        {
+            if (!_expandedAppGroups.Add(appGroup.Key)) _expandedAppGroups.Remove(appGroup.Key);
+            RefreshActiveTab();
+            return;
+        }
         ShowDetails(row);
     }
 
@@ -1456,6 +1708,7 @@ public partial class ViewLogForm : Form
 }
 
 public sealed record FileLogGroup(string Key, int Count);
+public sealed record AppLogGroup(string Key, int Count);
 
 public sealed record LogViewEntry(
     string Id,

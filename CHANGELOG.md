@@ -2,6 +2,17 @@
 
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
+## Unreleased
+
+### Added
+
+- Added full-result App Activity grouping and expandable groups by date, application, process ID and path in both Current User and Administrator logs.
+
+### Fixed
+
+- File and App Activity grouping now aggregates and sorts the complete selected date range before applying page limits.
+- Newly created rules are reloaded by the service before retroactive cleanup begins and are activated immediately when cleanup is not requested.
+
 ## 0.3.4.0 — 2026-07-28
 
 ### Added
