@@ -1,0 +1,37 @@
+# DeskPulse administrator rule overrides
+#
+# Installed location:
+#   C:\ProgramData\DeskPulse\Config\admin-rules.yaml
+#
+# This file is preserved during upgrades and can be changed only by SYSTEM or
+# a local administrator. Changes are validated and applied automatically.
+#
+# Administrator rules run before shipped defaults. To replace or disable a
+# shipped rule, use the same id. A disabled rule with the same id suppresses
+# that default. An Include rule can create a specific exception before a broad
+# default Exclude rule. Set visible_in_ui to false to keep a rule out of the
+# existing Settings rule grids without disabling its enforcement.
+#
+# Example:
+#
+# rules:
+#   - id: include-required-windows-tool
+#     enabled: true
+#     visible_in_ui: true
+#     type: process
+#     action: include
+#     value: RequiredTool.exe
+#     reason: "This tool is relevant on this computer."
+#
+#   - id: windows-search-data
+#     based_on_default_revision: 1
+#     enabled: false
+#     visible_in_ui: true
+#     type: path
+#     action: exclude
+#     value: "%ProgramData%\\Microsoft\\Search"
+#     reason: "Disable the shipped rule with the same id."
+
+version: 1
+
+rules: []

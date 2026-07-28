@@ -1,38 +1,47 @@
-# Version Check — 0.3.3.2
+# Version Check — 0.3.4.0
 
-Version **0.3.3.2** is the current patch release. Historical version numbers in changelog entries and archived verification records are intentionally preserved.
+Version **0.3.4.0** is the current milestone release. Historical version numbers in changelog entries and archived verification records are intentionally preserved.
 
 ## Active references
 
-- `DeskPulse.Shared` AppInfo: `0.3.3.2`
-- Shared, service and tray project versions: `0.3.3.2`
-- Inno Setup installer and output filename: `0.3.3.2`
-- Publish folders: `dev\publish\v0.3.3.2\service` and `dev\publish\v0.3.3.2\tray`
-- Installer: `dev\publish\v0.3.3.2\installer\DeskPulse_Setup_0.3.3.2.exe`
+- `DeskPulse.Shared` AppInfo: `0.3.4.0`
+- Shared, service and tray project versions: `0.3.4.0`
+- Inno Setup installer and output filename: `0.3.4.0`
+- Publish folders: `dev\publish\v0.3.4.0\service` and `dev\publish\v0.3.4.0\tray`
+- Installer: `dev\publish\v0.3.4.0\installer\DeskPulse_Setup_0.3.4.0.exe`
 - Current approved installer folder: `releases\current`
-- Retained milestone baseline: `releases\v0.3.3.0`
-- GitHub tag target: `v0.3.3.2`
-- Installer SHA-256: `DC36BF3D1696A126B58FDE030F08AB7E8B6ECF5834B12D0A68FC283E950C5055`
+- Retained milestone: `releases\v0.3.4.0`
+- GitHub tag target: `v0.3.4.0`
+- Installer SHA-256: `2A478EA556694E3046C750CCF52256F460C539C0B23900C104A2C998291D3457`
 
-## Release checks
+## 0.3.4.0 release checks
 
-- [x] Release build completes with zero warnings and zero errors.
-- [x] Self-contained service and tray publish outputs exist under `dev\publish\v0.3.3.2`.
-- [x] Inno Setup creates `DeskPulse_Setup_0.3.3.2.exe`.
-- [x] The installer is copied to `releases\current`; the 0.3.3.0 milestone remains retained.
-- [x] Published and installed service and tray report version 0.3.3.2.
+- [x] Full Release build completes with zero warnings and zero errors.
+- [x] Eight automated tests pass for override precedence, visibility, last-known-good recovery, missing-file fallback, revision warnings, disabled-override restoration, WinForms layout and the opt-in live integrity harness.
+- [x] Current User and Administrator Settings render tests pass at compact sizes and simulated 125%, 150% and 200% scaling.
+- [x] Self-contained service and tray outputs exist under `dev\publish\v0.3.4.0`.
+- [x] Inno Setup creates `DeskPulse_Setup_0.3.4.0.exe`.
+- [x] The installer is copied to `releases\current` and retained under `releases\v0.3.4.0`.
+- [x] The live installer upgraded 0.3.3.2 to 0.3.4.0 with exit code zero.
+- [x] Installed service and tray hashes match the published 0.3.4.0 binaries.
+- [x] Installed service reports Running and Automatic; the installed tray is running.
+- [x] Shipped defaults include explicit rule IDs, revisions, enabled state, UI visibility, action, type, value and reason.
+- [x] The administrator override file was preserved across upgrade.
+- [x] Config folder and override file ACLs allow only LocalSystem and Administrators.
+- [x] No administrator-rule validation errors were produced after installation.
+- [x] Elevated read-only SQLite `integrity_check` passes for the installed system and user databases.
+- [x] The all-users scheduled tray task was triggered after installation and returned result `0`.
+- [x] Machine-wide rules are displayed as locked policy rows and the elevated page shows IDs, source, status and reasons.
+- [x] Aggregate candidate diagnostics exclude full paths, user names, SIDs and event contents.
+
+## Existing architecture acceptance
+
 - [x] ProgramData migration, ACL, schema and SQLite integrity passed during 0.3.2.x acceptance.
 - [x] SID/session routing and simultaneous-user isolation passed during 0.3.2.x acceptance.
 - [x] Named-pipe authorization and system/current-user maintenance boundaries passed.
 - [x] Current-user and system log/settings process isolation passed.
 - [x] Complete active-tab/date-range export passed with a 209,831-row runtime export.
-- [x] Standalone Log and Settings windows are fitted to the active screen and explicitly activated.
-- [x] The installed Current User Log created a visible `DeskPulse - Log (Current User)` main window.
-- [x] Current-user and administrator exports show the dedicated progress window and close Log after success.
-- [x] Current-user and administrator tray-menu forms passed manual open/export testing.
-- [x] Windows 11 hidden-icons flyout dismissal passed manual testing.
-- [x] Pause and Resume Logging display the correct installed tray-state icons.
 
 ## Scope boundary
 
-DeskPulse provides no combined all-users log. Current-user actions target only the calling user's SID database; administrator log and maintenance target only the protected system database.
+DeskPulse provides no combined all-users log. Current-user actions target only the calling user's SID database; administrator log and maintenance target only the protected system database. Rule-candidate diagnostics store bounded aggregate process names and file extensions only.

@@ -28,6 +28,7 @@ internal sealed class DiagnosticLoadTestForm : Form
         ShowInTaskbar = true;
         ClientSize = new Size(500, 390);
         Icon = AppIcon.Load(AppIconState.Normal);
+        AppIcon.EnableScrolling(this);
 
         var main = new TableLayoutPanel
         {

@@ -1,5 +1,5 @@
 #define MyAppName "DeskPulse"
-#define MyAppVersion "0.3.3.2"
+#define MyAppVersion "0.3.4.0"
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -16,7 +16,7 @@ DefaultDirName={autopf}\DeskPulse
 DefaultGroupName=DeskPulse
 DisableProgramGroupPage=yes
 
-OutputDir=..\publish\v0.3.3.2\installer
+OutputDir=..\publish\v0.3.4.0\installer
 OutputBaseFilename=DeskPulse_Setup_{#MyAppVersion}
 
 Compression=lzma2
@@ -46,10 +46,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Dirs]
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveruninstall
+Name: "{commonappdata}\DeskPulse\Config"; Permissions: admins-full system-full; Flags: uninsneveruninstall
 
 [Files]
-Source: "..\publish\v0.3.3.2\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\v0.3.3.2\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.4.0\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.4.0\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "default-rules.yaml"; DestDir: "{app}\Config"; Flags: ignoreversion
+Source: "admin-rules.yaml"; DestDir: "{commonappdata}\DeskPulse\Config"; Flags: ignoreversion uninsneveruninstall; Check: ShouldInstallAdministratorRules
 Source: "Register-AllUsersTrayStartup.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [InstallDelete]
@@ -148,6 +151,16 @@ function GetInstallLifecycleParameters(Param: String): String;
 begin
   Result := '--record-install-lifecycle "' + DeskPulseInstallAction + '" "' +
     PreviousDeskPulseVersion + '" "{#MyAppVersion}"';
+end;
+
+function ShouldInstallAdministratorRules: Boolean;
+begin
+  { A fresh install replaces any file pre-created before the protected Config
+    directory existed. Upgrades and reinstalls preserve administrator changes,
+    while a missing override file is restored. }
+  Result :=
+    (PreviousDeskPulseVersion = '') or
+    (not FileExists(ExpandConstant('{commonappdata}\DeskPulse\Config\admin-rules.yaml')));
 end;
 
 function ServiceExists(const Service: string): Boolean;

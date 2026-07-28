@@ -169,6 +169,7 @@ public sealed class FilteredFileActivityProcessesForm : Form
             var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel };
             cancel.SetBounds(311, 82, 88, 30);
             Controls.Add(cancel);
+            AppIcon.Apply(this);
             AcceptButton = ok;
             CancelButton = cancel;
         }

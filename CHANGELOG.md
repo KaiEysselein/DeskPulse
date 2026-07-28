@@ -2,6 +2,20 @@
 
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
+## 0.3.4.0 — 2026-07-28
+
+### Added
+
+- Moved machine-wide Windows path and process exclusions from hard-coded lists into a versioned `default-rules.yaml`.
+- Added a protected, upgrade-preserved `%ProgramData%\DeskPulse\Config\admin-rules.yaml` for administrator Include exceptions, Exclude additions and default-rule overrides.
+- Added automatic validated rule reload, last-known-good behavior and protected rule validation diagnostics.
+- Added a per-rule `visible_in_ui` YAML setting that controls rule-grid visibility independently of enforcement.
+- Added a dynamic Machine-wide Rules grid to elevated Administrator Settings, populated from the effective YAML rules with source, status, visibility and reason details.
+- Added form and tab-page scrolling so controls remain reachable on compact or highly scaled displays.
+- Added default-rule revisions and administrator override review warnings when a shipped default changes.
+- Added bounded, privacy-safe aggregate candidate diagnostics containing process names and file extensions, but no full paths, user names, SIDs or event contents.
+- Added automated rule fallback, override, visibility, revision and WinForms layout tests.
+
 ## 0.3.3.2 — 2026-07-27
 
 ### Changed

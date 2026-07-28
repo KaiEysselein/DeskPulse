@@ -21,7 +21,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.3.3.2";
+    public const string Version = "0.3.4.0";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -4658,65 +4658,21 @@ public static class ProcessExclusions
 
 public static class WindowsDefaultExclusions
 {
-    private static readonly string WindowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd(Path.DirectorySeparatorChar);
-    private static readonly string ProgramDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData).TrimEnd(Path.DirectorySeparatorChar);
+    public static IReadOnlyList<ActivityRuleSetting> GetFileRules() =>
+        AdministratorRules.GetFileRules();
 
-    private static readonly string[] RelativeProgramDataFolders =
-    {
-        @"Microsoft\Windows\WER", @"Microsoft\Windows Defender", @"Microsoft\Search"
-    };
-
-    private static readonly HashSet<string> Processes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "SearchIndexer", "SearchProtocolHost", "SearchFilterHost", "MsMpEng", "CompatTelRunner",
-        "svchost", "RuntimeBroker", "TiWorker", "TrustedInstaller", "MoUsoCoreWorker", "UsoClient",
-        "WerFault", "System"
-    };
-
-    public static IReadOnlyList<ActivityRuleSetting> GetFileRules() => GetFolderPaths()
-        .Select(path => new ActivityRuleSetting { Enabled = true, RuleType = "file", Action = "Exclude", Value = path.TrimEnd(Path.DirectorySeparatorChar) + @"\**\*" })
-        .ToList();
-
-    public static IReadOnlyList<ActivityRuleSetting> GetProcessRules() => Processes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-        .Select(name => new ActivityRuleSetting { Enabled = true, RuleType = "process", Action = "Exclude", Value = name })
-        .ToList();
+    public static IReadOnlyList<ActivityRuleSetting> GetProcessRules() =>
+        AdministratorRules.GetProcessRules();
 
     public static bool IsFileOrProcessExcluded(string fullPath, string processName) =>
-        IsProcessExcluded(processName) || IsPathExcluded(fullPath);
+        AdministratorRules.IsFileOrProcessExcluded(fullPath, processName);
 
-    public static bool IsProcessExcluded(string processName)
-    {
-        var name = Path.GetFileNameWithoutExtension((processName ?? "").Trim());
-        return name.Length > 0 && Processes.Contains(name);
-    }
+    public static bool IsProcessExcluded(string processName) =>
+        AdministratorRules.IsProcessExcluded(processName);
 
     public static bool IsPathExcluded(string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(fullPath)) return false;
-        string normalized;
-        try { normalized = Path.GetFullPath(Environment.ExpandEnvironmentVariables(fullPath)).TrimEnd(Path.DirectorySeparatorChar); }
-        catch { return false; }
-
-        if (normalized.StartsWith(Path.GetPathRoot(normalized) + "$Recycle.Bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        return GetFolderPaths().Any(folder => normalized.Equals(folder, StringComparison.OrdinalIgnoreCase) || normalized.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static IEnumerable<string> GetFolderPaths()
-    {
-        // When Windows system activity tracking is disabled, exclude the complete
-        // Windows installation tree. This is intentionally broader than maintaining
-        // a fragile list of noisy subfolders and is evaluated before user include rules.
-        if (!string.IsNullOrWhiteSpace(WindowsFolder))
-            yield return WindowsFolder;
-
-        foreach (var relative in RelativeProgramDataFolders)
-            yield return Path.Combine(ProgramDataFolder, relative).TrimEnd(Path.DirectorySeparatorChar);
-
-        var root = Path.GetPathRoot(WindowsFolder);
-        if (!string.IsNullOrWhiteSpace(root))
-            yield return Path.Combine(root, "$Recycle.Bin").TrimEnd(Path.DirectorySeparatorChar);
+        return AdministratorRules.IsFileOrProcessExcluded(fullPath, "");
     }
 }
 

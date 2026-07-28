@@ -2,16 +2,16 @@
 
 ## Current release
 
-The current DeskPulse patch release is **0.3.3.2**.
+The current DeskPulse milestone release is **0.3.4.0**.
 
 - Repository: `https://github.com/KaiEysselein/DeskPulse`
-- GitHub release tag: `v0.3.3.2`
-- Retained milestone folder: `releases\v0.3.3.0`
+- GitHub release tag: `v0.3.4.0`
+- Retained milestone folder: `releases\v0.3.4.0`
 - Current approved installer copy: `releases\current`
 - Active development source: `dev`
 - Detailed technical handover: `dev\HANDOVER.md`
 
-Version 0.3.3.2 locks in the tested tray-menu dispatch, Windows 11 hidden-icons interaction, Excel-export progress/closure, and runtime tray-state icon fixes before Calendar development.
+Version 0.3.4.0 adds protected machine-wide policy files, administrator override and fallback handling, revision warnings, aggregate rule diagnostics, a dynamic administrator policy view, automated rule/layout tests and scrollable forms.
 
 ## Release scope
 
@@ -27,12 +27,15 @@ Version 0.3.3.2 locks in the tested tray-menu dispatch, Windows 11 hidden-icons 
 - Optionally suppress folder-opening events while preserving extensionless-file logging.
 - Allow only one DeskPulse form to be open from the tray at a time.
 - Launch one unelevated tray per Windows session through the all-users scheduled task.
+- Load machine-wide Windows path and process policy from protected, versioned rule files.
+- Preserve administrator overrides while updating shipped defaults.
+- Keep policy checkboxes visible but locked in the respective rule grids.
 
 ## Verification status
 
 The underlying 0.3.2.x migration, ACL, schema, routing, simultaneous-session, scheduled-task, named-pipe authorization, split-settings, isolated-UI, maintenance and export slices were interactively verified on 2026-07-23. The exact evidence is recorded in `dev\docs\verification\STORAGE_ACCEPTANCE_0.3.2.x.md`.
 
-The final 0.3.3.2 build, publish, installer and installed-version results are recorded in `VERSION_CHECK.md`.
+The final 0.3.4.0 build, publish, installer and installed-version results are recorded in `VERSION_CHECK.md`.
 
 ## Release-retention policy
 
@@ -46,4 +49,4 @@ Release versions whose fourth component is zero are retained under `releases\v<v
 
 ## Release procedure
 
-Build and verify from `dev`. The approved patch installer must be present under `releases\current`; `releases\v0.3.3.0` remains the retained milestone baseline. The GitHub Release uses tag `v0.3.3.2`.
+Build and verify from `dev`. The approved installer must be present under `releases\current` and retained under `releases\v0.3.4.0`. The GitHub Release uses tag `v0.3.4.0`.

@@ -58,6 +58,8 @@ public partial class SettingsForm : Form
     private bool _initializingUi = true;
     private readonly Button _saveAndCloseButton = new();
     private readonly bool _administratorMode;
+    private DataGridView? _machineWideRulesGrid;
+    private Label? _machineWideRulesStatus;
     private bool _isDirty;
     private bool _allowClose;
 
@@ -358,9 +360,9 @@ public partial class SettingsForm : Form
     {
         _rulesSubTabControl.TabPages.Clear();
 
-        var filePage = new TabPage("File Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
-        var appPage = new TabPage("App Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
-        var userPage = new TabPage("User Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8) };
+        var filePage = new TabPage("File Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8), AutoScroll = true };
+        var appPage = new TabPage("App Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8), AutoScroll = true };
+        var userPage = new TabPage("User Activity") { BackColor = System.Drawing.SystemColors.Window, Padding = new Padding(8), AutoScroll = true };
 
         _fileActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.File) { Dock = DockStyle.Fill };
         _appActivityRuleEditor = new ActivityRuleEditor(ActivityRuleCategory.App) { Dock = DockStyle.Fill };
@@ -372,6 +374,7 @@ public partial class SettingsForm : Form
 
         if (_administratorMode)
         {
+            _rulesSubTabControl.TabPages.Add(CreateMachineWideRulesPage());
             userPage.Text = "System Events";
             _rulesSubTabControl.TabPages.Add(userPage);
         }
@@ -380,6 +383,139 @@ public partial class SettingsForm : Form
             _rulesSubTabControl.TabPages.Add(filePage);
             _rulesSubTabControl.TabPages.Add(appPage);
             _rulesSubTabControl.TabPages.Add(userPage);
+        }
+    }
+
+    private TabPage CreateMachineWideRulesPage()
+    {
+        var page = new TabPage("Machine-wide Rules")
+        {
+            BackColor = System.Drawing.SystemColors.Window,
+            Padding = new Padding(8),
+            AutoScroll = true
+        };
+
+        _machineWideRulesStatus = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 42,
+            ForeColor = System.Drawing.SystemColors.GrayText,
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+
+        _machineWideRulesGrid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            RowHeadersVisible = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            BackgroundColor = System.Drawing.SystemColors.Window,
+            AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.DisplayedCellsExceptHeaders
+        };
+        _machineWideRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", Width = 36 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Visible", HeaderText = "Visible", Width = 52 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Id", HeaderText = "Rule ID", Width = 165 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Action", HeaderText = "Action", Width = 65 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Type", HeaderText = "Type", Width = 65 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", HeaderText = "Value", Width = 260 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Source", HeaderText = "Source", Width = 105 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 180 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Reason",
+            HeaderText = "Reason",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = 180
+        });
+
+        var actions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 42,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false
+        };
+        var refresh = new Button { Text = "Reload Rules", Width = 112, Height = 29, FlatStyle = FlatStyle.System };
+        refresh.Click += (_, _) =>
+        {
+            AdministratorRules.ReloadNow();
+            PopulateMachineWideRules();
+        };
+        var openOverrides = new Button { Text = "Open Override File", Width = 150, Height = 29, FlatStyle = FlatStyle.System };
+        openOverrides.Click += (_, _) => OpenRuleFile(AdministratorRules.AdministratorRulesFilePath);
+        var openDefaults = new Button { Text = "Open Default File", Width = 140, Height = 29, FlatStyle = FlatStyle.System };
+        openDefaults.Click += (_, _) => OpenRuleFile(AdministratorRules.DefaultRulesFilePath);
+        var openDiagnostics = new Button { Text = "Open Diagnostics", Width = 130, Height = 29, FlatStyle = FlatStyle.System };
+        openDiagnostics.Click += (_, _) => OpenRuleFile(StorageLayout.AdministratorRulesErrorLogFilePath);
+        var openCandidates = new Button { Text = "Open Candidates", Width = 130, Height = 29, FlatStyle = FlatStyle.System };
+        openCandidates.Click += (_, _) => OpenRuleFile(StorageLayout.RuleCandidateDiagnosticsFilePath);
+        actions.Controls.AddRange(new Control[] { refresh, openOverrides, openDefaults, openDiagnostics, openCandidates });
+
+        page.Controls.Add(_machineWideRulesGrid);
+        page.Controls.Add(actions);
+        page.Controls.Add(_machineWideRulesStatus);
+        PopulateMachineWideRules();
+        return page;
+    }
+
+    private void PopulateMachineWideRules()
+    {
+        if (_machineWideRulesGrid == null || _machineWideRulesStatus == null)
+            return;
+
+        _machineWideRulesGrid.Rows.Clear();
+        var rules = AdministratorRules.GetEffectiveRules(includeHidden: true);
+        foreach (var rule in rules)
+        {
+            var rowIndex = _machineWideRulesGrid.Rows.Add(
+                rule.Enabled, rule.VisibleInUi, rule.Id, rule.Action, rule.Type,
+                rule.Value, rule.Source, rule.Status, rule.Reason);
+            var row = _machineWideRulesGrid.Rows[rowIndex];
+            row.Tag = rule.Id;
+            row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.Control;
+            row.DefaultCellStyle.ForeColor = System.Drawing.SystemColors.GrayText;
+            row.Cells["Enabled"].ToolTipText = "Managed by your administrator.";
+            row.Cells["Visible"].ToolTipText = "Managed by your administrator.";
+            if (rule.Status.StartsWith("Review needed", StringComparison.OrdinalIgnoreCase))
+            {
+                row.DefaultCellStyle.BackColor = System.Drawing.Color.MistyRose;
+                row.DefaultCellStyle.ForeColor = System.Drawing.Color.DarkRed;
+            }
+        }
+
+        var error = AdministratorRules.LastLoadError;
+        var reviewCount = rules.Count(rule => rule.Status.StartsWith("Review needed", StringComparison.OrdinalIgnoreCase));
+        _machineWideRulesStatus.Text = string.IsNullOrWhiteSpace(error)
+            ? $"{rules.Count:N0} effective machine-wide rule values loaded." +
+              (reviewCount > 0 ? $" {reviewCount:N0} administrator override(s) need review." : "") +
+              " Default rules are read-only; use the administrator override file to customize them."
+            : "The latest policy-file edit is invalid. DeskPulse is retaining the last valid rules: " + error;
+        _machineWideRulesStatus.ForeColor = string.IsNullOrWhiteSpace(error)
+            ? System.Drawing.SystemColors.GrayText
+            : System.Drawing.Color.DarkRed;
+    }
+
+    private void OpenRuleFile(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                MessageBox.Show(this, "The file does not exist yet:\n\n" + path,
+                    "DeskPulse Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "The file could not be opened.\n\n" + ex.Message,
+                "DeskPulse Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -612,7 +748,8 @@ public partial class SettingsForm : Form
         {
             Text = "Maintenance",
             BackColor = System.Drawing.SystemColors.Window,
-            Padding = new Padding(16)
+            Padding = new Padding(16),
+            AutoScroll = true
         };
 
         var intro = new Label
@@ -3252,6 +3389,7 @@ internal sealed class RuleImportModeForm : Form
         ShowInTaskbar = false;
         AutoScaleMode = AutoScaleMode.Font;
         ClientSize = new Size(470, 245);
+        AppIcon.Apply(this);
 
         var heading = new Label
         {
@@ -3487,7 +3625,7 @@ internal sealed class ActivityRuleEditor : UserControl
         if (_category != ActivityRuleCategory.User)
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Source", HeaderText = "Source", Width = 108, ReadOnly = true });
 
-        _grid.CellBeginEdit += (_, e) => { if (e.RowIndex >= 0 && Equals(_grid.Rows[e.RowIndex].Tag, "WindowsDefault")) e.Cancel = true; };
+        _grid.CellBeginEdit += (_, e) => { if (e.RowIndex >= 0 && Equals(_grid.Rows[e.RowIndex].Tag, "MachineWidePolicy")) e.Cancel = true; };
 
         if (_category == ActivityRuleCategory.File)
         {
@@ -3711,13 +3849,16 @@ internal sealed class ActivityRuleEditor : UserControl
             foreach (var setting in _windowsDefaultRules)
             {
                 var include = setting.Action.Equals("Include", StringComparison.OrdinalIgnoreCase);
-                var index = _grid.Rows.Add(_windowsDefaultsActive, "Windows default", !include, include, setting.Value);
+                var index = _grid.Rows.Add(_windowsDefaultsActive, "Machine-wide policy", !include, include, setting.Value);
                 var row = _grid.Rows[index];
-                row.Tag = "WindowsDefault";
+                row.Tag = "MachineWidePolicy";
                 row.ReadOnly = true;
                 row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.Control;
                 row.DefaultCellStyle.ForeColor = System.Drawing.SystemColors.GrayText;
-                row.Cells["Enabled"].ToolTipText = _windowsDefaultsActive ? "Active built-in exclusion. Controlled by Track Windows system activity." : "Inactive because Track Windows system activity is enabled.";
+                row.Cells["Enabled"].ToolTipText = _windowsDefaultsActive
+                    ? "Active machine-wide rule managed by your administrator."
+                    : "Inactive because Track Windows system activity is enabled.";
+                row.Cells["Source"].ToolTipText = "Managed by your administrator.";
             }
         }
 
@@ -3759,7 +3900,7 @@ internal sealed class ActivityRuleEditor : UserControl
         var result = new List<ActivityRuleSetting>();
         foreach (DataGridViewRow row in _grid.Rows)
         {
-            if (Equals(row.Tag, "WindowsDefault")) continue;
+            if (Equals(row.Tag, "MachineWidePolicy")) continue;
             var value = row.Cells["Value"].Value?.ToString()?.Trim() ?? "";
             if (value.Length == 0)
                 continue;
@@ -3821,7 +3962,7 @@ internal sealed class ActivityRuleEditor : UserControl
             });
             return;
         }
-        if (row == null || Equals(row.Tag, "WindowsDefault")) return;
+        if (row == null || Equals(row.Tag, "MachineWidePolicy")) return;
         var index = row.Index;
         if (action == "Remove") { _grid.Rows.RemoveAt(index); return; }
         if (action == "Duplicate")

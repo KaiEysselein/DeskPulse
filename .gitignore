@@ -5,6 +5,7 @@ publish/
 artifacts/
 Installer/Output/
 TestResults/
+test-artifacts/
 
 # Local release artifacts
 releases/**/*.exe

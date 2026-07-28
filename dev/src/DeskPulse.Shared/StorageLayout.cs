@@ -18,6 +18,14 @@ public static class StorageLayout
 
     public static string SystemSettingsFilePath => Path.Combine(SystemFolder, "settings.json");
 
+    public static string ConfigFolder => Path.Combine(RootFolder, "Config");
+
+    public static string AdministratorRulesFilePath => Path.Combine(ConfigFolder, "admin-rules.yaml");
+
+    public static string AdministratorRulesErrorLogFilePath => Path.Combine(SystemFolder, "admin-rules-error.log");
+
+    public static string RuleCandidateDiagnosticsFilePath => Path.Combine(SystemFolder, "rule-candidates.csv");
+
     public static string UsersFolder => Path.Combine(RootFolder, "Users");
 
     public static string GetUserFolder(string windowsSid) =>
@@ -126,6 +134,15 @@ public static class StorageLayout
     {
         Directory.CreateDirectory(RootFolder);
         var systemFolder = Directory.CreateDirectory(SystemFolder);
+        var configFolder = Directory.CreateDirectory(ConfigFolder);
+        SetAdministratorOnlyAcl(systemFolder);
+        SetAdministratorOnlyAcl(configFolder);
+        if (File.Exists(AdministratorRulesFilePath))
+            SetAdministratorOnlyAcl(new FileInfo(AdministratorRulesFilePath));
+    }
+
+    private static void SetAdministratorOnlyAcl(DirectoryInfo folder)
+    {
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         foreach (var sid in new[]
@@ -141,7 +158,25 @@ public static class StorageLayout
                 PropagationFlags.None,
                 AccessControlType.Allow));
         }
-        systemFolder.SetAccessControl(security);
+        folder.SetAccessControl(security);
+    }
+
+    private static void SetAdministratorOnlyAcl(FileInfo file)
+    {
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[]
+                 {
+                     new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                     new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)
+                 })
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                sid,
+                FileSystemRights.FullControl,
+                AccessControlType.Allow));
+        }
+        file.SetAccessControl(security);
     }
 
     public static void PrepareUserStorage(string windowsSid)

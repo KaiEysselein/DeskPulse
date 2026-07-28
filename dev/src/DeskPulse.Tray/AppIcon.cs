@@ -57,5 +57,27 @@ internal static class AppIcon
     {
         form.ShowIcon = true;
         form.Icon = Load(AppIconState.Normal);
+        EnableScrolling(form);
+    }
+
+    public static void EnableScrolling(Form form)
+    {
+        // Preserve the form's designed content extent. If Windows display scaling
+        // or a compact screen makes the client area smaller, scrollbars expose
+        // controls that would otherwise be clipped.
+        form.AutoScroll = true;
+        form.AutoScrollMinSize = form.ClientSize;
+        EnableTabPageScrolling(form);
+    }
+
+    private static void EnableTabPageScrolling(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            if (child is TabPage page)
+                page.AutoScroll = true;
+            if (child.HasChildren)
+                EnableTabPageScrolling(child);
+        }
     }
 }
