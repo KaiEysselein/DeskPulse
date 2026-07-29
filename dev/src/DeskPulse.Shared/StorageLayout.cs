@@ -26,6 +26,8 @@ public static class StorageLayout
 
     public static string RuleCandidateDiagnosticsFilePath => Path.Combine(SystemFolder, "rule-candidates.csv");
 
+    public static string AttributionPreviewFilePath => Path.Combine(SystemFolder, "attribution-preview.csv");
+
     public static string UsersFolder => Path.Combine(RootFolder, "Users");
 
     public static string GetUserFolder(string windowsSid) =>

@@ -9,6 +9,9 @@ partial class DeleteLogRecordsForm
     private System.Windows.Forms.Label warningIconLabel = null!;
     private System.Windows.Forms.Label messageLabel = null!;
     private System.Windows.Forms.CheckBox createRulesCheckBox = null!;
+    private System.Windows.Forms.FlowLayoutPanel matchTypePanel = null!;
+    private System.Windows.Forms.Label matchTypeLabel = null!;
+    private System.Windows.Forms.ComboBox matchTypeComboBox = null!;
     private System.Windows.Forms.FlowLayoutPanel buttonPanel = null!;
     private System.Windows.Forms.Button deleteButton = null!;
     private System.Windows.Forms.Button cancelButton = null!;
@@ -26,10 +29,14 @@ partial class DeleteLogRecordsForm
         warningIconLabel = new System.Windows.Forms.Label();
         messageLabel = new System.Windows.Forms.Label();
         createRulesCheckBox = new System.Windows.Forms.CheckBox();
+        matchTypePanel = new System.Windows.Forms.FlowLayoutPanel();
+        matchTypeLabel = new System.Windows.Forms.Label();
+        matchTypeComboBox = new System.Windows.Forms.ComboBox();
         buttonPanel = new System.Windows.Forms.FlowLayoutPanel();
         deleteButton = new System.Windows.Forms.Button();
         cancelButton = new System.Windows.Forms.Button();
         layout.SuspendLayout();
+        matchTypePanel.SuspendLayout();
         buttonPanel.SuspendLayout();
         SuspendLayout();
         //
@@ -41,15 +48,17 @@ partial class DeleteLogRecordsForm
         layout.Controls.Add(warningIconLabel, 0, 0);
         layout.Controls.Add(messageLabel, 1, 0);
         layout.Controls.Add(createRulesCheckBox, 1, 1);
-        layout.Controls.Add(buttonPanel, 0, 2);
+        layout.Controls.Add(matchTypePanel, 1, 2);
+        layout.Controls.Add(buttonPanel, 0, 3);
         layout.Dock = System.Windows.Forms.DockStyle.Fill;
         layout.Location = new System.Drawing.Point(12, 12);
         layout.Name = "layout";
-        layout.RowCount = 3;
+        layout.RowCount = 4;
         layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        layout.Size = new System.Drawing.Size(496, 168);
+        layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+        layout.Size = new System.Drawing.Size(496, 211);
         layout.TabIndex = 0;
         //
         // warningIconLabel
@@ -86,6 +95,32 @@ partial class DeleteLogRecordsForm
         createRulesCheckBox.TabIndex = 2;
         createRulesCheckBox.Text = "Also create exclusion rule(s)";
         createRulesCheckBox.UseVisualStyleBackColor = true;
+        createRulesCheckBox.CheckedChanged += CreateRulesCheckBox_CheckedChanged;
+        //
+        // matchTypePanel
+        //
+        matchTypePanel.AutoSize = true;
+        matchTypePanel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+        matchTypePanel.Controls.Add(matchTypeLabel);
+        matchTypePanel.Controls.Add(matchTypeComboBox);
+        matchTypePanel.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
+        matchTypePanel.Margin = new System.Windows.Forms.Padding(3, 0, 3, 12);
+        matchTypePanel.Name = "matchTypePanel";
+        matchTypePanel.TabIndex = 3;
+        matchTypePanel.Visible = false;
+        matchTypePanel.WrapContents = false;
+        //
+        // matchTypeLabel
+        //
+        matchTypeLabel.AutoSize = true;
+        matchTypeLabel.Margin = new System.Windows.Forms.Padding(0, 7, 8, 0);
+        matchTypeLabel.Text = "Match by:";
+        //
+        // matchTypeComboBox
+        //
+        matchTypeComboBox.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+        matchTypeComboBox.Margin = new System.Windows.Forms.Padding(0, 3, 0, 3);
+        matchTypeComboBox.Size = new System.Drawing.Size(240, 23);
         //
         // buttonPanel
         //
@@ -100,7 +135,7 @@ partial class DeleteLogRecordsForm
         buttonPanel.Name = "buttonPanel";
         buttonPanel.Padding = new System.Windows.Forms.Padding(0, 8, 0, 0);
         buttonPanel.Size = new System.Drawing.Size(490, 63);
-        buttonPanel.TabIndex = 3;
+        buttonPanel.TabIndex = 4;
         buttonPanel.WrapContents = false;
         //
         // deleteButton
@@ -135,7 +170,7 @@ partial class DeleteLogRecordsForm
         AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
         AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
         CancelButton = cancelButton;
-        ClientSize = new System.Drawing.Size(520, 192);
+        ClientSize = new System.Drawing.Size(520, 235);
         Controls.Add(layout);
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -147,6 +182,8 @@ partial class DeleteLogRecordsForm
         Text = "Delete selected log records";
         layout.ResumeLayout(false);
         layout.PerformLayout();
+        matchTypePanel.ResumeLayout(false);
+        matchTypePanel.PerformLayout();
         buttonPanel.ResumeLayout(false);
         buttonPanel.PerformLayout();
         ResumeLayout(false);

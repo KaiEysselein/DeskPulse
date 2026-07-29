@@ -24,6 +24,7 @@ public partial class ViewLogForm : Form
     private string _fileGroupBy = "None";
     private string _appGroupBy = "None";
     private bool _use12HourTime;
+    private bool _applyingPeriod;
     private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedAppGroups = new(StringComparer.Ordinal);
     private bool _updatingGroupByCombo;
@@ -80,7 +81,38 @@ public partial class ViewLogForm : Form
         timeFormatCombo.SelectedItem = _use12HourTime ? "12-hour" : "24-hour";
         pageSizeInput.Value = Math.Clamp(_pageSize, (int)pageSizeInput.Minimum, (int)pageSizeInput.Maximum);
         dateStart.Value = GetFirstRecordedDate();
-        dateEnd.Value = DateTime.Today;
+        dateEnd.Value = DateTime.Now;
+        periodCombo.Items.AddRange(new object[]
+        {
+            "Custom",
+            "All time",
+            "Today (since midnight)",
+            "Last 24 hours",
+            "Last 7 days",
+            "Last 14 days",
+            "Last 30 days",
+            "This month",
+            "Last 60 days",
+            "Last 90 days",
+            "Last 180 days",
+            "Last 1 year",
+            "Last 2 years",
+            "Last 3 years",
+            "Last 4 years",
+            "Last 5 years",
+            "Last 10 years"
+        });
+        _applyingPeriod = true;
+        try
+        {
+            periodCombo.SelectedItem = "All time";
+        }
+        finally
+        {
+            _applyingPeriod = false;
+        }
+        dateStart.ValueChanged += (_, _) => MarkPeriodCustom();
+        dateEnd.ValueChanged += (_, _) => MarkPeriodCustom();
         ConfigureGrids();
         tabs.SelectedIndexChanged += (_, _) =>
         {
@@ -108,13 +140,65 @@ public partial class ViewLogForm : Form
         return DatabaseDateRange.GetFirstRecordedDate(_databaseFilePath);
     }
 
-    private void TodayOnlyButton_Click(object? sender, EventArgs e)
+    private void PeriodCombo_SelectedIndexChanged(object? sender, EventArgs e)
     {
-        dateStart.Value = DateTime.Today;
+        if (_applyingPeriod || periodCombo.SelectedItem?.ToString() is not { } period || period == "Custom")
+            return;
+        var range = CalculatePeriodRange(period, DateTime.Now, GetFirstRecordedDate());
+        _applyingPeriod = true;
+        try
+        {
+            dateStart.Value = ClampPickerValue(dateStart, range.Start);
+            dateEnd.Value = ClampPickerValue(dateEnd, range.End);
+        }
+        finally
+        {
+            _applyingPeriod = false;
+        }
         _filePage = 0;
         _appPage = 0;
         _userPage = 0;
         RefreshLog();
+    }
+
+    private void MarkPeriodCustom()
+    {
+        if (_applyingPeriod || periodCombo.SelectedItem?.ToString() == "Custom")
+            return;
+        _applyingPeriod = true;
+        try { periodCombo.SelectedItem = "Custom"; }
+        finally { _applyingPeriod = false; }
+    }
+
+    private static DateTime ClampPickerValue(DateTimePicker picker, DateTime value) =>
+        value < picker.MinDate ? picker.MinDate : value > picker.MaxDate ? picker.MaxDate : value;
+
+    public static (DateTime Start, DateTime End) CalculatePeriodRange(
+        string period,
+        DateTime now,
+        DateTime? firstRecordedDate = null)
+    {
+        var start = period switch
+        {
+            "All time" => firstRecordedDate ?? DateTimePicker.MinimumDateTime,
+            "Today (since midnight)" => now.Date,
+            "Last 24 hours" => now.AddHours(-24),
+            "Last 7 days" => now.AddDays(-7),
+            "Last 14 days" => now.AddDays(-14),
+            "Last 30 days" => now.AddDays(-30),
+            "This month" => new DateTime(now.Year, now.Month, 1),
+            "Last 60 days" => now.AddDays(-60),
+            "Last 90 days" => now.AddDays(-90),
+            "Last 180 days" => now.AddDays(-180),
+            "Last 1 year" => now.AddYears(-1),
+            "Last 2 years" => now.AddYears(-2),
+            "Last 3 years" => now.AddYears(-3),
+            "Last 4 years" => now.AddYears(-4),
+            "Last 5 years" => now.AddYears(-5),
+            "Last 10 years" => now.AddYears(-10),
+            _ => throw new ArgumentOutOfRangeException(nameof(period), period, "Unknown log period.")
+        };
+        return (start, now);
     }
 
     private void ConfigureGrids()
@@ -142,10 +226,21 @@ public partial class ViewLogForm : Form
             {
                 Name = columnName.Replace(" ", ""),
                 HeaderText = columnName,
+                Tag = columnName,
                 SortMode = DataGridViewColumnSortMode.Programmatic,
                 FillWeight = columnName is "Folder" or "Path" ? 180 : columnName is "File" or "App" or "Event" ? 130 : columnName == "Extension" ? 65 : columnName == "ID" ? 55 : 80
             });
         }
+
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "RecordCount",
+            HeaderText = "Records",
+            Tag = "Records",
+            SortMode = DataGridViewColumnSortMode.Programmatic,
+            FillWeight = 75,
+            Visible = false
+        });
 
         grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -154,6 +249,15 @@ public partial class ViewLogForm : Form
             Text = "Details",
             UseColumnTextForButtonValue = true,
             Width = 72,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "Summary",
+            HeaderText = "",
+            UseColumnTextForButtonValue = false,
+            Width = 78,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
@@ -175,11 +279,12 @@ public partial class ViewLogForm : Form
         if (column.SortMode == DataGridViewColumnSortMode.NotSortable)
             return;
 
+        var originalHeaderText = column.Tag as string ?? column.HeaderText;
         var databaseColumn = grid == gridFile && _fileGroupBy != "None"
-            ? GetFileGroupSortColumn(column.HeaderText)
+            ? GetFileGroupSortColumn(originalHeaderText)
             : grid == gridApp && _appGroupBy != "None"
-                ? GetAppGroupSortColumn(column.HeaderText)
-                : GetDatabaseSortColumn(grid, column.HeaderText);
+                ? GetAppGroupSortColumn(originalHeaderText)
+                : GetDatabaseSortColumn(grid, originalHeaderText);
         if (databaseColumn == null)
             return;
 
@@ -239,23 +344,19 @@ public partial class ViewLogForm : Form
         RefreshActiveTab();
     }
 
-    private static string? GetFileGroupSortColumn(string headerText) => headerText switch
-    {
-        "Date" => "Latest",
-        "Time" => "Latest",
-        "File" => "GroupKey",
-        "Extension" => "RecordCount",
-        _ => null
-    };
+    private string? GetFileGroupSortColumn(string headerText) =>
+        headerText.Equals("Records", StringComparison.OrdinalIgnoreCase)
+            ? "RecordCount"
+            : headerText.Equals(FileGroupDisplayHeaderText(), StringComparison.OrdinalIgnoreCase)
+                ? "GroupKey"
+                : null;
 
-    private static string? GetAppGroupSortColumn(string headerText) => headerText switch
-    {
-        "Date" => "Latest",
-        "Time" => "Latest",
-        "App" => "GroupKey",
-        "Process ID" => "RecordCount",
-        _ => null
-    };
+    private string? GetAppGroupSortColumn(string headerText) =>
+        headerText.Equals("Records", StringComparison.OrdinalIgnoreCase)
+            ? "RecordCount"
+            : headerText.Equals(AppGroupDisplayHeaderText(), StringComparison.OrdinalIgnoreCase)
+                ? "GroupKey"
+                : null;
 
     private string? GetDatabaseSortColumn(DataGridView grid, string headerText)
     {
@@ -308,9 +409,15 @@ public partial class ViewLogForm : Form
     private static void UpdateSortGlyphs(DataGridView grid, DataGridViewColumn sortedColumn, bool ascending)
     {
         foreach (DataGridViewColumn column in grid.Columns)
+        {
             column.HeaderCell.SortGlyphDirection = SortOrder.None;
+            if (column.Tag is string originalHeaderText)
+                column.HeaderText = originalHeaderText;
+        }
 
         sortedColumn.HeaderCell.SortGlyphDirection = ascending ? SortOrder.Ascending : SortOrder.Descending;
+        if (sortedColumn.Tag is string sortedHeaderText)
+            sortedColumn.HeaderText = sortedHeaderText + (ascending ? " ▲" : " ▼");
     }
 
     private static string BuildOrderBy(string column, bool ascending)
@@ -323,8 +430,51 @@ public partial class ViewLogForm : Form
     {
         var grid = GetActiveGrid();
         var selectedCount = grid?.SelectedRows.Count ?? 0;
-        createRuleButton.Enabled = selectedCount == 1 && grid!.SelectedRows[0].Tag is LogViewEntry;
-        deleteButton.Enabled = selectedCount > 0 && grid!.SelectedRows.Cast<DataGridViewRow>().Any(row => row.Tag is LogViewEntry);
+        createRuleButton.Enabled = selectedCount == 1 &&
+            (grid!.SelectedRows[0].Tag is LogViewEntry ||
+             TryGetGroupRuleSuggestion(grid, grid.SelectedRows[0], out _));
+        deleteButton.Enabled = selectedCount > 0 &&
+            grid!.SelectedRows.Cast<DataGridViewRow>().Any(row =>
+                row.Tag is LogViewEntry ||
+                grid == gridFile && row.Tag is FileLogGroup ||
+                grid == gridApp && row.Tag is AppLogGroup);
+    }
+
+    private bool TryGetGroupRuleSuggestion(
+        DataGridView grid,
+        DataGridViewRow row,
+        out GroupRuleSuggestion suggestion)
+    {
+        suggestion = default;
+
+        if (grid == gridFile && row.Tag is FileLogGroup fileGroup)
+        {
+            suggestion = _fileGroupBy switch
+            {
+                "File name" => new(fileGroup.Key, LogRuleCategory.File, "file", false),
+                "Extension" when !fileGroup.Key.Equals("(no extension)", StringComparison.OrdinalIgnoreCase) =>
+                    new("*" + (fileGroup.Key.StartsWith('.') ? fileGroup.Key : "." + fileGroup.Key),
+                        LogRuleCategory.File, "file", false),
+                "Folder" when !fileGroup.Key.Equals("(unknown folder)", StringComparison.OrdinalIgnoreCase) =>
+                    new(fileGroup.Key, LogRuleCategory.File, "folder", true),
+                "Application" when !fileGroup.Key.Equals("(unknown application)", StringComparison.OrdinalIgnoreCase) =>
+                    new(fileGroup.Key, LogRuleCategory.App, "process", false),
+                _ => default
+            };
+        }
+        else if (grid == gridApp && row.Tag is AppLogGroup appGroup)
+        {
+            suggestion = _appGroupBy switch
+            {
+                "Application" when !appGroup.Key.Equals("(unknown application)", StringComparison.OrdinalIgnoreCase) =>
+                    new(appGroup.Key, LogRuleCategory.App, "process", false),
+                "Path" when !appGroup.Key.Equals("(unknown path)", StringComparison.OrdinalIgnoreCase) =>
+                    new(appGroup.Key, LogRuleCategory.App, "process", false),
+                _ => default
+            };
+        }
+
+        return !string.IsNullOrWhiteSpace(suggestion.Value);
     }
 
     private DataGridView? GetActiveGrid()
@@ -349,8 +499,10 @@ public partial class ViewLogForm : Form
         if (grid == null)
             return;
 
-        var entries = grid.SelectedRows
+        var selectedRows = grid.SelectedRows
             .Cast<DataGridViewRow>()
+            .ToList();
+        var entries = selectedRows
             .Select(row => row.Tag as LogViewEntry)
             .Where(entry => entry != null && long.TryParse(entry.Id, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
             .Cast<LogViewEntry>()
@@ -358,13 +510,53 @@ public partial class ViewLogForm : Form
             .Select(group => group.First())
             .ToList();
 
-        if (entries.Count == 0)
+        var fileGroups = grid == gridFile
+            ? selectedRows.Select(row => row.Tag).OfType<FileLogGroup>().ToList()
+            : new List<FileLogGroup>();
+        var appGroups = grid == gridApp
+            ? selectedRows.Select(row => row.Tag).OfType<AppLogGroup>().ToList()
+            : new List<AppLogGroup>();
+        var groupedDeletion = fileGroups.Count > 0 || appGroups.Count > 0;
+        var ids = entries
+            .Select(entry => long.Parse(entry.Id, CultureInfo.InvariantCulture))
+            .ToHashSet();
+
+        foreach (var group in fileGroups)
+            ids.UnionWith(ReadGroupRecordIds(
+                "ActivityEvents", FileGroupExpression(), group.Key,
+                dateStart.Value, dateEnd.Value));
+        foreach (var group in appGroups)
+            ids.UnionWith(ReadGroupRecordIds(
+                "ProgramEvents", AppGroupExpression(), group.Key,
+                dateStart.Value, dateEnd.Value));
+
+        if (ids.Count == 0)
             return;
 
         var sectionName = tabs.SelectedTab?.Text ?? "activity";
-        using var deleteForm = new DeleteLogRecordsForm(entries.Count, sectionName);
+        var category = GetActiveCategory();
+        var selectedGroupCount = fileGroups.Count + appGroups.Count;
+        using var deleteForm = new DeleteLogRecordsForm(
+            ids.Count, sectionName, category, groupedDeletion, selectedGroupCount);
         if (deleteForm.ShowDialog(this) != DialogResult.OK)
             return;
+
+        if (groupedDeletion)
+        {
+            var finalApproval = MessageBox.Show(
+                this,
+                $"FINAL WARNING\r\n\r\n" +
+                $"You are about to permanently delete {ids.Count:N0} record(s) from " +
+                $"{selectedGroupCount:N0} selected group(s).\r\n\r\n" +
+                "This cannot be undone and may severely affect the historical data in the logs.\r\n\r\n" +
+                "Do you want to proceed?",
+                "Confirm permanent grouped deletion",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (finalApproval != DialogResult.Yes)
+                return;
+        }
 
         var createRules = deleteForm.CreateRules;
 
@@ -378,13 +570,10 @@ public partial class ViewLogForm : Form
         try
         {
             Cursor = Cursors.WaitCursor;
-            statusLabel.Text = $"Deleting {entries.Count:N0} selected record(s)...";
-            var ids = entries
-                .Select(entry => long.Parse(entry.Id, CultureInfo.InvariantCulture))
-                .ToArray();
+            statusLabel.Text = $"Deleting {ids.Count:N0} selected record(s)...";
 
-            var deleted = await ServicePipeClient.DeleteRecordsAsync(tableName, ids);
-            var rulesCreated = createRules ? CreateExclusionRulesForEntries(entries) : 0;
+            var deleted = await ServicePipeClient.DeleteRecordsAsync(tableName, ids.ToArray());
+            var rulesCreated = createRules ? CreateExclusionRulesForEntries(entries, deleteForm.MatchType) : 0;
             RefreshActiveTab();
             statusLabel.Text = rulesCreated > 0
                 ? $"Deleted {deleted:N0} selected record(s) and created {rulesCreated:N0} exclusion rule(s)."
@@ -406,8 +595,39 @@ public partial class ViewLogForm : Form
         }
     }
 
+    private List<long> ReadGroupRecordIds(
+        string tableName,
+        string groupExpression,
+        string groupKey,
+        DateTime start,
+        DateTime endExclusive)
+    {
+        var allowedTable = tableName switch
+        {
+            "ActivityEvents" => "ActivityEvents",
+            "ProgramEvents" => "ProgramEvents",
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName))
+        };
 
-    private int CreateExclusionRulesForEntries(IReadOnlyList<LogViewEntry> entries)
+        var result = new List<long>();
+        using var connection = OpenReadConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT Id
+            FROM {allowedTable}
+            WHERE CreatedAt >= $start AND CreatedAt < $end
+              AND {groupExpression} = $groupKey;
+            """;
+        AddDateParameters(command, start, endExclusive);
+        command.Parameters.AddWithValue("$groupKey", groupKey);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            result.Add(reader.GetInt64(0));
+        return result;
+    }
+
+
+    private int CreateExclusionRulesForEntries(IReadOnlyList<LogViewEntry> entries, string matchType)
     {
         var category = GetActiveCategory();
         var settings = AppSettings.Load();
@@ -421,30 +641,9 @@ public partial class ViewLogForm : Form
         var created = 0;
         foreach (var entry in entries)
         {
-            var value = category switch
-            {
-                LogRuleCategory.App => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.App,
-                LogRuleCategory.File => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.Subject,
-                _ => entry.Subject
-            };
-
-            value = value?.Trim() ?? string.Empty;
-            if (value.Length == 0)
+            var rule = BuildDeletionExclusionRule(entry, category, matchType);
+            if (rule == null)
                 continue;
-
-            var rule = new ActivityRuleSetting
-            {
-                Enabled = true,
-                RuleType = category switch
-                {
-                    LogRuleCategory.App => "process",
-                    LogRuleCategory.File => "file",
-                    _ => "event"
-                },
-                Action = "Exclude",
-                Value = value,
-                IncludeSubfolders = false
-            };
 
             var duplicate = target.Any(existing =>
                 existing.RuleType.Equals(rule.RuleType, StringComparison.OrdinalIgnoreCase) &&
@@ -469,21 +668,95 @@ public partial class ViewLogForm : Form
         return created;
     }
 
-    private void CreateRuleButton_Click(object? sender, EventArgs e)
+    public static ActivityRuleSetting? BuildDeletionExclusionRule(
+        LogViewEntry entry,
+        LogRuleCategory category,
+        string matchType)
+    {
+        var path = (!string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.Subject).Trim();
+        var ruleType = category switch
+        {
+            LogRuleCategory.App => "process",
+            LogRuleCategory.File => "file",
+            _ => "event"
+        };
+        var value = category switch
+        {
+            LogRuleCategory.App => path.Length > 0 ? path : entry.App.Trim(),
+            LogRuleCategory.User => entry.Subject.Trim(),
+            _ when matchType == DeleteLogRecordsForm.FileNameAnywhere => Path.GetFileName(path),
+            _ when matchType == DeleteLogRecordsForm.FileExtension =>
+                entry.Fields.TryGetValue("Extension", out var extension) && !string.IsNullOrWhiteSpace(extension)
+                    ? "*" + (extension.StartsWith('.') ? extension : "." + extension)
+                    : "*" + Path.GetExtension(path),
+            _ when matchType == DeleteLogRecordsForm.Folder =>
+                !string.IsNullOrWhiteSpace(entry.Folder) ? entry.Folder.Trim() : Path.GetDirectoryName(path) ?? "",
+            _ when matchType == DeleteLogRecordsForm.Application => entry.App.Trim(),
+            _ => path
+        };
+
+        if (category == LogRuleCategory.File)
+        {
+            if (matchType == DeleteLogRecordsForm.Folder)
+                ruleType = "folder";
+            else if (matchType == DeleteLogRecordsForm.Application)
+                ruleType = "process";
+        }
+
+        value = value.Trim();
+        if (value.Length == 0 || value == "*")
+            return null;
+
+        return new ActivityRuleSetting
+        {
+            Enabled = true,
+            RuleType = ruleType,
+            Action = "Exclude",
+            Value = value,
+            IncludeSubfolders = ruleType == "folder"
+        };
+    }
+
+    private async void CreateRuleButton_Click(object? sender, EventArgs e)
     {
         var grid = GetActiveGrid();
-        if (grid?.SelectedRows.Count != 1 || grid.SelectedRows[0].Tag is not LogViewEntry entry)
+        if (grid?.SelectedRows.Count != 1)
             return;
 
         var category = GetActiveCategory();
-        var suggestedValue = category switch
+        var selectedTag = grid.SelectedRows[0].Tag;
+        var formCategory = category;
+        var ruleType = category switch
         {
-            LogRuleCategory.App => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.App,
-            LogRuleCategory.File => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.Subject,
-            _ => entry.Subject
+            LogRuleCategory.App => "process",
+            LogRuleCategory.File => "file",
+            _ => "event"
         };
+        var includeSubfolders = false;
+        string suggestedValue;
 
-        using var form = new AddLogRuleForm(category, suggestedValue);
+        if (selectedTag is LogViewEntry entry)
+        {
+            suggestedValue = category switch
+            {
+                LogRuleCategory.App => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.App,
+                LogRuleCategory.File => !string.IsNullOrWhiteSpace(entry.Path) ? entry.Path : entry.Subject,
+                _ => entry.Subject
+            };
+        }
+        else if (TryGetGroupRuleSuggestion(grid, grid.SelectedRows[0], out var groupSuggestion))
+        {
+            suggestedValue = groupSuggestion.Value;
+            formCategory = groupSuggestion.FormCategory;
+            ruleType = groupSuggestion.RuleType;
+            includeSubfolders = groupSuggestion.IncludeSubfolders;
+        }
+        else
+        {
+            return;
+        }
+
+        using var form = new AddLogRuleForm(formCategory, suggestedValue);
         if (form.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -491,15 +764,10 @@ public partial class ViewLogForm : Form
         var rule = new ActivityRuleSetting
         {
             Enabled = form.RuleEnabled,
-            RuleType = category switch
-            {
-                LogRuleCategory.App => "process",
-                LogRuleCategory.File => "file",
-                _ => "event"
-            },
+            RuleType = ruleType,
             Action = form.IsInclude ? "Include" : "Exclude",
             Value = form.RuleValue,
-            IncludeSubfolders = false
+            IncludeSubfolders = includeSubfolders
         };
 
         var target = category switch
@@ -521,9 +789,22 @@ public partial class ViewLogForm : Form
             return;
         }
 
-        var conflictingIds = form.CleanUpOldData && !form.IsInclude
-            ? FindConflictingRecordIds(category, rule)
-            : new ConflictingRecordIds();
+        var conflictingIds = new ConflictingRecordIds();
+        if (form.CleanUpOldData && !form.IsInclude)
+        {
+            createRuleButton.Enabled = false;
+            Cursor = Cursors.WaitCursor;
+            statusLabel.Text = "Checking all existing records against the new rule...";
+            try
+            {
+                conflictingIds = await Task.Run(() => FindConflictingRecordIds(category, rule));
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+                UpdateSelectionButtons();
+            }
+        }
 
         if (conflictingIds.TotalCount > 0)
         {
@@ -567,7 +848,7 @@ public partial class ViewLogForm : Form
             settings.Save();
             try
             {
-                ServicePipeClient.ReloadSettingsAsync().GetAwaiter().GetResult();
+                await ServicePipeClient.ReloadSettingsAsync();
             }
             catch (Exception ex)
             {
@@ -596,13 +877,20 @@ public partial class ViewLogForm : Form
         if (category == LogRuleCategory.File)
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id, COALESCE(FullPath, '') FROM ActivityEvents;";
+            command.CommandText = "SELECT Id, COALESCE(FullPath, ''), COALESCE(ProcessName, '') FROM ActivityEvents;";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
                 var id = reader.GetInt64(0);
                 var fullPath = reader.GetString(1);
-                if (FilePatternMatches(fullPath, rule.Value)) result.ActivityIds.Add(id);
+                var processName = reader.GetString(2);
+                var matches = rule.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase)
+                    ? AppPatternMatches(fullPath, processName, rule.Value)
+                    : rule.RuleType.Equals("folder", StringComparison.OrdinalIgnoreCase)
+                        ? FolderPatternMatches(fullPath, rule.Value, rule.IncludeSubfolders)
+                        : FilePatternMatches(fullPath, rule.Value);
+                if (matches)
+                    result.ActivityIds.Add(id);
             }
         }
         else if (category == LogRuleCategory.App)
@@ -660,6 +948,28 @@ public partial class ViewLogForm : Form
         return Regex.IsMatch(normalizedValue, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
+    private static bool FolderPatternMatches(string fullPath, string folder, bool includeSubfolders)
+    {
+        try
+        {
+            var normalizedPath = Path.GetFullPath(fullPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedFolder = Path.GetFullPath(folder)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var containingFolder = Path.GetDirectoryName(normalizedPath) ?? "";
+
+            return containingFolder.Equals(normalizedFolder, StringComparison.OrdinalIgnoreCase) ||
+                   (includeSubfolders &&
+                    containingFolder.StartsWith(
+                        normalizedFolder + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static string NormalizeWindowsGlobPattern(string pattern)
     {
         return string.Join("\\", pattern.Split('\\').Select(segment => segment == "*.*" ? "*" : segment));
@@ -709,8 +1019,15 @@ public partial class ViewLogForm : Form
 
     private static bool AppPatternMatches(string filePath, string processName, string pattern)
     {
-        pattern = (pattern ?? "").Trim().Trim('"');
-        if (Path.IsPathRooted(pattern) && !ContainsWildcard(pattern))
+        pattern = Environment.ExpandEnvironmentVariables((pattern ?? "").Trim().Trim('"'));
+        var containsPathSeparator =
+            pattern.Contains(Path.DirectorySeparatorChar) ||
+            pattern.Contains(Path.AltDirectorySeparatorChar);
+        if (containsPathSeparator && ContainsWildcard(pattern))
+            return !string.IsNullOrWhiteSpace(filePath) &&
+                FilePatternMatches(filePath, pattern);
+
+        if (Path.IsPathRooted(pattern))
         {
             try { if (Path.GetFullPath(filePath).Equals(Path.GetFullPath(pattern), StringComparison.OrdinalIgnoreCase)) return true; }
             catch { }
@@ -768,8 +1085,13 @@ public partial class ViewLogForm : Form
         try
         {
             Cursor = Cursors.WaitCursor;
-            var start = dateStart.Value.Date;
-            var endExclusive = dateEnd.Value.Date.AddDays(1);
+            var start = dateStart.Value;
+            var endExclusive = dateEnd.Value;
+            if (endExclusive <= start)
+            {
+                MessageBox.Show(this, "The end date and time must be later than the start.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             var exportedColumns = grid.Columns
                 .Cast<DataGridViewColumn>()
                 .Where(column => column.Visible && column is not DataGridViewButtonColumn)
@@ -1141,17 +1463,15 @@ public partial class ViewLogForm : Form
 
     private void RefreshActiveTab()
     {
-        var start = dateStart.Value.Date;
-        var end = dateEnd.Value.Date;
-        if (end < start) return;
+        var start = dateStart.Value;
+        var endExclusive = dateEnd.Value;
+        if (endExclusive <= start) return;
 
         try
         {
             Cursor = Cursors.WaitCursor;
             statusLabel.Text = "Reading log page...";
             Application.DoEvents();
-            var endExclusive = end.AddDays(1);
-
             switch (tabs.SelectedTab?.Text)
             {
                 case "App Activity":
@@ -1205,12 +1525,12 @@ public partial class ViewLogForm : Form
 
     private void RefreshLog()
     {
-        var start = dateStart.Value.Date;
-        var end = dateEnd.Value.Date;
+        var start = dateStart.Value;
+        var endExclusive = dateEnd.Value;
 
-        if (end < start)
+        if (endExclusive <= start)
         {
-            MessageBox.Show(this, "The end date cannot be before the start date.", "View Log", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "The end date and time must be later than the start.", "View Log", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -1220,7 +1540,6 @@ public partial class ViewLogForm : Form
             statusLabel.Text = "Reading log...";
             Application.DoEvents();
 
-            var endExclusive = end.AddDays(1);
             _fileTotal = _fileGroupBy == "None" ? CountEntries("ActivityEvents", start, endExclusive) : CountFileGroups(start, endExclusive);
             _appTotal = _appGroupBy == "None"
                 ? CountEntries("ProgramEvents", start, endExclusive)
@@ -1590,28 +1909,37 @@ public partial class ViewLogForm : Form
 
     private void PopulateFileGroups(IEnumerable<FileLogGroup> groups, DateTime start, DateTime endExclusive)
     {
+        SetGroupedColumnVisibility(
+            gridFile,
+            FileGroupDisplayColumnName(),
+            _expandedFileGroups.Count > 0);
         gridFile.Rows.Clear();
         foreach (var group in groups)
         {
             var expanded = _expandedFileGroups.Contains(group.Key);
-            var rowIndex = gridFile.Rows.Add("", "", "", $"{(expanded ? "▼" : "▶")} {group.Key}", $"{group.Count:N0} records", "", "", "", "");
+            var rowIndex = gridFile.Rows.Add();
             var row = gridFile.Rows[rowIndex];
+            row.Cells[FileGroupDisplayColumnName()].Value = $"{(expanded ? "▼" : "▶")} {group.Key}";
+            row.Cells["RecordCount"].Value = group.Count;
             row.Tag = group;
             row.DefaultCellStyle.Font = new System.Drawing.Font(gridFile.Font, System.Drawing.FontStyle.Bold);
             row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
+            ConfigureGroupActionCell(row, expanded);
             if (!expanded) continue;
             foreach (var entry in ReadFileGroupEntries(start, endExclusive, group.Key))
             {
                 var childIndex = gridFile.Rows.Add(entry.Id, entry.Date, entry.Time, "    " + entry.Subject,
                     entry.Fields.TryGetValue("Extension", out var ext) ? ext : "",
-                    GetFileActivity(entry), entry.Folder, entry.App, "Details");
+                    GetFileActivity(entry), entry.Folder, entry.App);
                 gridFile.Rows[childIndex].Tag = entry;
+                ConfigureNonGroupSummaryCell(gridFile.Rows[childIndex]);
             }
         }
     }
 
     private void PopulateFileGrid(IEnumerable<LogViewEntry> entries)
     {
+        RestoreDetailColumnVisibility(gridFile);
         gridFile.Rows.Clear();
         foreach (var e in entries) AddRow(gridFile, e, e.Id, e.Date, e.Time, e.Subject,
             e.Fields.TryGetValue("Extension", out var extension) ? extension : "",
@@ -1629,21 +1957,29 @@ public partial class ViewLogForm : Form
 
     private void PopulateAppGrid(IEnumerable<LogViewEntry> entries)
     {
+        RestoreDetailColumnVisibility(gridApp);
         gridApp.Rows.Clear();
         foreach (var e in entries) AddRow(gridApp, e, e.Id, e.Date, e.Time, e.App, e.ProcessId, e.Path);
     }
 
     private void PopulateAppGroups(IEnumerable<AppLogGroup> groups, DateTime start, DateTime endExclusive)
     {
+        SetGroupedColumnVisibility(
+            gridApp,
+            AppGroupDisplayColumnName(),
+            _expandedAppGroups.Count > 0);
         gridApp.Rows.Clear();
         foreach (var group in groups)
         {
             var expanded = _expandedAppGroups.Contains(group.Key);
-            var rowIndex = gridApp.Rows.Add("", "", "", $"{(expanded ? "▼" : "▶")} {group.Key}", $"{group.Count:N0} records", "", "");
+            var rowIndex = gridApp.Rows.Add();
             var row = gridApp.Rows[rowIndex];
+            row.Cells[AppGroupDisplayColumnName()].Value = $"{(expanded ? "▼" : "▶")} {group.Key}";
+            row.Cells["RecordCount"].Value = group.Count;
             row.Tag = group;
             row.DefaultCellStyle.Font = new System.Drawing.Font(gridApp.Font, System.Drawing.FontStyle.Bold);
             row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
+            ConfigureGroupActionCell(row, expanded);
             if (!expanded)
                 continue;
 
@@ -1655,48 +1991,327 @@ public partial class ViewLogForm : Form
                     entry.Time,
                     "    " + entry.App,
                     entry.ProcessId,
-                    entry.Path,
-                    "Details");
+                    entry.Path);
                 gridApp.Rows[childIndex].Tag = entry;
+                ConfigureNonGroupSummaryCell(gridApp.Rows[childIndex]);
             }
         }
     }
 
+    private string FileGroupDisplayColumnName() => _fileGroupBy switch
+    {
+        "Date" => "Date",
+        "Extension" => "Extension",
+        "Folder" => "Folder",
+        "Application" => "App",
+        "Activity" => "Activity",
+        _ => "File"
+    };
+
+    private string FileGroupDisplayHeaderText() => _fileGroupBy switch
+    {
+        "File name" => "File",
+        "Application" => "App",
+        _ => _fileGroupBy
+    };
+
+    private string AppGroupDisplayColumnName() => _appGroupBy switch
+    {
+        "Date" => "Date",
+        "Process ID" => "ProcessID",
+        "Path" => "Path",
+        _ => "App"
+    };
+
+    private string AppGroupDisplayHeaderText() => _appGroupBy switch
+    {
+        "Application" => "App",
+        _ => _appGroupBy
+    };
+
     private void PopulateUserGrid(IEnumerable<LogViewEntry> entries)
     {
+        SetRecordCountColumnVisible(gridUser, false);
         gridUser.Rows.Clear();
         foreach (var e in entries) AddRow(gridUser, e, e.Id, e.Date, e.Time, e.Subject, e.App, e.Fields.TryGetValue("Computer", out var computer) ? computer : "");
+    }
+
+    private static void SetRecordCountColumnVisible(DataGridView grid, bool visible)
+    {
+        if (grid.Columns["RecordCount"] is { } column)
+            column.Visible = visible;
+    }
+
+    private static void SetGroupedColumnVisibility(
+        DataGridView grid,
+        string groupColumnName,
+        bool hasExpandedGroups)
+    {
+        foreach (DataGridViewColumn column in grid.Columns)
+        {
+            if (column is DataGridViewButtonColumn)
+                continue;
+
+            column.Visible =
+                column.Name == "RecordCount" ||
+                hasExpandedGroups ||
+                column.Name.Equals(groupColumnName, StringComparison.Ordinal);
+        }
+    }
+
+    private static void RestoreDetailColumnVisibility(DataGridView grid)
+    {
+        foreach (DataGridViewColumn column in grid.Columns)
+        {
+            if (column is not DataGridViewButtonColumn)
+                column.Visible = column.Name != "RecordCount";
+        }
     }
 
     private static void AddRow(DataGridView grid, LogViewEntry entry, params object[] values)
     {
         var rowIndex = grid.Rows.Add(values);
         grid.Rows[rowIndex].Tag = entry;
+        ConfigureNonGroupSummaryCell(grid.Rows[rowIndex]);
     }
 
-    private static void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
+    private static void ConfigureGroupActionCell(DataGridViewRow row, bool expanded)
     {
-        if (sender is not DataGridView grid || e.RowIndex < 0 || e.ColumnIndex < 0 || grid.Columns[e.ColumnIndex].Name != "Details") return;
-        ShowDetails(grid.Rows[e.RowIndex]);
+        if (row.DataGridView?.Columns["Details"] is not { } detailsColumn)
+            return;
+
+        row.Cells[detailsColumn.Index] = new DataGridViewButtonCell
+        {
+            UseColumnTextForButtonValue = false,
+            Value = expanded ? "Collapse" : "Expand"
+        };
+
+        if (row.DataGridView.Columns["Summary"] is { } summaryColumn)
+        {
+            row.Cells[summaryColumn.Index] = new DataGridViewButtonCell
+            {
+                UseColumnTextForButtonValue = false,
+                Value = "Summary"
+            };
+        }
+    }
+
+    private static void ConfigureNonGroupSummaryCell(DataGridViewRow row)
+    {
+        if (row.DataGridView?.Columns["Summary"] is not { } summaryColumn)
+            return;
+        row.Cells[summaryColumn.Index] = new DataGridViewTextBoxCell();
+    }
+
+    private void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (sender is not DataGridView grid || e.RowIndex < 0 || e.ColumnIndex < 0)
+            return;
+
+        var row = grid.Rows[e.RowIndex];
+        if (grid.Columns[e.ColumnIndex].Name == "Summary")
+        {
+            ShowGroupSummary(grid, row);
+            return;
+        }
+
+        if (grid.Columns[e.ColumnIndex].Name != "Details")
+            return;
+
+        if (ToggleGroupRow(grid, row))
+            RefreshActiveTab();
+        else
+            ShowDetails(row);
     }
 
     private void Grid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
     {
         if (sender is not DataGridView grid || e.RowIndex < 0) return;
         var row = grid.Rows[e.RowIndex];
-        if (grid == gridFile && row.Tag is FileLogGroup group)
+        if (ToggleGroupRow(grid, row))
         {
-            if (!_expandedFileGroups.Add(group.Key)) _expandedFileGroups.Remove(group.Key);
-            RefreshActiveTab();
-            return;
-        }
-        if (grid == gridApp && row.Tag is AppLogGroup appGroup)
-        {
-            if (!_expandedAppGroups.Add(appGroup.Key)) _expandedAppGroups.Remove(appGroup.Key);
             RefreshActiveTab();
             return;
         }
         ShowDetails(row);
+    }
+
+    private bool ToggleGroupRow(DataGridView grid, DataGridViewRow row)
+    {
+        if (grid == gridFile && row.Tag is FileLogGroup group)
+        {
+            if (!_expandedFileGroups.Add(group.Key))
+                _expandedFileGroups.Remove(group.Key);
+            return true;
+        }
+
+        if (grid == gridApp && row.Tag is AppLogGroup appGroup)
+        {
+            if (!_expandedAppGroups.Add(appGroup.Key))
+                _expandedAppGroups.Remove(appGroup.Key);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ShowGroupSummary(DataGridView grid, DataGridViewRow row)
+    {
+        IReadOnlyDictionary<string, string>? fields = row.Tag switch
+        {
+            FileLogGroup fileGroup when grid == gridFile => ReadFileGroupSummary(
+                fileGroup.Key, dateStart.Value, dateEnd.Value),
+            AppLogGroup appGroup when grid == gridApp => ReadAppGroupSummary(
+                appGroup.Key, dateStart.Value, dateEnd.Value),
+            _ => null
+        };
+
+        if (fields == null)
+            return;
+
+        using var details = new LogEntryDetailsForm(fields);
+        details.Text = "DeskPulse - Group Summary";
+        details.ShowDialog(this);
+    }
+
+    private IReadOnlyDictionary<string, string> ReadFileGroupSummary(
+        string groupKey,
+        DateTime start,
+        DateTime endExclusive)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["Grouped by"] = _fileGroupBy,
+            ["Group"] = groupKey,
+            ["Selected period"] = $"{start:dd/MM/yyyy HH:mm:ss} — {endExclusive:dd/MM/yyyy HH:mm:ss}"
+        };
+
+        using var connection = OpenReadConnection();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT COUNT(*), MIN(CreatedAt), MAX(CreatedAt),
+                       COUNT(DISTINCT NULLIF(FullPath, '')),
+                       COUNT(DISTINCT NULLIF(FolderPath, '')),
+                       COUNT(DISTINCT NULLIF(Extension, '')),
+                       COUNT(DISTINCT NULLIF(ProcessName, '')),
+                       SUM(CASE WHEN WriteCount GLOB '[0-9]*' THEN CAST(WriteCount AS INTEGER) ELSE 0 END)
+                FROM ActivityEvents
+                WHERE CreatedAt >= $start AND CreatedAt < $end
+                  AND {FileGroupExpression()} = $groupKey;
+                """;
+            AddDateParameters(command, start, endExclusive);
+            command.Parameters.AddWithValue("$groupKey", groupKey);
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                fields["Total records"] = ReadText(reader, 0);
+                fields["Oldest activity"] = ReadText(reader, 1);
+                fields["Newest activity"] = ReadText(reader, 2);
+                fields["Unique full paths"] = ReadText(reader, 3);
+                fields["Unique folders"] = ReadText(reader, 4);
+                fields["Unique extensions"] = ReadText(reader, 5);
+                fields["Unique applications"] = ReadText(reader, 6);
+                fields["Total recorded writes"] = ReadText(reader, 7);
+            }
+        }
+
+        fields["Top activities"] = ReadTopGroupValues(
+            connection, "ActivityEvents", FileGroupExpression(),
+            "COALESCE(NULLIF(InferredAction, ''), NULLIF(ActivityType, ''), '(unknown activity)')",
+            groupKey, start, endExclusive);
+        fields["Top applications"] = ReadTopGroupValues(
+            connection, "ActivityEvents", FileGroupExpression(),
+            "COALESCE(NULLIF(ProcessName, ''), '(unknown application)')",
+            groupKey, start, endExclusive);
+        fields["Top paths"] = ReadTopGroupValues(
+            connection, "ActivityEvents", FileGroupExpression(),
+            "COALESCE(NULLIF(FullPath, ''), '(unknown path)')",
+            groupKey, start, endExclusive);
+        return fields;
+    }
+
+    private IReadOnlyDictionary<string, string> ReadAppGroupSummary(
+        string groupKey,
+        DateTime start,
+        DateTime endExclusive)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["Grouped by"] = _appGroupBy,
+            ["Group"] = groupKey,
+            ["Selected period"] = $"{start:dd/MM/yyyy HH:mm:ss} — {endExclusive:dd/MM/yyyy HH:mm:ss}"
+        };
+
+        using var connection = OpenReadConnection();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT COUNT(*), MIN(CreatedAt), MAX(CreatedAt),
+                       COUNT(DISTINCT NULLIF(ProgramName, '')),
+                       COUNT(DISTINCT NULLIF(FilePath, '')),
+                       COUNT(DISTINCT ProcessId),
+                       COUNT(DISTINCT NULLIF(WindowTitle, ''))
+                FROM ProgramEvents
+                WHERE CreatedAt >= $start AND CreatedAt < $end
+                  AND {AppGroupExpression()} = $groupKey;
+                """;
+            AddDateParameters(command, start, endExclusive);
+            command.Parameters.AddWithValue("$groupKey", groupKey);
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                fields["Total records"] = ReadText(reader, 0);
+                fields["Oldest activity"] = ReadText(reader, 1);
+                fields["Newest activity"] = ReadText(reader, 2);
+                fields["Unique applications"] = ReadText(reader, 3);
+                fields["Unique executable paths"] = ReadText(reader, 4);
+                fields["Unique process IDs"] = ReadText(reader, 5);
+                fields["Unique window titles"] = ReadText(reader, 6);
+            }
+        }
+
+        fields["Top applications"] = ReadTopGroupValues(
+            connection, "ProgramEvents", AppGroupExpression(),
+            "COALESCE(NULLIF(ProgramName, ''), '(unknown application)')",
+            groupKey, start, endExclusive);
+        fields["Top executable paths"] = ReadTopGroupValues(
+            connection, "ProgramEvents", AppGroupExpression(),
+            "COALESCE(NULLIF(FilePath, ''), '(unknown path)')",
+            groupKey, start, endExclusive);
+        fields["Top event descriptions"] = ReadTopGroupValues(
+            connection, "ProgramEvents", AppGroupExpression(),
+            "COALESCE(NULLIF(EventDescription, ''), '(unknown event)')",
+            groupKey, start, endExclusive);
+        return fields;
+    }
+
+    private static string ReadTopGroupValues(
+        SqliteConnection connection,
+        string table,
+        string groupExpression,
+        string valueExpression,
+        string groupKey,
+        DateTime start,
+        DateTime endExclusive)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {valueExpression} AS Value, COUNT(*) AS RecordCount
+            FROM {table}
+            WHERE CreatedAt >= $start AND CreatedAt < $end
+              AND {groupExpression} = $groupKey
+            GROUP BY Value
+            ORDER BY RecordCount DESC, Value ASC
+            LIMIT 5;
+            """;
+        AddDateParameters(command, start, endExclusive);
+        command.Parameters.AddWithValue("$groupKey", groupKey);
+        using var reader = command.ExecuteReader();
+        var values = new List<string>();
+        while (reader.Read())
+            values.Add($"{ReadText(reader, 0)} ({ReadText(reader, 1)})");
+        return values.Count == 0 ? "(none)" : string.Join(Environment.NewLine, values);
     }
 
     private static void ShowDetails(DataGridViewRow row)
@@ -1709,6 +2324,11 @@ public partial class ViewLogForm : Form
 
 public sealed record FileLogGroup(string Key, int Count);
 public sealed record AppLogGroup(string Key, int Count);
+public readonly record struct GroupRuleSuggestion(
+    string Value,
+    LogRuleCategory FormCategory,
+    string RuleType,
+    bool IncludeSubfolders);
 
 public sealed record LogViewEntry(
     string Id,

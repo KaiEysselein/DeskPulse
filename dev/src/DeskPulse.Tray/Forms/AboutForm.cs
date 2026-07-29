@@ -16,6 +16,8 @@ public sealed partial class AboutForm : Form
         projectLinkLabel.Text = AppInfo.GitHubUrl;
         projectLinkLabel.Links.Add(0, AppInfo.GitHubUrl.Length, AppInfo.GitHubUrl);
         projectLinkLabel.LinkClicked += OnProjectLinkClicked;
+        okButton.Click += (_, _) => Close();
+        CancelButton = okButton;
     }
 
     private static void OnProjectLinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)

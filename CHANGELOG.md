@@ -1,17 +1,42 @@
 # Changelog
 
+## 0.3.4.4 — 2026-07-29
+
+- Advances the completed System/User attribution, historical preview, grouping, responsive rule handling, and PowerShell-free installation work to the 0.3.4.4 maintenance release.
+- Hides unused columns while all grouped rows are collapsed and restores detail columns when a group is expanded.
+- Allows permanent deletion of grouped records behind two confirmation steps and a prominent historical-data warning.
+- Supports safe full-path app wildcards, including single-level `*` and recursive `**` folder matching.
+- Opens log views with the complete available history selected by default.
+- Refines the grouped-deletion prompt to show the affected record and group counts without exposing confirmation workflow details.
+- Fixes the About window's OK button and Escape key so the modeless tray window closes correctly.
+
 All notable DeskPulse changes are recorded here. Historical verification records under `dev\docs` remain unchanged.
 
-## Unreleased
+## 0.3.4.3 — 2026-07-29
+
+- Added sortable grouped record counts and rule creation for supported grouped columns.
+- Prevented rule creation from freezing while the service reloads settings.
+- Added a bounded timeout while waiting for service pipe responses.
+
+## 0.3.4.2 — 2026-07-28
+
+- Removed PowerShell execution from the installer and running tray.
+- Replaced scheduled-task startup registration with a standard all-users Startup shortcut.
+- Made retroactive rule pre-checks asynchronous and process-rule aware.
+
+## 0.3.4.1 — 2026-07-28
 
 ### Added
 
 - Added full-result App Activity grouping and expandable groups by date, application, process ID and path in both Current User and Administrator logs.
+- Added process-token owner attribution, explicit `route_system`/`route_user` policy actions and a read-only historical attribution preview.
+- Replaced the log's Today Only action with exact-time presets from Today and Last 24 Hours through ten years.
 
 ### Fixed
 
 - File and App Activity grouping now aggregates and sorts the complete selected date range before applying page limits.
 - Newly created rules are reloaded by the service before retroactive cleanup begins and are activated immediately when cleanup is not requested.
+- System-attributed File Activity now uses system settings throughout filtering and storage instead of inheriting the active user settings snapshot.
 
 ## 0.3.4.0 — 2026-07-28
 

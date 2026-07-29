@@ -21,7 +21,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.3.4.0";
+    public const string Version = "0.3.4.4";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -72,7 +72,7 @@ public sealed class FileIoMonitor : IDisposable
         _programActivityMonitor = new ProgramActivityMonitor(
             GetSettingsForAttribution,
             GetDatabaseForAttribution,
-            sessionId => ResolveSessionAttribution(sessionId));
+            ResolveProcessAttribution);
 
         WriteDeskPulseProgramEvent("ServiceStarted", "DeskPulse service started", "DeskPulse background service startup completed");
         WriteUserEvent("DeskPulseServiceStarted", "DeskPulse service started", "DeskPulse background service startup detected", scope: EventScope.System);
@@ -426,7 +426,7 @@ public sealed class FileIoMonitor : IDisposable
     private AppSettings GetSettingsForAttribution(EventAttribution attribution)
     {
         if (attribution.Scope != EventScope.User || string.IsNullOrWhiteSpace(attribution.WindowsSid))
-            return _settings.Clone();
+            return _systemSettings.Clone();
 
         lock (_settingsLock)
         {
@@ -494,24 +494,22 @@ public sealed class FileIoMonitor : IDisposable
 
     private EventAttribution ResolveProcessAttribution(int processId)
     {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            var sessionId = process.SessionId;
-            if (StorageLayout.TryResolveSessionUser(
-                sessionId,
-                out var windowsSid,
-                out var userName))
-            {
-                return EventAttribution.User(windowsSid, sessionId, userName);
-            }
-        }
-        catch
-        {
-            // A process can exit between ETW delivery and identity resolution.
-        }
+        return ProcessOwnerAttribution.Resolve(processId);
+    }
 
-        return EventAttribution.System;
+    private EventAttribution ResolveRoutedAttribution(
+        int processId,
+        string fullPath,
+        string processName)
+    {
+        var owner = ResolveProcessAttribution(processId);
+        return AdministratorRules.GetRoutingAction(fullPath, processName, owner.Scope) switch
+        {
+            MachineWideRuleAction.RouteSystem => EventAttribution.System,
+            MachineWideRuleAction.RouteUser when owner.Scope == EventScope.User => owner,
+            MachineWideRuleAction.RouteUser => GetActiveAttribution(),
+            _ => owner
+        };
     }
 
     private EventAttribution ResolveSessionAttribution(int? sessionId)
@@ -632,10 +630,11 @@ public sealed class FileIoMonitor : IDisposable
         if (string.IsNullOrWhiteSpace(fullPath))
             return;
 
+        var attribution = ResolveRoutedAttribution(processId, fullPath, processName);
         var key = BuildOpenFileKey(fullPath, processId, processName);
         if (operation == "OPEN" &&
             isDirectoryOpen &&
-            !GetSettingsForAttribution(ResolveProcessAttribution(processId)).LogFolderOpenings)
+            !GetSettingsForAttribution(attribution).LogFolderOpenings)
         {
             RegisterIgnoredDirectoryOpen(key);
             return;
@@ -647,7 +646,7 @@ public sealed class FileIoMonitor : IDisposable
         if (operation == "CLOSE" && TryConsumeIgnoredDirectoryOpen(key))
             return;
 
-        if (!ShouldMonitorFile(rawFileName, normalizedPath, operation, processName, processId))
+        if (!ShouldMonitorFile(rawFileName, normalizedPath, operation, processName, processId, attribution))
             return;
 
         var folderPath = PathUtilities.GetFolderPath(fullPath);
@@ -682,7 +681,7 @@ public sealed class FileIoMonitor : IDisposable
                 ProcessName = processName,
                 ProcessId = processId,
                 Note = "Open event logged immediately; close events may not contain a usable filename on all systems"
-            });
+            }, attribution);
 
             return;
         }
@@ -709,7 +708,7 @@ public sealed class FileIoMonitor : IDisposable
                 Note = writeWasAttachedToOpenSession
                     ? "Write event logged immediately and matched to an open session"
                     : "Write event logged immediately, but matching open event was not found"
-            });
+            }, attribution);
 
             return;
         }
@@ -742,7 +741,7 @@ public sealed class FileIoMonitor : IDisposable
                 Note = openInfo == null
                     ? "Close event logged, but matching open event was not found"
                     : "Close event logged with matched open/write session"
-            });
+            }, attribution);
         }
     }
 
@@ -821,7 +820,7 @@ public sealed class FileIoMonitor : IDisposable
         return false;
     }
 
-    private void WriteEvent(ActivityEventRecord record)
+    private void WriteEvent(ActivityEventRecord record, EventAttribution? resolvedAttribution = null)
     {
         if (_loggingPaused || _disposed)
             return;
@@ -830,7 +829,7 @@ public sealed class FileIoMonitor : IDisposable
         {
             var attribution = string.Equals(record.ActivityType, "Error", StringComparison.OrdinalIgnoreCase)
                 ? EventAttribution.System
-                : ResolveProcessAttribution(record.ProcessId);
+                : resolvedAttribution ?? ResolveRoutedAttribution(record.ProcessId, record.FullPath, record.ProcessName);
             record.Scope = attribution.Scope;
             record.WindowsSid = attribution.WindowsSid;
             record.SessionId = attribution.SessionId;
@@ -947,12 +946,18 @@ public sealed class FileIoMonitor : IDisposable
         }
     }
 
-    private bool ShouldMonitorFile(string rawFileName, string normalizedFileName, string operation, string processName, int processId)
+    private bool ShouldMonitorFile(
+        string rawFileName,
+        string normalizedFileName,
+        string operation,
+        string processName,
+        int processId,
+        EventAttribution? resolvedAttribution = null)
     {
-        var attribution = ResolveProcessAttribution(processId);
+        var fullPath = GetSafeFullPath(normalizedFileName) ?? "";
+        var attribution = resolvedAttribution ?? ResolveRoutedAttribution(processId, fullPath, processName);
         var settings = GetSettingsForAttribution(attribution);
         var ext = PathUtilities.GetExtension(normalizedFileName);
-        var fullPath = GetSafeFullPath(normalizedFileName) ?? "";
 
         try
         {
@@ -967,6 +972,9 @@ public sealed class FileIoMonitor : IDisposable
             }
 
             if (settings.IsFileActivityProcessFiltered(processName))
+                return false;
+
+            if (AdministratorRules.GetRoutingAction(fullPath, processName, attribution.Scope) == MachineWideRuleAction.Exclude)
                 return false;
 
             if (!settings.TrackWindowsSystemActivity && WindowsDefaultExclusions.IsFileOrProcessExcluded(fullPath, processName))
@@ -1147,7 +1155,7 @@ public sealed class ProgramActivityMonitor : IDisposable
     private readonly object _lock = new();
     private readonly Func<EventAttribution, AppSettings> _getSettings;
     private readonly Func<EventAttribution, DeskPulseDatabase> _getDatabase;
-    private readonly Func<int, EventAttribution> _resolveSessionAttribution;
+    private readonly Func<int, EventAttribution> _resolveProcessAttribution;
     private readonly Dictionary<int, ProgramSnapshot> _knownProcesses = new();
     private System.Threading.Timer? _timer;
     private bool _disposed;
@@ -1157,11 +1165,11 @@ public sealed class ProgramActivityMonitor : IDisposable
     public ProgramActivityMonitor(
         Func<EventAttribution, AppSettings> getSettings,
         Func<EventAttribution, DeskPulseDatabase> getDatabase,
-        Func<int, EventAttribution> resolveSessionAttribution)
+        Func<int, EventAttribution> resolveProcessAttribution)
     {
         _getSettings = getSettings;
         _getDatabase = getDatabase;
-        _resolveSessionAttribution = resolveSessionAttribution;
+        _resolveProcessAttribution = resolveProcessAttribution;
     }
 
     public void Start() => Resume();
@@ -1194,7 +1202,7 @@ public sealed class ProgramActivityMonitor : IDisposable
 
             _knownProcesses.Clear();
 
-            foreach (var process in CaptureInteractiveSessionProcesses())
+            foreach (var process in CaptureProcesses())
                 _knownProcesses[process.ProcessId] = process;
 
             _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -1220,7 +1228,7 @@ public sealed class ProgramActivityMonitor : IDisposable
             {
                 _knownProcesses.Clear();
 
-                foreach (var process in CaptureInteractiveSessionProcesses())
+                foreach (var process in CaptureProcesses())
                     _knownProcesses[process.ProcessId] = process;
 
                 _timer = new System.Threading.Timer(_ => ScanProcesses(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -1240,7 +1248,7 @@ public sealed class ProgramActivityMonitor : IDisposable
 
         try
         {
-            var currentProcesses = CaptureInteractiveSessionProcesses()
+            var currentProcesses = CaptureProcesses()
                 .ToDictionary(process => process.ProcessId);
 
             List<ProgramSnapshot> startedProcesses;
@@ -1268,7 +1276,8 @@ public sealed class ProgramActivityMonitor : IDisposable
             {
                 var attribution = process.GetAttribution();
                 var settings = _getSettings(attribution);
-                if ((settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
+                if (AdministratorRules.GetRoutingAction(process.FilePath, process.ProcessName, process.Scope) != MachineWideRuleAction.Exclude &&
+                    (settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
                     settings.LogProgramActivity &&
                     LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
                     WriteProgramEvent("ProgramStarted", "Program started", process, process.StartTime ?? DateTime.Now, "Detected in the current interactive Windows session");
@@ -1278,7 +1287,8 @@ public sealed class ProgramActivityMonitor : IDisposable
             {
                 var attribution = process.GetAttribution();
                 var settings = _getSettings(attribution);
-                if ((settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
+                if (AdministratorRules.GetRoutingAction(process.FilePath, process.ProcessName, process.Scope) != MachineWideRuleAction.Exclude &&
+                    (settings.TrackWindowsSystemActivity || !WindowsDefaultExclusions.IsProcessExcluded(process.ProcessName)) &&
                     settings.LogProgramActivity &&
                     LoggingRulesEngine.IsProgramActivityMonitored(process.FilePath, process.ProcessName, settings.AppActivityRules))
                     WriteProgramEvent("ProgramStopped", "Program closed", process, DateTime.Now, "Process no longer detected in the current interactive Windows session");
@@ -1294,10 +1304,9 @@ public sealed class ProgramActivityMonitor : IDisposable
         }
     }
 
-    private List<ProgramSnapshot> CaptureInteractiveSessionProcesses()
+    private List<ProgramSnapshot> CaptureProcesses()
     {
         var result = new List<ProgramSnapshot>();
-        var sessionAttributions = new Dictionary<int, EventAttribution>();
 
         foreach (var process in Process.GetProcesses())
         {
@@ -1306,26 +1315,30 @@ public sealed class ProgramActivityMonitor : IDisposable
                 if (process.Id == Environment.ProcessId)
                     continue;
 
-                var sessionId = process.SessionId;
-                if (!sessionAttributions.TryGetValue(sessionId, out var attribution))
-                {
-                    attribution = _resolveSessionAttribution(sessionId);
-                    sessionAttributions[sessionId] = attribution;
-                }
-
-                if (attribution.Scope != EventScope.User)
-                    continue;
-
                 var processName = SafeGetProcessName(process);
 
                 if (string.IsNullOrWhiteSpace(processName))
+                    continue;
+
+                var filePath = SafeGetMainModuleFileName(process);
+                var attribution = _resolveProcessAttribution(process.Id);
+                var route = AdministratorRules.GetRoutingAction(filePath, processName, attribution.Scope);
+                if (route == MachineWideRuleAction.RouteSystem)
+                    attribution = EventAttribution.System;
+                else if (route == MachineWideRuleAction.RouteUser &&
+                         StorageLayout.TryResolveSessionUser(
+                             process.SessionId,
+                             out var routedSid,
+                             out var routedUserName))
+                    attribution = EventAttribution.User(routedSid, process.SessionId, routedUserName);
+                else if (route == MachineWideRuleAction.Exclude)
                     continue;
 
                 result.Add(new ProgramSnapshot
                 {
                     ProcessId = process.Id,
                     ProcessName = processName,
-                    FilePath = SafeGetMainModuleFileName(process),
+                    FilePath = filePath,
                     WindowTitle = SafeGetMainWindowTitle(process),
                     StartTime = SafeGetStartTime(process),
                     UserName = attribution.UserName,
@@ -4781,12 +4794,24 @@ public static class LoggingRulesEngine
 
     private static bool AppRuleMatches(string filePath, string processName, ExclusionRule rule)
     {
-        var ruleValue = (rule.Value ?? "").Trim().Trim('"');
+        var ruleValue = Environment.ExpandEnvironmentVariables(
+            (rule.Value ?? "").Trim().Trim('"'));
 
         if (ruleValue.Length == 0)
             return false;
 
-        if (Path.IsPathRooted(ruleValue) && !ContainsWildcard(ruleValue))
+        var containsPathSeparator =
+            ruleValue.Contains(Path.DirectorySeparatorChar) ||
+            ruleValue.Contains(Path.AltDirectorySeparatorChar);
+        if (containsPathSeparator && ContainsWildcard(ruleValue))
+        {
+            return !string.IsNullOrWhiteSpace(filePath) &&
+                FileWildcardMatches(
+                    Environment.ExpandEnvironmentVariables(filePath),
+                    ruleValue);
+        }
+
+        if (Path.IsPathRooted(ruleValue))
         {
             try
             {

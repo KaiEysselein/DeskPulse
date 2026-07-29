@@ -83,7 +83,6 @@ partial class AboutForm
         // 
         // okButton
         // 
-        okButton.DialogResult = DialogResult.OK;
         okButton.FlatStyle = FlatStyle.System;
         okButton.Location = new System.Drawing.Point(356, 226);
         okButton.Name = "okButton";

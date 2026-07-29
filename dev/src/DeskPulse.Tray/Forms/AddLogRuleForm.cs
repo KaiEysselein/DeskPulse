@@ -23,14 +23,14 @@ public sealed class AddLogRuleForm : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new System.Drawing.Size(620, 205);
+        ClientSize = new System.Drawing.Size(620, category == LogRuleCategory.App ? 235 : 205);
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 4
+            RowCount = category == LogRuleCategory.App ? 5 : 4
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -59,6 +59,19 @@ public sealed class AddLogRuleForm : Form
         layout.Controls.Add(_value, 1, 1);
 
         var nextRow = 2;
+        if (category == LogRuleCategory.App)
+        {
+            var wildcardHint = new Label
+            {
+                AutoSize = true,
+                ForeColor = System.Drawing.SystemColors.GrayText,
+                Text = @"Wildcards: * matches within one folder; ** matches any subfolders; ? matches one character." +
+                       "\r\n" + @"Example: C:\Tools\**\*.exe"
+            };
+            layout.Controls.Add(wildcardHint, 1, nextRow);
+            nextRow++;
+        }
+
         layout.Controls.Add(new Label { Text = "Existing data:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, nextRow);
         layout.Controls.Add(_cleanup, 1, nextRow);
         nextRow++;

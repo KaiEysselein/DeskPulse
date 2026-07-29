@@ -5,62 +5,68 @@
 # then promote proven rules into this source-controlled default file.
 #
 # Rules are evaluated from top to bottom. Administrator override rules are
-# evaluated before these defaults. The first matching rule wins.
+# evaluated before these defaults. The first matching rule wins. Routing keeps
+# an event in exactly one database; exclusion keeps it in neither database.
 
 version: 1
 
 rules:
   - id: windows-installation-tree
-    revision: 1
+    revision: 2
     enabled: true
     visible_in_ui: true
     type: path
-    action: exclude
+    action: route_system
+    owner_scope: system
     value: "%WINDIR%"
     reason: "Suppress routine activity below the Windows installation folder."
 
   - id: windows-error-reporting
-    revision: 1
+    revision: 2
     enabled: true
     visible_in_ui: true
     type: path
-    action: exclude
+    action: route_system
+    owner_scope: system
     value: "%ProgramData%\\Microsoft\\Windows\\WER"
     reason: "Suppress Windows Error Reporting background files."
 
   - id: windows-defender-data
-    revision: 1
+    revision: 2
     enabled: true
     visible_in_ui: true
     type: path
-    action: exclude
+    action: route_system
+    owner_scope: system
     value: "%ProgramData%\\Microsoft\\Windows Defender"
     reason: "Suppress routine Microsoft Defender data activity."
 
   - id: windows-search-data
-    revision: 1
+    revision: 2
     enabled: true
     visible_in_ui: true
     type: path
-    action: exclude
+    action: route_system
+    owner_scope: system
     value: "%ProgramData%\\Microsoft\\Search"
     reason: "Suppress Windows Search index data."
 
   - id: recycle-bin
-    revision: 1
+    revision: 2
     enabled: true
     visible_in_ui: true
     type: path
-    action: exclude
+    action: route_system
+    owner_scope: system
     value: "%SystemDrive%\\$Recycle.Bin"
     reason: "Suppress Recycle Bin housekeeping."
 
   - id: windows-background-processes
-    revision: 1
+    revision: 2
     enabled: true
     visible_in_ui: true
     type: process
-    action: exclude
+    action: route_system
     values:
       - SearchIndexer
       - SearchProtocolHost

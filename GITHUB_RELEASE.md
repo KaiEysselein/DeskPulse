@@ -1,16 +1,16 @@
-# DeskPulse 0.3.4.0
+# DeskPulse 0.3.4.4
 
-DeskPulse 0.3.4.0 moves machine-wide Windows exclusions into protected, data-driven policy files and improves Settings usability on compact and highly scaled displays.
+DeskPulse 0.3.4.4 improves System/User attribution, activity grouping, rule creation and cleanup reliability, and removes PowerShell from installation and runtime operations.
 
 ## Highlights
 
-- Versioned shipped path and process rules with protected administrator overrides.
-- Validated automatic reload with last-known-good and built-in safety fallback behavior.
-- Dynamic elevated Machine-wide Rules view with locked policy checkboxes, rule IDs, source, status and reasons.
-- Rule revision tracking warns when an administrator override should be reviewed after a default changes.
-- Aggregate rule-candidate diagnostics store process names and extensions without full paths or user identity.
-- Scrollable forms and tab pages, verified at compact sizes and simulated 125%, 150% and 200% scaling.
-- Automated fallback, override, visibility, revision and WinForms layout tests.
+- Process-token ownership distinguishes SYSTEM and service accounts from interactive users.
+- `route_system` and `route_user` policy actions give each event exactly one destination.
+- Read-only historical attribution previews propose movements without modifying either database.
+- File and App Activity grouping summarizes and sorts the complete date range before pagination.
+- App Activity supports expandable groups in Current User and Administrator logs.
+- Newly added rules reload before retroactive cleanup and activate immediately.
+- Log period presets support exact rolling hours, days and years as well as midnight-based Today and This Month ranges.
 
 ## Upgrade
 
@@ -23,7 +23,7 @@ DeskPulse does not expose a combined or all-users activity view. Candidate diagn
 ## Installer
 
 ```text
-DeskPulse_Setup_0.3.4.0.exe
+DeskPulse_Setup_0.3.4.4.exe
 ```
 
 ## Verification

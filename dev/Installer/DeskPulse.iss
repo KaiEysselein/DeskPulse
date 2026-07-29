@@ -1,5 +1,5 @@
 #define MyAppName "DeskPulse"
-#define MyAppVersion "0.3.4.0"
+#define MyAppVersion "0.3.4.4"
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -16,7 +16,7 @@ DefaultDirName={autopf}\DeskPulse
 DefaultGroupName=DeskPulse
 DisableProgramGroupPage=yes
 
-OutputDir=..\publish\v0.3.4.0\installer
+OutputDir=..\publish\v0.3.4.4\installer
 OutputBaseFilename=DeskPulse_Setup_{#MyAppVersion}
 
 Compression=lzma2
@@ -49,15 +49,13 @@ Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveru
 Name: "{commonappdata}\DeskPulse\Config"; Permissions: admins-full system-full; Flags: uninsneveruninstall
 
 [Files]
-Source: "..\publish\v0.3.4.0\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\v0.3.4.0\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.4.4\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\v0.3.4.4\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "default-rules.yaml"; DestDir: "{app}\Config"; Flags: ignoreversion
 Source: "admin-rules.yaml"; DestDir: "{commonappdata}\DeskPulse\Config"; Flags: ignoreversion uninsneveruninstall; Check: ShouldInstallAdministratorRules
-Source: "Register-AllUsersTrayStartup.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [InstallDelete]
-; Remove startup shortcuts from older builds. Tray autostart now uses a
-; machine-wide scheduled task triggered at logon of any user.
+; Remove obsolete startup shortcuts before creating the current all-users shortcut.
 Type: files; Name: "{userstartup}\DeskPulse.lnk"
 Type: files; Name: "{userstartup}\DeskPulse Tray.lnk"
 Type: files; Name: "{commonstartup}\DeskPulse.lnk"
@@ -67,6 +65,7 @@ Type: files; Name: "{commonstartup}\DeskPulse Tray.lnk"
 Name: "{group}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"
 Name: "{group}\Uninstall DeskPulse"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Tasks: desktopicon
+Name: "{commonstartup}\DeskPulse Tray"; Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--tray"; WorkingDir: "{app}\Tray"
 
 [Run]
 ; Normalize the shared settings as the original interactive user before the
@@ -74,7 +73,6 @@ Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Tasks: d
 ; its protected ProgramData SID folder.
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--initialize-settings"; Flags: runhidden waituntilterminated runasoriginaluser
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--disable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\Register-AllUsersTrayStartup.ps1"" -TrayPath ""{app}\Tray\{#TrayExeName}"" -ErrorLogPath ""{commonappdata}\DeskPulse\scheduled-task-registration-error.log"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Service\{#ServiceExeName}"" start= auto DisplayName= ""DeskPulse Service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse background monitoring service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "failure {#ServiceName} reset= 86400 actions= restart/5000/restart/15000/restart/60000"; Flags: runhidden waituntilterminated

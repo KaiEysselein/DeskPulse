@@ -1,4 +1,5 @@
 using DeskPulse;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace DeskPulse.Tests;
@@ -112,10 +113,119 @@ public sealed class AdministratorRulesTests : IDisposable
 
         Reload();
 
-        Assert.True(AdministratorRules.IsProcessExcluded("SearchIndexer.exe"));
+        Assert.Equal(
+            MachineWideRuleAction.RouteSystem,
+            AdministratorRules.GetRoutingAction("", "SearchIndexer.exe"));
         Assert.Contains(
             AdministratorRules.GetEffectiveRules(),
             rule => rule.Id == "windows-installation-tree");
+    }
+
+    [Fact]
+    public void RoutingRuleTakesSingleExplicitDestination()
+    {
+        WriteDefaults("""
+            version: 1
+            rules:
+              - id: route-windows
+                revision: 1
+                enabled: true
+                visible_in_ui: true
+                type: path
+                action: route_system
+                owner_scope: system
+                value: "C:\\Windows"
+                reason: "System-owned activity"
+            """);
+        WriteAdministrator("version: 1\nrules: []\n");
+
+        Reload();
+
+        Assert.Equal(
+            MachineWideRuleAction.RouteSystem,
+            AdministratorRules.GetRoutingAction(@"C:\Windows\System32\driver.sys", "System", EventScope.System));
+        Assert.Equal(
+            MachineWideRuleAction.None,
+            AdministratorRules.GetRoutingAction(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "powershell", EventScope.User));
+        Assert.False(AdministratorRules.IsFileOrProcessExcluded(
+            @"C:\Windows\System32\driver.sys",
+            "System"));
+    }
+
+    [Fact]
+    public void HistoricalPreviewUsesRulesBeforeStoredUserSid()
+    {
+        WriteDefaults("""
+            version: 1
+            rules:
+              - id: route-service
+                revision: 1
+                enabled: true
+                visible_in_ui: true
+                type: process
+                action: route_system
+                value: ServiceWorker
+                reason: "System service"
+            """);
+        WriteAdministrator("version: 1\nrules: []\n");
+        Reload();
+
+        var result = HistoricalAttributionPreview.Classify(
+            EventScope.User,
+            EventScope.User,
+            "S-1-5-21-100-200-300-1001",
+            123,
+            "ServiceWorker",
+            @"C:\Data\file.txt");
+
+        Assert.Equal(EventScope.System, result.Target);
+        Assert.Equal("High", result.Confidence);
+    }
+
+    [Fact]
+    public void HistoricalPreviewReadsWithoutMutatingSourceDatabase()
+    {
+        WriteDefaults("version: 1\nrules: []\n");
+        WriteAdministrator("version: 1\nrules: []\n");
+        Reload();
+        var databasePath = Path.Combine(_folder, "preview.db");
+        using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE ActivityEvents
+                (
+                    Scope TEXT,
+                    WindowsSid TEXT,
+                    ProcessId INTEGER,
+                    ProcessName TEXT,
+                    FullPath TEXT
+                );
+                CREATE TABLE ProgramEvents
+                (
+                    Scope TEXT,
+                    WindowsSid TEXT,
+                    ProcessId INTEGER,
+                    ProgramName TEXT,
+                    FilePath TEXT
+                );
+                INSERT INTO ActivityEvents VALUES
+                    ('User', 'S-1-5-21-100-200-300-1001', 42, 'Worker', 'C:\Data\file.txt');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var reportPath = Path.Combine(_folder, "preview.csv");
+        var result = HistoricalAttributionPreview.Generate(new[] { databasePath }, reportPath);
+
+        Assert.Equal(1, result.RecordsExamined);
+        Assert.True(File.Exists(reportPath));
+        using var verify = new SqliteConnection($"Data Source={databasePath};Mode=ReadOnly");
+        verify.Open();
+        using var count = verify.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM ActivityEvents;";
+        Assert.Equal(1L, (long)count.ExecuteScalar()!);
     }
 
     [Fact]

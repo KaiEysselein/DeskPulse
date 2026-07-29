@@ -10,7 +10,9 @@
 # shipped rule, use the same id. A disabled rule with the same id suppresses
 # that default. An Include rule can create a specific exception before a broad
 # default Exclude rule. Set visible_in_ui to false to keep a rule out of the
-# existing Settings rule grids without disabling its enforcement.
+# existing Settings rule grids without disabling its enforcement. Supported
+# actions are include, exclude, route_system and route_user. Optional
+# owner_scope can be any (default), system or user.
 #
 # Example:
 #

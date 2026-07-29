@@ -2,8 +2,8 @@
 # Do not use this script over an installer-managed installation without uninstalling first.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$serviceSource = Join-Path $root 'publish\v0.3.4.0\service'
-$traySource = Join-Path $root 'publish\v0.3.4.0\tray'
+$serviceSource = Join-Path $root 'publish\v0.3.4.4\service'
+$traySource = Join-Path $root 'publish\v0.3.4.4\tray'
 $installRoot = Join-Path $env:ProgramFiles 'DeskPulse'
 $serviceInstall = Join-Path $installRoot 'Service'
 $trayInstall = Join-Path $installRoot 'Tray'
@@ -29,10 +29,6 @@ sc.exe create 'DeskPulse.Service' binPath= "`"$serviceInstall\DeskPulse.Service.
 sc.exe description 'DeskPulse.Service' 'DeskPulse background monitoring service.' | Out-Null
 sc.exe failure 'DeskPulse.Service' reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
 Start-Service 'DeskPulse.Service'
-
-& (Join-Path $root 'Installer\Register-AllUsersTrayStartup.ps1') `
-    -TrayPath (Join-Path $trayInstall 'DeskPulse.Tray.exe') `
-    -ErrorLogPath (Join-Path $programData 'scheduled-task-registration-error.log')
 
 Start-Process "$trayInstall\DeskPulse.Tray.exe"
 Write-Host 'DeskPulse service installed and all-user tray logon task created.' -ForegroundColor Green

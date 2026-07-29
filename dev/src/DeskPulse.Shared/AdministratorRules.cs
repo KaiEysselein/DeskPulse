@@ -71,7 +71,7 @@ public static class AdministratorRules
                 rule.Enabled,
                 rule.VisibleInUi,
                 rule.Type == RuleType.Path ? "Path" : "Process",
-                rule.Action == RuleAction.Include ? "Include" : "Exclude",
+                FormatAction(rule.Action),
                 rule.Value,
                 rule.Source == RuleSource.Administrator ? "Administrator" : "Default",
                 rule.Status,
@@ -80,7 +80,8 @@ public static class AdministratorRules
 
     public static IReadOnlyList<ActivityRuleSetting> GetFileRules() =>
         GetSnapshot().Rules
-            .Where(rule => rule.Enabled && rule.VisibleInUi && rule.Type == RuleType.Path)
+            .Where(rule => rule.Enabled && rule.VisibleInUi && rule.Type == RuleType.Path &&
+                           rule.Action is RuleAction.Include or RuleAction.Exclude)
             .Select(rule => new ActivityRuleSetting
             {
                 Enabled = true,
@@ -92,7 +93,8 @@ public static class AdministratorRules
 
     public static IReadOnlyList<ActivityRuleSetting> GetProcessRules() =>
         GetSnapshot().Rules
-            .Where(rule => rule.Enabled && rule.VisibleInUi && rule.Type == RuleType.Process)
+            .Where(rule => rule.Enabled && rule.VisibleInUi && rule.Type == RuleType.Process &&
+                           rule.Action is RuleAction.Include or RuleAction.Exclude)
             .Select(rule => new ActivityRuleSetting
             {
                 Enabled = true,
@@ -108,6 +110,26 @@ public static class AdministratorRules
     public static bool IsProcessExcluded(string processName) =>
         TryEvaluate("", processName, includePaths: false, out var excluded) && excluded;
 
+    public static MachineWideRuleAction GetRoutingAction(string fullPath, string processName) =>
+        GetRoutingAction(fullPath, processName, "");
+
+    public static MachineWideRuleAction GetRoutingAction(
+        string fullPath,
+        string processName,
+        string ownerScope)
+    {
+        if (!TryMatch(fullPath, processName, includePaths: true, ownerScope, out var action))
+            return MachineWideRuleAction.None;
+        return action switch
+        {
+            RuleAction.Include => MachineWideRuleAction.Include,
+            RuleAction.Exclude => MachineWideRuleAction.Exclude,
+            RuleAction.RouteSystem => MachineWideRuleAction.RouteSystem,
+            RuleAction.RouteUser => MachineWideRuleAction.RouteUser,
+            _ => MachineWideRuleAction.None
+        };
+    }
+
     private static bool TryEvaluate(
         string fullPath,
         string processName,
@@ -115,12 +137,31 @@ public static class AdministratorRules
         out bool excluded)
     {
         excluded = false;
+        if (!TryMatch(fullPath, processName, includePaths, "", out var action))
+            return false;
+        excluded = action == RuleAction.Exclude;
+        return true;
+    }
+
+    private static bool TryMatch(
+        string fullPath,
+        string processName,
+        bool includePaths,
+        string ownerScope,
+        out RuleAction action)
+    {
+        action = default;
         var normalizedProcess = NormalizeProcess(processName);
         var normalizedPath = includePaths ? NormalizePath(fullPath, requireAbsolute: true) : "";
 
         foreach (var rule in GetSnapshot().Rules)
         {
             if (!rule.Enabled)
+                continue;
+            if (rule.OwnerScope != RuleOwnerScope.Any &&
+                !ownerScope.Equals(
+                    rule.OwnerScope == RuleOwnerScope.System ? EventScope.System : EventScope.User,
+                    StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var matches = rule.Type switch
@@ -138,7 +179,7 @@ public static class AdministratorRules
             if (!matches)
                 continue;
 
-            excluded = rule.Action == RuleAction.Exclude;
+            action = rule.Action;
             return true;
         }
 
@@ -255,6 +296,7 @@ public static class AdministratorRules
 
             var type = ParseType(source.Type, sourceName, id);
             var action = ParseAction(source.Action, sourceName, id);
+            var ownerScope = ParseOwnerScope(source.OwnerScope, sourceName, id);
             var values = new List<string>();
             if (!string.IsNullOrWhiteSpace(source.Value))
                 values.Add(source.Value);
@@ -278,6 +320,7 @@ public static class AdministratorRules
                     source.BasedOnDefaultRevision,
                     type,
                     action,
+                    ownerScope,
                     normalized,
                     ruleSource,
                     (source.Reason ?? "").Trim()));
@@ -334,9 +377,29 @@ public static class AdministratorRules
         {
             "include" => RuleAction.Include,
             "exclude" => RuleAction.Exclude,
+            "route_system" => RuleAction.RouteSystem,
+            "route_user" => RuleAction.RouteUser,
             _ => throw new InvalidDataException(
-                $"Rule '{id}' in the {sourceName} rules file must have action 'include' or 'exclude'.")
+                $"Rule '{id}' in the {sourceName} rules file must have action 'include', 'exclude', 'route_system' or 'route_user'.")
         };
+
+    private static RuleOwnerScope ParseOwnerScope(string? value, string sourceName, string id) =>
+        (value ?? "any").Trim().ToLowerInvariant() switch
+        {
+            "any" => RuleOwnerScope.Any,
+            "system" => RuleOwnerScope.System,
+            "user" => RuleOwnerScope.User,
+            _ => throw new InvalidDataException(
+                $"Rule '{id}' in the {sourceName} rules file must have owner_scope 'any', 'system' or 'user'.")
+        };
+
+    private static string FormatAction(RuleAction action) => action switch
+    {
+        RuleAction.RouteSystem => "Route to System",
+        RuleAction.RouteUser => "Route to User",
+        RuleAction.Include => "Include",
+        _ => "Exclude"
+    };
 
     private static string NormalizeConfiguredPath(string value, string sourceName, string id)
     {
@@ -410,7 +473,8 @@ public static class AdministratorRules
                 1,
                 null,
                 RuleType.Process,
-                RuleAction.Exclude,
+                RuleAction.RouteSystem,
+                RuleOwnerScope.Any,
                 process,
                 RuleSource.Default,
                 "Built-in safety fallback."));
@@ -429,7 +493,8 @@ public static class AdministratorRules
                 1,
                 null,
                 RuleType.Path,
-                RuleAction.Exclude,
+                RuleAction.RouteSystem,
+                RuleOwnerScope.System,
                 normalized,
                 RuleSource.Default,
                 "Built-in safety fallback."));
@@ -478,6 +543,7 @@ public static class AdministratorRules
         int? BasedOnDefaultRevision,
         RuleType Type,
         RuleAction Action,
+        RuleOwnerScope OwnerScope,
         string Value,
         RuleSource Source,
         string Reason,
@@ -492,13 +558,22 @@ public static class AdministratorRules
     private enum RuleAction
     {
         Include,
-        Exclude
+        Exclude,
+        RouteSystem,
+        RouteUser
     }
 
     private enum RuleSource
     {
         Default,
         Administrator
+    }
+
+    private enum RuleOwnerScope
+    {
+        Any,
+        System,
+        User
     }
 
     private readonly record struct FileSignature(bool Exists, long Length, DateTime LastWriteUtc)
@@ -534,10 +609,20 @@ public static class AdministratorRules
         public int? BasedOnDefaultRevision { get; set; }
         public string? Type { get; set; }
         public string? Action { get; set; }
+        public string? OwnerScope { get; set; }
         public string? Value { get; set; }
         public List<string>? Values { get; set; }
         public string? Reason { get; set; }
     }
+}
+
+public enum MachineWideRuleAction
+{
+    None,
+    Include,
+    Exclude,
+    RouteSystem,
+    RouteUser
 }
 
 public sealed record MachineWideRuleInfo(

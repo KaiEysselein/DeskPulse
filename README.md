@@ -6,7 +6,7 @@
 
 It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
 
-**Current version:** `0.3.4.0`
+**Current version:** `0.3.4.4`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
@@ -70,7 +70,7 @@ The uninstaller removes the application, service and startup registration while 
 
 ## 0.3.4 release boundary
 
-Version 0.3.4.0 adds protected, data-driven machine-wide rule policy, administrator override and fallback handling, rule diagnostics and a dynamic administrator rule view. It also makes forms and tab pages scrollable on compact or highly scaled displays.
+Version 0.3.4.4 adds process-owner attribution, deterministic System/User routing, read-only historical attribution previews, full-result activity grouping, responsive rule creation and cleanup, and PowerShell-free installation/runtime operations.
 
 ## Activity filtering
 
@@ -78,7 +78,9 @@ DeskPulse supports user-defined Include and Exclude rules for file, folder, appl
 
 Machine-wide YAML rules protect against high-volume background activity when **Track Windows system activity** is disabled. Shipped defaults live under the protected installation folder and are updated with DeskPulse releases. Local administrator overrides live under protected ProgramData storage and are preserved during upgrades.
 
-Administrator rules are evaluated before shipped defaults, and the first matching rule wins. An administrator can add an Include exception before a broad Exclude, add new exclusions, or replace and disable a shipped rule by using the same rule ID. Changes are validated and detected automatically. If an edit is invalid, DeskPulse retains the last complete valid rules and records the problem in `admin-rules-error.log`.
+Administrator rules are evaluated before shipped defaults, and the first matching rule wins. Supported actions are `include`, `exclude`, `route_system` and `route_user`. Routing writes an event to exactly one database; System routing takes precedence over normal user attribution. An administrator can add a specific exception, add new routing or exclusion policy, or replace and disable a shipped rule by using the same rule ID. Changes are validated and detected automatically. If an edit is invalid, DeskPulse retains the last complete valid rules and records the problem in `admin-rules-error.log`.
+
+Process ownership is resolved from the accessing process token when possible, including SYSTEM, Local Service, Network Service and service virtual accounts. Session attribution is retained as a fallback. Elevated Administrator Settings can generate a read-only historical attribution preview; it writes an aggregate CSV report but does not modify either database.
 
 Each YAML rule also supports `visible_in_ui: true` or `false`. This controls only whether the rule appears in the existing Settings rule grids; it never changes whether the service enforces the rule. The property defaults to `true`.
 

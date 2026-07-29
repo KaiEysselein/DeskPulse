@@ -419,7 +419,7 @@ public partial class SettingsForm : Form
         _machineWideRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = "On", Width = 36 });
         _machineWideRulesGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Visible", HeaderText = "Visible", Width = 52 });
         _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Id", HeaderText = "Rule ID", Width = 165 });
-        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Action", HeaderText = "Action", Width = 65 });
+        _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Action", HeaderText = "Action", Width = 110 });
         _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Type", HeaderText = "Type", Width = 65 });
         _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", HeaderText = "Value", Width = 260 });
         _machineWideRulesGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Source", HeaderText = "Source", Width = 105 });
@@ -453,13 +453,46 @@ public partial class SettingsForm : Form
         openDiagnostics.Click += (_, _) => OpenRuleFile(StorageLayout.AdministratorRulesErrorLogFilePath);
         var openCandidates = new Button { Text = "Open Candidates", Width = 130, Height = 29, FlatStyle = FlatStyle.System };
         openCandidates.Click += (_, _) => OpenRuleFile(StorageLayout.RuleCandidateDiagnosticsFilePath);
-        actions.Controls.AddRange(new Control[] { refresh, openOverrides, openDefaults, openDiagnostics, openCandidates });
+        var attributionPreview = new Button { Text = "Attribution Preview", Width = 145, Height = 29, FlatStyle = FlatStyle.System };
+        attributionPreview.Click += (_, _) => GenerateAttributionPreview();
+        actions.Controls.AddRange(new Control[] { refresh, openOverrides, openDefaults, openDiagnostics, openCandidates, attributionPreview });
 
         page.Controls.Add(_machineWideRulesGrid);
         page.Controls.Add(actions);
         page.Controls.Add(_machineWideRulesStatus);
         PopulateMachineWideRules();
         return page;
+    }
+
+    private void GenerateAttributionPreview()
+    {
+        try
+        {
+            var userDatabase = AppSettings.Load().DatabaseFilePath;
+            var result = HistoricalAttributionPreview.Generate(
+                new[] { StorageLayout.SystemDatabaseFilePath, userDatabase },
+                StorageLayout.AttributionPreviewFilePath);
+            MessageBox.Show(
+                this,
+                "Read-only attribution preview completed.\n\n" +
+                $"Records examined: {result.RecordsExamined:N0}\n" +
+                $"Proposed movements: {result.ProposedMoves:N0}\n" +
+                $"Unresolved records: {result.UnresolvedRecords:N0}\n\n" +
+                "No database records were changed.",
+                "Attribution Preview",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            OpenRuleFile(result.OutputPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                "The read-only attribution preview could not be generated.\n\n" + ex.Message,
+                "Attribution Preview",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     private void PopulateMachineWideRules()
@@ -886,32 +919,8 @@ public partial class SettingsForm : Form
 
         try
         {
-            var command =
-                "$ErrorActionPreference='Stop'; " +
-                "Restart-Service -Name 'DeskPulse.Service' -Force; " +
-                "$service = Get-Service -Name 'DeskPulse.Service'; " +
-                "$service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))";
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
-            startInfo.ArgumentList.Add("-NoProfile");
-            startInfo.ArgumentList.Add("-ExecutionPolicy");
-            startInfo.ArgumentList.Add("Bypass");
-            startInfo.ArgumentList.Add("-Command");
-            startInfo.ArgumentList.Add(command);
-
-            using var process = Process.Start(startInfo);
-            if (process == null)
-                throw new InvalidOperationException("Windows could not start the elevated service restart command.");
-
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException("The service restart command failed with exit code " + process.ExitCode + ".");
+            await RunElevatedServiceControlAsync("stop");
+            await RunElevatedServiceControlAsync("start");
 
             string status = "DeskPulse service is restarting.";
             for (var attempt = 0; attempt < 10; attempt++)
@@ -943,6 +952,28 @@ public partial class SettingsForm : Form
             Cursor = Cursors.Default;
             _restartWindowsServiceButton.Enabled = true;
         }
+    }
+
+    private static async Task RunElevatedServiceControlAsync(string action)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.SystemDirectory, "sc.exe"),
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        startInfo.ArgumentList.Add(action);
+        startInfo.ArgumentList.Add("DeskPulse.Service");
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+            throw new InvalidOperationException("Windows could not start the elevated service control command.");
+
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0 && !(action == "stop" && process.ExitCode == 1062))
+            throw new InvalidOperationException(
+                $"The service {action} command failed with exit code {process.ExitCode}.");
     }
 
     private void CleanDatabaseWithCurrentRulesButton_Click(object? sender, EventArgs e)

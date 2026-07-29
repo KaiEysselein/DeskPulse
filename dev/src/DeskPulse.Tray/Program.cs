@@ -51,6 +51,31 @@ internal static class Program
         if (TryHandleDiagnosticLoadCommand(args))
             return;
 
+        var previewArgumentIndex = Array.FindIndex(
+            args,
+            a => a.Equals("--attribution-preview", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("--attribution-preview-export", StringComparison.OrdinalIgnoreCase));
+        if (previewArgumentIndex >= 0)
+        {
+            if (!IsProcessElevated())
+                throw new InvalidOperationException("The attribution preview requires elevation to read the protected System database.");
+            var exportRequested = args[previewArgumentIndex].Equals(
+                "--attribution-preview-export",
+                StringComparison.OrdinalIgnoreCase);
+            var outputPath = exportRequested
+                ? previewArgumentIndex + 1 < args.Length && Path.IsPathFullyQualified(args[previewArgumentIndex + 1])
+                    ? Path.GetFullPath(args[previewArgumentIndex + 1])
+                    : throw new ArgumentException("A fully qualified preview export path is required.")
+                : StorageLayout.AttributionPreviewFilePath;
+            var result = HistoricalAttributionPreview.Generate(
+                new[] { StorageLayout.SystemDatabaseFilePath, AppSettings.Load().DatabaseFilePath },
+                outputPath);
+            Console.WriteLine(
+                $"Examined={result.RecordsExamined};Moves={result.ProposedMoves};" +
+                $"Unresolved={result.UnresolvedRecords};Output={result.OutputPath}");
+            return;
+        }
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -951,17 +976,22 @@ public sealed class TrayAppContext : ApplicationContext
 
 public static class ServicePipeClient
 {
-    public static async Task<string> SendAsync(string command)
+    public static async Task<string> SendAsync(string command, TimeSpan? responseTimeout = null)
     {
         try
         {
             using var client = new NamedPipeClientStream(".", AppInfo.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            await client.ConnectAsync(timeout.Token);
+            using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await client.ConnectAsync(connectTimeout.Token);
             using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
             using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(command);
-            return await reader.ReadLineAsync() ?? "No response from service.";
+            using var readTimeout = new CancellationTokenSource(responseTimeout ?? TimeSpan.FromSeconds(5));
+            return await reader.ReadLineAsync(readTimeout.Token) ?? "No response from service.";
+        }
+        catch (OperationCanceledException)
+        {
+            return "Timed out waiting for the DeskPulse service.";
         }
         catch (Exception ex)
         {
@@ -972,7 +1002,7 @@ public static class ServicePipeClient
 
     public static async Task ReloadSettingsAsync()
     {
-        var response = await SendAsync("RELOAD_SETTINGS");
+        var response = await SendAsync("RELOAD_SETTINGS", TimeSpan.FromSeconds(5));
         if (!response.Equals("OK", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("DeskPulse could not activate the saved rules. " + response);
     }
