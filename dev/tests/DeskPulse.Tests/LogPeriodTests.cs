@@ -197,3 +197,36 @@ public sealed class CellRuleSuggestionTests
         Assert.Equal(expectedIncludeSubfolders, suggestion.IncludeSubfolders);
     }
 }
+
+public sealed class HeaderGroupingTests
+{
+    [Theory]
+    [InlineData(LogRuleCategory.File, "Date", "Date")]
+    [InlineData(LogRuleCategory.File, "File", "File name")]
+    [InlineData(LogRuleCategory.File, "Extension", "Extension")]
+    [InlineData(LogRuleCategory.File, "Activity", "Activity")]
+    [InlineData(LogRuleCategory.File, "Folder", "Folder")]
+    [InlineData(LogRuleCategory.File, "App", "Application")]
+    [InlineData(LogRuleCategory.App, "Date", "Date")]
+    [InlineData(LogRuleCategory.App, "App", "Application")]
+    [InlineData(LogRuleCategory.App, "Process ID", "Process ID")]
+    [InlineData(LogRuleCategory.App, "Path", "Path")]
+    public void SupportedHeaderMapsToGrouping(
+        LogRuleCategory category,
+        string header,
+        string expected)
+    {
+        Assert.Equal(expected, ViewLogForm.GetHeaderGrouping(category, header));
+    }
+
+    [Theory]
+    [InlineData(LogRuleCategory.File, "ID")]
+    [InlineData(LogRuleCategory.File, "Time")]
+    [InlineData(LogRuleCategory.File, "Calendar")]
+    [InlineData(LogRuleCategory.App, "Records")]
+    [InlineData(LogRuleCategory.User, "User")]
+    public void UnsupportedHeaderDoesNotGroup(LogRuleCategory category, string header)
+    {
+        Assert.Null(ViewLogForm.GetHeaderGrouping(category, header));
+    }
+}

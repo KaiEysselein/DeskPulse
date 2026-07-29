@@ -11,6 +11,7 @@ test-artifacts/
 releases/**/*.exe
 releases/**/*.msi
 releases/**/*.zip
+releases/**/*.sha256
 
 # Visual Studio / VS Code
 .vs/

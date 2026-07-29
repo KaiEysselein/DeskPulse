@@ -1,10 +1,18 @@
+param(
+    [ValidateSet('Stable', 'Nightly')]
+    [string]$ReleaseChannel = 'Stable',
+    [string]$Version = '0.4.0.0',
+    [string]$PublishFolder = "v$Version",
+    [string]$InstallerBaseName = $(if ($ReleaseChannel -eq 'Nightly') { 'DeskPulse_Setup_Nightly' } else { "DeskPulse_Setup_$Version" }),
+    [switch]$SkipReleaseCopy
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $projectRoot
 $issFile = Join-Path $PSScriptRoot 'DeskPulse.iss'
-$version = '0.3.4.7'
-$versionFolder = "v$version"
+$versionFolder = $PublishFolder
 
 $candidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -22,7 +30,7 @@ $publishRoot = Join-Path $projectRoot "publish\$versionFolder"
 $serviceExe = Join-Path $publishRoot 'service\DeskPulse.Service.exe'
 $trayExe = Join-Path $publishRoot 'tray\DeskPulse.Tray.exe'
 $installerDir = Join-Path $publishRoot 'installer'
-$installerName = "DeskPulse_Setup_$version.exe"
+$installerName = "$InstallerBaseName.exe"
 $installerExe = Join-Path $installerDir $installerName
 
 if (-not (Test-Path $serviceExe)) {
@@ -36,7 +44,12 @@ New-Item -ItemType Directory -Path $installerDir -Force | Out-Null
 
 Push-Location $PSScriptRoot
 try {
-    & $iscc $issFile
+    & $iscc `
+        "/DMyAppVersion=$Version" `
+        "/DMyAppChannel=$ReleaseChannel" `
+        "/DPublishFolder=$PublishFolder" `
+        "/DOutputBaseFilename=$InstallerBaseName" `
+        $issFile
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
     }
@@ -52,18 +65,21 @@ if (-not (Test-Path $installerExe)) {
 $releasesRoot = Join-Path $workspaceRoot 'releases'
 $currentReleaseDir = Join-Path $releasesRoot 'current'
 
-New-Item -ItemType Directory -Path $currentReleaseDir -Force | Out-Null
-Get-ChildItem -LiteralPath $currentReleaseDir -Force -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force
+$currentInstaller = $null
+if (-not $SkipReleaseCopy -and $ReleaseChannel -eq 'Stable') {
+    New-Item -ItemType Directory -Path $currentReleaseDir -Force | Out-Null
+    Get-ChildItem -LiteralPath $currentReleaseDir -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force
 
-$currentInstaller = Join-Path $currentReleaseDir $installerName
-Copy-Item -LiteralPath $installerExe -Destination $currentInstaller -Force
+    $currentInstaller = Join-Path $currentReleaseDir $installerName
+    Copy-Item -LiteralPath $installerExe -Destination $currentInstaller -Force
+}
 
-$isMilestone = $version -match '^0\.\d+\.\d+\.0$'
+$isMilestone = $ReleaseChannel -eq 'Stable' -and $Version -match '^0\.\d+\.\d+\.0$'
 $milestoneInstaller = $null
 
 if ($isMilestone) {
-    $milestoneDir = Join-Path $releasesRoot $versionFolder
+    $milestoneDir = Join-Path $releasesRoot "v$Version"
     New-Item -ItemType Directory -Path $milestoneDir -Force | Out-Null
 
     $milestoneInstaller = Join-Path $milestoneDir $installerName
@@ -73,9 +89,11 @@ if ($isMilestone) {
 Write-Host ""
 Write-Host "Installer created at:" -ForegroundColor Green
 Write-Host $installerExe
-Write-Host ""
-Write-Host "Current approved installer copied to:" -ForegroundColor Green
-Write-Host $currentInstaller
+if ($currentInstaller) {
+    Write-Host ""
+    Write-Host "Current approved installer copied to:" -ForegroundColor Green
+    Write-Host $currentInstaller
+}
 
 if ($milestoneInstaller) {
     Write-Host ""

@@ -19,7 +19,9 @@ public sealed class CalendarViewForm : Form
     private readonly DataGridView _grid = new();
     private List<CalendarEntry> _entries = new();
 
-    public CalendarViewForm(string databaseFilePath)
+    public CalendarViewForm(
+        string databaseFilePath,
+        string windowTitle = "DeskPulse - Calendar View")
     {
         _connectionString = new SqliteConnectionStringBuilder
         {
@@ -28,10 +30,11 @@ public sealed class CalendarViewForm : Form
             Cache = SqliteCacheMode.Shared
         }.ToString();
 
-        Text = "DeskPulse - Calendar View";
+        Text = windowTitle;
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(1040, 620);
         MinimumSize = new Size(760, 480);
+        WindowState = FormWindowState.Maximized;
         AppIcon.Apply(this);
 
         var header = new Label
@@ -71,7 +74,7 @@ public sealed class CalendarViewForm : Form
             else
                 ShowEntries(_calendar.SelectionStart.Date);
         };
-        Load += (_, _) => LoadCalendarEntries();
+        Activated += (_, _) => LoadCalendarEntries();
     }
 
     private void ConfigureGrid()
@@ -97,6 +100,7 @@ public sealed class CalendarViewForm : Form
     {
         try
         {
+            _entries.Clear();
             using var connection = new SqliteConnection(_connectionString);
             connection.Open();
             using var command = connection.CreateCommand();

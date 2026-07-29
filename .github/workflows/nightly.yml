@@ -1,0 +1,151 @@
+name: Nightly release
+
+on:
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deskpulse-nightly-release
+  cancel-in-progress: true
+
+jobs:
+  build-nightly:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Create nightly identity
+        id: identity
+        shell: pwsh
+        run: |
+          $baseVersion = "0.4.0.0"
+          $stamp = Get-Date -AsUTC -Format "yyyyMMdd"
+          $shortSha = "${{ github.sha }}".Substring(0, 8)
+          $identity = "$baseVersion-nightly.$stamp.${{ github.run_number }}+$shortSha"
+          "base_version=$baseVersion" >> $env:GITHUB_OUTPUT
+          "informational_version=$identity" >> $env:GITHUB_OUTPUT
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          dotnet build dev/DeskPulse.sln -c Release
+          dotnet test dev/DeskPulse.sln -c Release --no-build --logger "console;verbosity=minimal"
+
+      - name: Publish nightly binaries
+        shell: pwsh
+        run: |
+          ./dev/scripts/Publish.ps1 `
+            -Version "${{ steps.identity.outputs.base_version }}" `
+            -PublishFolder "nightly" `
+            -InformationalVersion "${{ steps.identity.outputs.informational_version }}"
+
+      - name: Build nightly installer
+        shell: pwsh
+        run: |
+          ./dev/Installer/Build-Installer.ps1 `
+            -ReleaseChannel Nightly `
+            -Version "${{ steps.identity.outputs.base_version }}" `
+            -PublishFolder "nightly" `
+            -InstallerBaseName "DeskPulse_Setup_Nightly" `
+            -SkipReleaseCopy
+
+      - name: Scan installer with Microsoft Defender
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path "dev/publish/nightly/installer/DeskPulse_Setup_Nightly.exe"
+          $scannerCandidates = @(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          )
+          $scanner = Get-Item $scannerCandidates -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $scanner) {
+            throw "Microsoft Defender command-line scanner was not found."
+          }
+          & $scanner.FullName -Scan -ScanType 3 -File $installer -DisableRemediation
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Defender returned exit code $LASTEXITCODE."
+          }
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Copy-Item `
+            "dev/publish/nightly/installer/DeskPulse_Setup_Nightly.exe" `
+            "artifacts/DeskPulse_Setup_Nightly.exe" `
+            -Force
+          $hash = (Get-FileHash "artifacts/DeskPulse_Setup_Nightly.exe" -Algorithm SHA256).Hash
+          "$hash  DeskPulse_Setup_Nightly.exe" |
+            Set-Content "artifacts/DeskPulse_Setup_Nightly.sha256" -Encoding ascii
+          @"
+          Automated build from ``main``.
+
+          - Build: ${{ steps.identity.outputs.informational_version }}
+          - Commit: ${{ github.sha }}
+          - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Tests: passed
+          - Microsoft Defender scan: passed
+
+          This is a prerelease build intended for testing. Use the latest numbered release for the stable channel.
+          "@ | Set-Content "nightly-notes.md" -Encoding utf8
+
+      - name: Move nightly tag and publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --force nightly "${{ github.sha }}"
+          git push --force origin refs/tags/nightly
+
+          gh release view nightly *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit nightly `
+              --title "DeskPulse Nightly" `
+              --notes-file "nightly-notes.md" `
+              --prerelease `
+              --latest=false
+            gh release upload nightly `
+              "artifacts/DeskPulse_Setup_Nightly.exe" `
+              "artifacts/DeskPulse_Setup_Nightly.sha256" `
+              --clobber
+          }
+          else {
+            gh release create nightly `
+              "artifacts/DeskPulse_Setup_Nightly.exe" `
+              "artifacts/DeskPulse_Setup_Nightly.sha256" `
+              --title "DeskPulse Nightly" `
+              --notes-file "nightly-notes.md" `
+              --prerelease `
+              --verify-tag
+          }
+
+      - name: Retain workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeskPulse-Nightly-${{ steps.identity.outputs.short_sha }}
+          path: artifacts/*
+          retention-days: 14

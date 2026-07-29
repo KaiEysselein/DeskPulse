@@ -29,6 +29,12 @@ public partial class ViewLogForm : Form
     private readonly HashSet<string> _expandedAppGroups = new(StringComparer.Ordinal);
     private bool _updatingGroupByCombo;
     private bool _updatingCalendarCells;
+    private readonly System.Windows.Forms.Timer _headerClickTimer = new()
+    {
+        Interval = SystemInformation.DoubleClickTime
+    };
+    private DataGridView? _pendingHeaderGrid;
+    private int _pendingHeaderColumnIndex = -1;
     private ContextMenuStrip? _reportContextMenu;
 
     private int _appPage;
@@ -73,7 +79,7 @@ public partial class ViewLogForm : Form
         }.ToString();
         if (_systemOnly)
         {
-            Text = "DeskPulse - System Log (read-only)";
+            Text = "DeskPulse - System Log";
             createRuleButton.Visible = false;
             deleteButton.Visible = false;
         }
@@ -116,6 +122,7 @@ public partial class ViewLogForm : Form
         dateStart.ValueChanged += (_, _) => MarkPeriodCustom();
         dateEnd.ValueChanged += (_, _) => MarkPeriodCustom();
         ConfigureGrids();
+        _headerClickTimer.Tick += (_, _) => ApplyPendingHeaderSort();
         tabs.SelectedIndexChanged += (_, _) =>
         {
             UpdateSelectionButtons();
@@ -128,7 +135,11 @@ public partial class ViewLogForm : Form
             UpdateGroupByControls();
             RefreshLog();
         };
-        FormClosed += (_, _) => _reportContextMenu?.Dispose();
+        FormClosed += (_, _) =>
+        {
+            _reportContextMenu?.Dispose();
+            _headerClickTimer.Dispose();
+        };
     }
 
     private SqliteConnection OpenReadConnection()
@@ -248,7 +259,7 @@ public partial class ViewLogForm : Form
             Width = 68,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             SortMode = DataGridViewColumnSortMode.NotSortable,
-            ReadOnly = _systemOnly
+            ReadOnly = false
         });
 
         grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -288,6 +299,7 @@ public partial class ViewLogForm : Form
         grid.CurrentCellDirtyStateChanged += Grid_CurrentCellDirtyStateChanged;
         grid.CellValueChanged += Grid_CellValueChanged;
         grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
+        grid.ColumnHeaderMouseDoubleClick += Grid_ColumnHeaderMouseDoubleClick;
         grid.CellDoubleClick += Grid_CellDoubleClick;
         grid.CellMouseDown += Grid_CellMouseDown;
         grid.SelectionChanged += (_, _) => UpdateSelectionButtons();
@@ -456,7 +468,104 @@ public partial class ViewLogForm : Form
         if (sender is not DataGridView grid || e.ColumnIndex < 0)
             return;
 
-        var column = grid.Columns[e.ColumnIndex];
+        _headerClickTimer.Stop();
+        _pendingHeaderGrid = grid;
+        _pendingHeaderColumnIndex = e.ColumnIndex;
+        _headerClickTimer.Start();
+    }
+
+    private void Grid_ColumnHeaderMouseDoubleClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        _headerClickTimer.Stop();
+        _pendingHeaderGrid = null;
+        _pendingHeaderColumnIndex = -1;
+
+        if (sender is not DataGridView grid ||
+            e.ColumnIndex < 0 ||
+            !TryGetHeaderGrouping(grid, grid.Columns[e.ColumnIndex], out var grouping))
+        {
+            return;
+        }
+
+        if (grid == gridFile)
+        {
+            _fileGroupBy = _fileGroupBy == grouping ? "None" : grouping;
+            _fileGroupSortColumn = "Latest";
+            _fileGroupSortAscending = false;
+            _expandedFileGroups.Clear();
+            _filePage = 0;
+        }
+        else
+        {
+            _appGroupBy = _appGroupBy == grouping ? "None" : grouping;
+            _appGroupSortColumn = "Latest";
+            _appGroupSortAscending = false;
+            _expandedAppGroups.Clear();
+            _appPage = 0;
+        }
+
+        UpdateGroupByControls();
+        RefreshActiveTab();
+    }
+
+    private bool TryGetHeaderGrouping(
+        DataGridView grid,
+        DataGridViewColumn column,
+        out string grouping)
+    {
+        var header = column.Tag as string ?? column.HeaderText;
+        grouping = GetHeaderGrouping(
+            grid == gridFile
+                ? LogRuleCategory.File
+                : grid == gridApp
+                    ? LogRuleCategory.App
+                    : LogRuleCategory.User,
+            header) ?? "";
+        return grouping.Length > 0;
+    }
+
+    public static string? GetHeaderGrouping(
+        LogRuleCategory category,
+        string header) =>
+        category switch
+        {
+            LogRuleCategory.File => header switch
+            {
+                "Date" => "Date",
+                "File" => "File name",
+                "Extension" => "Extension",
+                "Activity" => "Activity",
+                "Folder" => "Folder",
+                "App" => "Application",
+                _ => null
+            },
+            LogRuleCategory.App => header switch
+                {
+                    "Date" => "Date",
+                    "App" => "Application",
+                    "Process ID" => "Process ID",
+                    "Path" => "Path",
+                    _ => null
+                },
+            _ => null
+        };
+
+    private void ApplyPendingHeaderSort()
+    {
+        _headerClickTimer.Stop();
+        var grid = _pendingHeaderGrid;
+        var columnIndex = _pendingHeaderColumnIndex;
+        _pendingHeaderGrid = null;
+        _pendingHeaderColumnIndex = -1;
+        if (grid == null || grid.IsDisposed || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            return;
+
+        ApplyColumnSort(grid, columnIndex);
+    }
+
+    private void ApplyColumnSort(DataGridView grid, int columnIndex)
+    {
+        var column = grid.Columns[columnIndex];
         if (column.SortMode == DataGridViewColumnSortMode.NotSortable)
             return;
 
@@ -1524,7 +1633,8 @@ public partial class ViewLogForm : Form
     {
         var tabName = tabs.SelectedTab?.Text;
         var supportsGrouping = tabName is "File Activity" or "App Activity";
-        groupByLabel.Visible = groupByCombo.Visible = supportsGrouping;
+        groupByLabel.Visible = supportsGrouping;
+        groupByCombo.Visible = false;
         if (!supportsGrouping)
             return;
 
@@ -1532,6 +1642,9 @@ public partial class ViewLogForm : Form
             ? new[] { "None", "Date", "Application", "Process ID", "Path" }
             : new[] { "None", "Date", "File name", "Extension", "Folder", "Application", "Activity" };
         var selected = tabName == "App Activity" ? _appGroupBy : _fileGroupBy;
+        groupByLabel.Text = selected == "None"
+            ? "Double-click a heading to group"
+            : $"Grouped: {selected}";
 
         _updatingGroupByCombo = true;
         try
@@ -2426,7 +2539,6 @@ public partial class ViewLogForm : Form
     private async void Grid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
     {
         if (_updatingCalendarCells ||
-            _systemOnly ||
             sender is not DataGridView grid ||
             e.RowIndex < 0 ||
             e.ColumnIndex < 0 ||
@@ -2479,7 +2591,11 @@ public partial class ViewLogForm : Form
 
             Cursor = Cursors.WaitCursor;
             grid.Enabled = false;
-            await ServicePipeClient.SetCalendarVisibilityAsync(tableName, ids, showInCalendar);
+            await ServicePipeClient.SetCalendarVisibilityAsync(
+                tableName,
+                ids,
+                showInCalendar,
+                systemDatabase: _systemOnly);
             statusLabel.Text = showInCalendar
                 ? "Added to Calendar View."
                 : "Removed from Calendar View.";
@@ -2510,7 +2626,11 @@ public partial class ViewLogForm : Form
 
     private void CalendarViewButton_Click(object? sender, EventArgs e)
     {
-        using var calendar = new CalendarViewForm(_databaseFilePath);
+        using var calendar = new CalendarViewForm(
+            _databaseFilePath,
+            _systemOnly
+                ? "DeskPulse - System Calendar View"
+                : "DeskPulse - Calendar View");
         calendar.ShowDialog(this);
     }
 

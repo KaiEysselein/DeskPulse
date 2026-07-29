@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0.0 — 2026-07-29
+
+- Added **Current User → Calendar View** to the tray menu.
+- Added elevated **Administrator → System Calendar View** for Calendar-marked system records.
+- Calendar windows now run independently, refresh when activated and return to the foreground when selected again.
+- Enabled administrator-authorized Calendar marking in System Log while keeping all other system fields read-only.
+- Calendar views now open maximized.
+- Replaced the Group by dropdown with direct header gestures: single-click sorts and double-click groups or ungroups supported columns.
+
 ## 0.3.4.7 — 2026-07-29
 
 - Routed individual and grouped Calendar updates through the authenticated DeskPulse service.

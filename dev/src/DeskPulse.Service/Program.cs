@@ -272,7 +272,9 @@ public sealed class DeskPulseWindowsService : ServiceBase
             "PAUSE_LOGGING" or "RESUME_LOGGING" or "RELOAD_SETTINGS" or
             "INSTALL_LIFECYCLE" or "START_LOAD_TEST" or "STOP_LOAD_TEST" or
             "DELETE_RECORDS" or "CLEAR_TABLE" or "CLEAR_ALL_RECORDS" or
+            "SET_CALENDAR_VISIBILITY" or "SYSTEM_SET_CALENDAR_VISIBILITY" or
             "SYSTEM_CLEAR_TABLE" or "SYSTEM_CLEAR_ALL_RECORDS" or
+            "SYSTEM_SET_CALENDAR_VISIBILITY" or
             "TRAY_STARTED" or "TRAY_STOPPED" or
             "CLEAN_DATABASE_CURRENT_RULES" or "RELOAD_AND_CLEAN_DATABASE_CURRENT_RULES" or
             "SYSTEM_CLEAN_DATABASE_CURRENT_RULES" or
@@ -412,6 +414,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "LOAD_TEST_STATUS": return _loadTest.GetStatus();
             case "DELETE_RECORDS": return DeleteSelectedRecords(command, clientProcessId);
             case "SET_CALENDAR_VISIBILITY": return SetCalendarVisibility(command, clientProcessId);
+            case "SYSTEM_SET_CALENDAR_VISIBILITY": return SetSystemCalendarVisibility(command);
             case "CLEAR_TABLE": return ClearTable(command, clientProcessId);
             case "CLEAR_ALL_RECORDS": return ClearAllRecords(clientProcessId);
             case "SYSTEM_CLEAR_TABLE": return ClearSystemTable(command);
@@ -558,6 +561,66 @@ public sealed class DeskPulseWindowsService : ServiceBase
         return ExecuteDatabaseWrite(
             clientProcessId,
             database => database.SetCalendarVisibilityByIds(tableName, ids, showInCalendar));
+    }
+
+    private string SetSystemCalendarVisibility(string command)
+    {
+        if (!TryParseCalendarVisibilityCommand(
+                command,
+                out var tableName,
+                out var ids,
+                out var showInCalendar,
+                out var error))
+        {
+            return error;
+        }
+
+        return ExecuteSystemDatabaseWrite(
+            database => database.SetCalendarVisibilityByIds(
+                tableName,
+                ids,
+                showInCalendar));
+    }
+
+    private static bool TryParseCalendarVisibilityCommand(
+        string command,
+        out string tableName,
+        out long[] ids,
+        out bool showInCalendar,
+        out string error)
+    {
+        tableName = "";
+        ids = Array.Empty<long>();
+        showInCalendar = false;
+        error = "";
+
+        var parts = command.Split('|', 4);
+        if (parts.Length != 4)
+        {
+            error = "ERROR|Invalid Calendar View update request.";
+            return false;
+        }
+
+        tableName = NormalizeActivityTable(parts[1]) ?? "";
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            error = "ERROR|Unknown activity table.";
+            return false;
+        }
+        if (parts[2] is not ("0" or "1"))
+        {
+            error = "ERROR|Invalid Calendar View value.";
+            return false;
+        }
+
+        ids = parts[3].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => long.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+        showInCalendar = parts[2] == "1";
+        return true;
     }
 
     private string ClearTable(string command, int clientProcessId)

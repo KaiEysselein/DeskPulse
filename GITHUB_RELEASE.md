@@ -1,6 +1,6 @@
-# DeskPulse 0.3.4.7
+# DeskPulse 0.4.0.0
 
-DeskPulse 0.3.4.7 adds persistent Calendar marking through the protected DeskPulse service, including grouped summaries and a dedicated Calendar View.
+DeskPulse 0.4.0.0 promotes Calendar View to a first-class tray workflow for both current-user and protected system activity.
 
 ## Highlights
 
@@ -8,6 +8,10 @@ DeskPulse 0.3.4.7 adds persistent Calendar marking through the protected DeskPul
 - Collapsed File and App Activity groups support checked, unchecked and mixed Calendar states; changing a group updates every underlying record in the selected report period.
 - Calendar View lists all marked records, highlights dates containing marks and filters to a selected day.
 - Calendar updates run through the authenticated DeskPulse service, preserving protected database permissions and safely batching large groups.
+- The tray menu provides **Current User → Calendar View** and elevated **Administrator → System Calendar View** commands.
+- Calendar windows are independent, refresh when activated and return to the foreground when selected again.
+- Calendar windows open maximized.
+- Activity reports now use single-click column sorting and double-click header grouping, replacing the Group by dropdown.
 - Process-token ownership distinguishes SYSTEM and service accounts from interactive users.
 - `route_system` and `route_user` policy actions give each event exactly one destination.
 - Read-only historical attribution previews propose movements without modifying either database.
@@ -28,7 +32,7 @@ DeskPulse does not expose a combined or all-users activity view. Candidate diagn
 ## Installer
 
 ```text
-DeskPulse_Setup_0.3.4.7.exe
+DeskPulse_Setup_0.4.0.0.exe
 ```
 
 ## Verification

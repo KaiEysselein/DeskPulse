@@ -1,5 +1,16 @@
 #define MyAppName "DeskPulse"
-#define MyAppVersion "0.3.4.7"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.4.0.0"
+#endif
+#ifndef MyAppChannel
+  #define MyAppChannel "Stable"
+#endif
+#ifndef PublishFolder
+  #define PublishFolder "v0.4.0.0"
+#endif
+#ifndef OutputBaseFilename
+  #define OutputBaseFilename "DeskPulse_Setup_0.4.0.0"
+#endif
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
 #define ServiceExeName "DeskPulse.Service.exe"
@@ -9,15 +20,15 @@
 AppId={{A73C22CF-67EC-4EAF-B65D-219B90536982}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} {#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion} ({#MyAppChannel})
 AppPublisher={#MyAppPublisher}
 
 DefaultDirName={autopf}\DeskPulse
 DefaultGroupName=DeskPulse
 DisableProgramGroupPage=yes
 
-OutputDir=..\publish\v0.3.4.7\installer
-OutputBaseFilename=DeskPulse_Setup_{#MyAppVersion}
+OutputDir=..\publish\{#PublishFolder}\installer
+OutputBaseFilename={#OutputBaseFilename}
 
 Compression=lzma2
 SolidCompression=yes
@@ -49,8 +60,8 @@ Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveru
 Name: "{commonappdata}\DeskPulse\Config"; Permissions: admins-full system-full; Flags: uninsneveruninstall
 
 [Files]
-Source: "..\publish\v0.3.4.7\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\v0.3.4.7\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\{#PublishFolder}\service\*"; DestDir: "{app}\Service"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\{#PublishFolder}\tray\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "default-rules.yaml"; DestDir: "{app}\Config"; Flags: ignoreversion
 Source: "admin-rules.yaml"; DestDir: "{commonappdata}\DeskPulse\Config"; Flags: ignoreversion uninsneveruninstall; Check: ShouldInstallAdministratorRules
 

@@ -130,6 +130,34 @@ internal static class Program
             return;
         }
 
+        if (args.Any(a => a.Equals("--personal-calendar", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunSingleWindow(
+                "CurrentUser.Calendar",
+                () => new CalendarViewForm(AppSettings.Load().DatabaseFilePath));
+            return;
+        }
+
+        if (args.Any(a => a.Equals("--system-calendar", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!IsProcessElevated())
+            {
+                MessageBox.Show(
+                    "System Calendar View must be opened through the DeskPulse tray menu and approved through Windows User Account Control.",
+                    "DeskPulse System Calendar View",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            RunSingleWindow(
+                "Administrator.SystemCalendar",
+                () => new CalendarViewForm(
+                    StorageLayout.SystemDatabaseFilePath,
+                    "DeskPulse - System Calendar View"));
+            return;
+        }
+
         var mutexName = $"Local\\DeskPulse.Tray.Session.{Process.GetCurrentProcess().SessionId}";
         _trayInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
@@ -161,7 +189,13 @@ internal static class Program
     {
         var mutexName =
             $"Local\\DeskPulse.Window.{windowKey}.Session.{Process.GetCurrentProcess().SessionId}";
+        var activationEventName =
+            $"Local\\DeskPulse.Window.Activate.{windowKey}.Session.{Process.GetCurrentProcess().SessionId}";
         using var windowMutex = new Mutex(initiallyOwned: false, mutexName);
+        using var activationEvent = new EventWaitHandle(
+            initialState: false,
+            EventResetMode.AutoReset,
+            activationEventName);
 
         var ownsMutex = false;
         try
@@ -176,9 +210,20 @@ internal static class Program
             }
 
             if (!ownsMutex)
+            {
+                activationEvent.Set();
                 return;
+            }
 
             var form = createForm();
+            var activationTimer = new System.Windows.Forms.Timer { Interval = 200 };
+            activationTimer.Tick += (_, _) =>
+            {
+                if (activationEvent.WaitOne(0))
+                    ShowStandaloneWindow(form);
+            };
+            form.FormClosed += (_, _) => activationTimer.Dispose();
+            activationTimer.Start();
             form.Shown += (_, _) => ShowStandaloneWindow(form);
             Application.Run(form);
         }
@@ -455,6 +500,11 @@ public sealed class TrayAppContext : ApplicationContext
         personalMenu.ToolTipText = currentUserToolTip;
         var currentUserLogMenuItem = AddMenuCommand(personalMenu.DropDownItems, "Log...", OpenViewLog);
         currentUserLogMenuItem.ToolTipText = currentUserToolTip;
+        var currentUserCalendarMenuItem = AddMenuCommand(
+            personalMenu.DropDownItems,
+            "Calendar View...",
+            OpenCalendarView);
+        currentUserCalendarMenuItem.ToolTipText = "Shows Calendar-marked records for the current Windows user.";
         personalMenu.DropDownItems.Add(new ToolStripSeparator());
         var currentUserSettingsMenuItem = AddMenuCommand(personalMenu.DropDownItems, "Settings...", OpenSettings);
         currentUserSettingsMenuItem.ToolTipText = currentUserToolTip;
@@ -470,6 +520,11 @@ public sealed class TrayAppContext : ApplicationContext
             "System Log...",
             OpenSystemLog);
         systemLogMenuItem.ToolTipText = administratorToolTip;
+        var systemCalendarMenuItem = AddMenuCommand(
+            administratorMenu.DropDownItems,
+            "System Calendar View...",
+            OpenSystemCalendarView);
+        systemCalendarMenuItem.ToolTipText = "Shows Calendar-marked records from the protected system database. Requires administrator approval.";
         administratorMenu.DropDownItems.Add(new ToolStripSeparator());
         var systemSettingsMenuItem = AddMenuCommand(
             administratorMenu.DropDownItems,
@@ -700,6 +755,63 @@ public sealed class TrayAppContext : ApplicationContext
         {
             MessageBox.Show(
                 "DeskPulse could not open the system log.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private void OpenCalendarView()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--personal-calendar",
+                UseShellExecute = false,
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open Calendar View.\n\n" + ex.Message,
+                "DeskPulse",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private void OpenSystemCalendarView()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
+
+            _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = "--system-calendar",
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // The user cancelled the Windows UAC prompt.
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "DeskPulse could not open System Calendar View.\n\n" + ex.Message,
                 "DeskPulse",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -1142,7 +1254,8 @@ public static class ServicePipeClient
     public static async Task<long> SetCalendarVisibilityAsync(
         string tableName,
         IReadOnlyList<long> ids,
-        bool showInCalendar)
+        bool showInCalendar,
+        bool systemDatabase = false)
     {
         if (ids == null || ids.Count == 0)
             return 0;
@@ -1157,7 +1270,10 @@ public static class ServicePipeClient
                     .Take(requestBatchSize)
                     .Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             var command =
-                "SET_CALENDAR_VISIBILITY|" + tableName + "|" +
+                (systemDatabase
+                    ? "SYSTEM_SET_CALENDAR_VISIBILITY|"
+                    : "SET_CALENDAR_VISIBILITY|") +
+                tableName + "|" +
                 (showInCalendar ? "1" : "0") + "|" + payload;
             affected += ParseAffectedCount(await SendAsync(command, TimeSpan.FromMinutes(5)));
         }

@@ -1,0 +1,133 @@
+name: Stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Numeric DeskPulse version (for example 0.4.0.0)
+        required: true
+        type: string
+      tag:
+        description: Existing immutable tag (for example v0.4.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deskpulse-stable-release
+  cancel-in-progress: false
+
+jobs:
+  build-stable:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out requested tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Validate immutable release identity
+        shell: pwsh
+        run: |
+          if ("${{ inputs.version }}" -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw "Stable versions must contain four numeric components."
+          }
+          if ("${{ inputs.tag }}" -ne "v${{ inputs.version }}") {
+            throw "Tag must be v${{ inputs.version }}."
+          }
+          if ((git tag --points-at HEAD) -notcontains "${{ inputs.tag }}") {
+            throw "The checked-out commit is not tagged ${{ inputs.tag }}."
+          }
+          gh release view "${{ inputs.tag }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Stable release ${{ inputs.tag }} already exists and will not be overwritten."
+          }
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          dotnet build dev/DeskPulse.sln -c Release
+          dotnet test dev/DeskPulse.sln -c Release --no-build --logger "console;verbosity=minimal"
+
+      - name: Publish stable binaries
+        shell: pwsh
+        run: |
+          ./dev/scripts/Publish.ps1 `
+            -Version "${{ inputs.version }}" `
+            -PublishFolder "${{ inputs.tag }}" `
+            -InformationalVersion "${{ inputs.version }}"
+
+      - name: Build stable installer
+        shell: pwsh
+        run: |
+          ./dev/Installer/Build-Installer.ps1 `
+            -ReleaseChannel Stable `
+            -Version "${{ inputs.version }}" `
+            -PublishFolder "${{ inputs.tag }}" `
+            -InstallerBaseName "DeskPulse_Setup_${{ inputs.version }}" `
+            -SkipReleaseCopy
+
+      - name: Scan installer with Microsoft Defender
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path "dev/publish/${{ inputs.tag }}/installer/DeskPulse_Setup_${{ inputs.version }}.exe"
+          $scannerCandidates = @(
+            "$env:ProgramFiles\Windows Defender\MpCmdRun.exe",
+            "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe"
+          )
+          $scanner = Get-Item $scannerCandidates -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $scanner) {
+            throw "Microsoft Defender command-line scanner was not found."
+          }
+          & $scanner.FullName -Scan -ScanType 3 -File $installer -DisableRemediation
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Defender returned exit code $LASTEXITCODE."
+          }
+
+      - name: Prepare stable release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          $name = "DeskPulse_Setup_${{ inputs.version }}.exe"
+          Copy-Item "dev/publish/${{ inputs.tag }}/installer/$name" "artifacts/$name" -Force
+          $hash = (Get-FileHash "artifacts/$name" -Algorithm SHA256).Hash
+          "$hash  $name" |
+            Set-Content "artifacts/DeskPulse_Setup_${{ inputs.version }}.sha256" -Encoding ascii
+
+      - name: Publish immutable stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ inputs.tag }}" `
+            "artifacts/DeskPulse_Setup_${{ inputs.version }}.exe" `
+            "artifacts/DeskPulse_Setup_${{ inputs.version }}.sha256" `
+            --title "DeskPulse ${{ inputs.version }}" `
+            --notes-file "GITHUB_RELEASE.md" `
+            --latest `
+            --verify-tag
+
+      - name: Retain workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeskPulse-Stable-${{ inputs.version }}
+          path: artifacts/*
+          retention-days: 90
