@@ -13,24 +13,28 @@ public sealed class AddLogRuleForm : Form
     private readonly TextBox _value = new() { Dock = DockStyle.Fill };
     private readonly CheckBox _cleanup = new() { Text = "Clean up old data, removing records in conflict with this rule", AutoSize = true };
 
-    public AddLogRuleForm(LogRuleCategory category, string suggestedValue)
+    public AddLogRuleForm(
+        LogRuleCategory category,
+        string suggestedValue,
+        string ruleType,
+        bool exclusionOnly = false)
     {
         Category = category;
         AppIcon.Apply(this);
-        Text = "Add rule to rules list";
+        Text = "Create rule";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new System.Drawing.Size(620, category == LogRuleCategory.App ? 235 : 205);
+        ClientSize = new System.Drawing.Size(620, category == LogRuleCategory.User ? 205 : 235);
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = category == LogRuleCategory.App ? 5 : 4
+            RowCount = category == LogRuleCategory.User ? 4 : 5
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -40,7 +44,9 @@ public sealed class AddLogRuleForm : Form
             AutoSize = true,
             Text = category switch
             {
+                LogRuleCategory.App when exclusionOnly => "Application:",
                 LogRuleCategory.App => "App / pattern:",
+                LogRuleCategory.File when ruleType.Equals("folder", StringComparison.OrdinalIgnoreCase) => "Folder:",
                 LogRuleCategory.File => "File / pattern:",
                 _ => "Event / text:"
             },
@@ -48,6 +54,18 @@ public sealed class AddLogRuleForm : Form
         };
 
         _value.Text = suggestedValue;
+        if (exclusionOnly)
+        {
+            _include.Checked = false;
+            _include.Enabled = false;
+            _exclude.Checked = true;
+        }
+        _include.CheckedChanged += (_, _) =>
+        {
+            if (_include.Checked)
+                _cleanup.Checked = false;
+            _cleanup.Enabled = !_include.Checked;
+        };
         var actionPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         actionPanel.Controls.Add(_enabled);
         actionPanel.Controls.Add(_include);
@@ -59,16 +77,22 @@ public sealed class AddLogRuleForm : Form
         layout.Controls.Add(_value, 1, 1);
 
         var nextRow = 2;
-        if (category == LogRuleCategory.App)
+        if (category != LogRuleCategory.User)
         {
-            var wildcardHint = new Label
+            var ruleHint = new Label
             {
                 AutoSize = true,
                 ForeColor = System.Drawing.SystemColors.GrayText,
-                Text = @"Wildcards: * matches within one folder; ** matches any subfolders; ? matches one character." +
-                       "\r\n" + @"Example: C:\Tools\**\*.exe"
+                Text = exclusionOnly
+                    ? "Exact process name used by File Activity (for example, icacls or OneDrive.exe).\r\nWildcards are not supported; matching is case-insensitive."
+                    : ruleType.Equals("folder", StringComparison.OrdinalIgnoreCase)
+                        ? "Matches this folder and all of its subfolders."
+                        : category == LogRuleCategory.App
+                            ? @"App names may use * and ?. Full-path patterns may also use ** for subfolders." +
+                              "\r\n" + @"Example: C:\Tools\**\*.exe"
+                            : "Use an exact filename or a wildcard pattern such as *.pdf."
             };
-            layout.Controls.Add(wildcardHint, 1, nextRow);
+            layout.Controls.Add(ruleHint, 1, nextRow);
             nextRow++;
         }
 

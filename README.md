@@ -6,7 +6,7 @@
 
 It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
 
-**Current version:** `0.3.4.4`
+**Current version:** `0.3.4.7`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
@@ -70,7 +70,7 @@ The uninstaller removes the application, service and startup registration while 
 
 ## 0.3.4 release boundary
 
-Version 0.3.4.4 adds process-owner attribution, deterministic System/User routing, read-only historical attribution previews, full-result activity grouping, responsive rule creation and cleanup, and PowerShell-free installation/runtime operations.
+Version 0.3.4.7 adds persistent Calendar marking through the protected DeskPulse service for individual records and grouped summaries, plus a Calendar View of all marked activity.
 
 ## Activity filtering
 

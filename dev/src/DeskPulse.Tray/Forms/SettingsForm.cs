@@ -1028,7 +1028,7 @@ public partial class SettingsForm : Form
         var dataFolder = _dataFolderTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(dataFolder) || !Path.IsPathFullyQualified(dataFolder))
         {
-            MessageBox.Show("Please enter a valid full data folder path before running maintenance.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("Please enter a valid full export folder path before running maintenance.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return null;
         }
 
@@ -1419,18 +1419,18 @@ public partial class SettingsForm : Form
         SetButtonToolTip(_maintenanceAddProcessExclusionButton, "Adds the selected process/program value as an Exclude rule. Affects future logging only until past-record cleanup is run.");
         SetButtonToolTip(_maintenanceDeleteExportButton, "Deletes only the generated Excel export file. Does not delete the SQLite database, records, settings, or logging rules.");
         SetButtonToolTip(_maintenanceDeleteStartupLogButton, "Deletes only the temporary DeskPulse startup fallback log. Does not delete database records, settings, or logging rules.");
-        SetButtonToolTip(_maintenanceRemoveUnwantedDataButton, "Deletes only past file/program records that match current Exclude rules in Logging Rules. Does not delete Include exceptions, the rules themselves, user/session records, settings, or the database file.");
-        SetButtonToolTip(_maintenanceDeleteFileActivityButton, "Deletes ALL file open/write/close records from ActivityEvents. Keeps user/session records, program records, settings, logging rules, and the database file.");
-        SetButtonToolTip(_maintenanceDeleteUserActivityButton, "Deletes ALL user/session records such as DeskPulse start/stop, PC lock/unlock, logon/logoff, and session connect/disconnect events. Keeps file/program records, settings, and logging rules.");
-        SetButtonToolTip(_maintenanceDeleteProgramActivityButton, "Deletes ALL program start/close records from ProgramEvents. Keeps file activity, user/session records, settings, and logging rules.");
-        SetButtonToolTip(_maintenanceDeleteAllActivityButton, "Deletes EVERYTHING recorded in DeskPulse activity tables: file activity, user/session activity, and program activity. Keeps settings, logging rules, and database structure.");
+        SetButtonToolTip(_maintenanceRemoveUnwantedDataButton, "Deletes only past File and App Activity records that match current exclusions. Does not delete Include exceptions, the rules themselves, User Activity records, settings, or the database file.");
+        SetButtonToolTip(_maintenanceDeleteFileActivityButton, "Deletes ALL File Activity open/write/close records from ActivityEvents. Keeps User and App Activity, settings, logging rules, and the database file.");
+        SetButtonToolTip(_maintenanceDeleteUserActivityButton, "Deletes ALL User Activity records such as DeskPulse start/stop, PC lock/unlock, logon/logoff, and session connect/disconnect events. Keeps File and App Activity, settings, and logging rules.");
+        SetButtonToolTip(_maintenanceDeleteProgramActivityButton, "Deletes ALL App Activity start/close records from ProgramEvents. Keeps File and User Activity, settings, and logging rules.");
+        SetButtonToolTip(_maintenanceDeleteAllActivityButton, "Deletes EVERYTHING recorded in DeskPulse activity tables: File, User, and App Activity. Keeps settings, logging rules, and database structure.");
         SetButtonToolTip(_maintenanceBrowseRuleButton, "Browses for the folder, exact file, or program executable used for a new logging rule. Does not add or delete anything by itself.");
         SetButtonToolTip(_maintenanceAddRuleButton, "Adds the newly entered Include or Exclude rule to the rules list. It affects future logging after Save; it does not delete past records.");
         SetButtonToolTip(_maintenanceMoveRuleUpButton, "Moves the selected logging rule up. Higher rules override lower rules. Does not delete data.");
         SetButtonToolTip(_maintenanceMoveRuleDownButton, "Moves the selected logging rule down. Higher rules override lower rules. Does not delete data.");
         SetButtonToolTip(_maintenanceRemoveRuleButton, "Removes only the selected logging rule from the list. It does not delete past database records.");
         SetButtonToolTip(_maintenanceDuplicateRuleButton, "Copies the selected logging rule so it can be edited or reordered. Does not delete data.");
-        SetButtonToolTip(_maintenanceRemovePastRecordsButton, "PERMANENTLY deletes past file/program records that match current Exclude rules. Does not delete the rules themselves or user/session records.");
+        SetButtonToolTip(_maintenanceRemovePastRecordsButton, "PERMANENTLY deletes past File and App Activity records that match current exclusions. Does not delete the rules themselves or User Activity records.");
         SetButtonToolTip(_maintenanceShowActiveExtensionsButton, "Shows the file extensions currently monitored by DeskPulse. Does not delete or change data.");
         SetButtonToolTip(_maintenanceShowStartupStatusButton, "Shows whether the current-user Windows startup registry entry exists. Does not delete or change data.");
         SetButtonToolTip(_maintenanceRemoveRegistrySettingsButton, "Deletes current-user DeskPulse registry settings, including preferences and logging rules. Does not delete the database, export, startup fallback log, or program files.");
@@ -1728,8 +1728,8 @@ public partial class SettingsForm : Form
                 "SHM size: " + FormatBytes(overview.ShmBytes) + Environment.NewLine +
                 "Total database-related files: " + FormatBytes(overview.TotalDatabaseRelatedBytes) + Environment.NewLine + Environment.NewLine +
                 "File activity records: " + overview.ActivityEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
-                "User/session records: " + overview.UserEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
-                "Program activity records: " + overview.ProgramEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
+                "User Activity records: " + overview.UserEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
+                "App Activity records: " + overview.ProgramEventCount.ToString("N0", CultureInfo.InvariantCulture) + Environment.NewLine +
                 "Total records: " + overview.TotalRecordCount.ToString("N0", CultureInfo.InvariantCulture);
         }
         catch (Exception ex)
@@ -2388,8 +2388,8 @@ public partial class SettingsForm : Form
             "- file activity records whose exact file path matches an excluded file\n" +
             "- file activity records whose folder/path matches an excluded folder\n" +
             "- file activity records whose process matches an excluded process\n" +
-            "- program activity records whose program/path matches an excluded process or folder\n\n" +
-            "It does not delete the exclusion settings themselves, and it does not delete user/session records.\n\n" +
+            "- App Activity records whose application/path matches an excluded process or folder\n\n" +
+            "It does not delete the exclusion settings themselves, and it does not delete User Activity records.\n\n" +
             "Continue?",
             "Delete Matching Past Records",
             MessageBoxButtons.YesNo,
@@ -2416,7 +2416,7 @@ public partial class SettingsForm : Form
         MessageBox.Show(
             "Excluded past records removed.\n\n" +
             "File activity records deleted: " + result.ActivityRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +
-            "Program activity records deleted: " + result.ProgramRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +
+            "App Activity records deleted: " + result.ProgramRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture) + "\n" +
             "Total records deleted: " + result.TotalRecordsDeleted.ToString("N0", CultureInfo.InvariantCulture),
             "DeskPulse Maintenance",
             MessageBoxButtons.OK,
@@ -3077,7 +3077,7 @@ public partial class SettingsForm : Form
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Choose the DeskPulse data folder",
+            Description = "Choose the folder for DeskPulse Excel exports",
             SelectedPath = Directory.Exists(_dataFolderTextBox.Text.Trim())
                 ? _dataFolderTextBox.Text.Trim()
                 : AppSettings.GetDefaultDataFolderPath(),
@@ -3209,7 +3209,7 @@ public partial class SettingsForm : Form
         if (string.IsNullOrWhiteSpace(dataFolder))
         {
             MessageBox.Show(
-                "Please enter a data folder.",
+                "Please enter an export folder.",
                 "Settings",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning
@@ -3222,7 +3222,7 @@ public partial class SettingsForm : Form
         if (!Path.IsPathFullyQualified(dataFolder))
         {
             MessageBox.Show(
-                "Please enter a full data folder path, for example:\n\nC:\\Users\\YourName\\Documents\\DeskPulse",
+                "Please enter a full export folder path, for example:\n\nC:\\Users\\YourName\\Documents\\DeskPulse",
                 "Settings",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning
@@ -3239,7 +3239,7 @@ public partial class SettingsForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"The data folder could not be created or accessed.\n\n{ex.Message}",
+                $"The export folder could not be created or accessed.\n\n{ex.Message}",
                 "Settings",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
@@ -3730,7 +3730,7 @@ internal sealed class ActivityRuleEditor : UserControl
             {
                 Dock = DockStyle.Bottom,
                 Height = 44,
-                Text = "Files, extensions, and folder patterns not matched by an Include rule are not monitored. Use \\* for one folder and \\**\\* for all subfolders. Explicit App Activity rules take precedence for matching executable files.",
+                Text = "Files, extensions, and folder patterns not matched by an Include rule are not monitored. Use \\* for one folder and \\**\\* for all subfolders. Use Activity logging → Configure filtered file applications to suppress File Activity from specific apps.",
                 ForeColor = System.Drawing.SystemColors.GrayText,
                 TextAlign = System.Drawing.ContentAlignment.MiddleLeft
             });

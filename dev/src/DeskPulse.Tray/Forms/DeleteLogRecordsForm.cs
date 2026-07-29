@@ -22,10 +22,13 @@ public partial class DeleteLogRecordsForm : Form
         string sectionName,
         LogRuleCategory category,
         bool groupedSelection = false,
-        int groupCount = 0)
+        int groupCount = 0,
+        bool allowRuleCreation = true)
     {
         InitializeComponent();
         AppIcon.Apply(this);
+        AcceptButton = cancelButton;
+        ActiveControl = cancelButton;
 
         var groupLabel = groupCount == 1 ? "group" : "groups";
         messageLabel.Text = groupedSelection
@@ -48,7 +51,7 @@ public partial class DeleteLogRecordsForm : Form
         });
         matchTypeComboBox.SelectedItem = ExactFilePath;
         matchTypePanel.Enabled = category == LogRuleCategory.File;
-        createRulesCheckBox.Visible = !groupedSelection;
+        createRulesCheckBox.Visible = allowRuleCreation && !groupedSelection;
     }
 
     private void CreateRulesCheckBox_CheckedChanged(object? sender, EventArgs e) =>

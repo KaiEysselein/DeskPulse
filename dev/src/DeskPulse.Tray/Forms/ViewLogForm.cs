@@ -28,6 +28,8 @@ public partial class ViewLogForm : Form
     private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedAppGroups = new(StringComparer.Ordinal);
     private bool _updatingGroupByCombo;
+    private bool _updatingCalendarCells;
+    private ContextMenuStrip? _reportContextMenu;
 
     private int _appPage;
     private int _filePage;
@@ -126,6 +128,7 @@ public partial class ViewLogForm : Form
             UpdateGroupByControls();
             RefreshLog();
         };
+        FormClosed += (_, _) => _reportContextMenu?.Dispose();
     }
 
     private SqliteConnection OpenReadConnection()
@@ -214,7 +217,7 @@ public partial class ViewLogForm : Form
         grid.AllowUserToAddRows = false;
         grid.AllowUserToDeleteRows = false;
         grid.AllowUserToOrderColumns = true;
-        grid.ReadOnly = true;
+        grid.ReadOnly = false;
         grid.MultiSelect = true;
         grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         grid.RowHeadersVisible = false;
@@ -228,9 +231,25 @@ public partial class ViewLogForm : Form
                 HeaderText = columnName,
                 Tag = columnName,
                 SortMode = DataGridViewColumnSortMode.Programmatic,
-                FillWeight = columnName is "Folder" or "Path" ? 180 : columnName is "File" or "App" or "Event" ? 130 : columnName == "Extension" ? 65 : columnName == "ID" ? 55 : 80
+                FillWeight = columnName is "Folder" or "Path" ? 180 : columnName is "File" or "App" or "Event" ? 130 : columnName == "Extension" ? 65 : columnName == "ID" ? 55 : 80,
+                ReadOnly = true
             });
         }
+
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "ShowInCalendarView",
+            HeaderText = "Calendar",
+            ToolTipText = "Include this record in Calendar View. On a grouped row, this changes every record in the group.",
+            ThreeState = true,
+            TrueValue = CheckState.Checked,
+            FalseValue = CheckState.Unchecked,
+            IndeterminateValue = CheckState.Indeterminate,
+            Width = 68,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            SortMode = DataGridViewColumnSortMode.NotSortable,
+            ReadOnly = _systemOnly
+        });
 
         grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -239,7 +258,8 @@ public partial class ViewLogForm : Form
             Tag = "Records",
             SortMode = DataGridViewColumnSortMode.Programmatic,
             FillWeight = 75,
-            Visible = false
+            Visible = false,
+            ReadOnly = true
         });
 
         grid.Columns.Add(new DataGridViewButtonColumn
@@ -251,6 +271,7 @@ public partial class ViewLogForm : Form
             Width = 72,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             SortMode = DataGridViewColumnSortMode.NotSortable
+            ,ReadOnly = true
         });
         grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -260,12 +281,172 @@ public partial class ViewLogForm : Form
             Width = 78,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             SortMode = DataGridViewColumnSortMode.NotSortable
+            ,ReadOnly = true
         });
 
         grid.CellContentClick += Grid_CellContentClick;
+        grid.CurrentCellDirtyStateChanged += Grid_CurrentCellDirtyStateChanged;
+        grid.CellValueChanged += Grid_CellValueChanged;
         grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
         grid.CellDoubleClick += Grid_CellDoubleClick;
+        grid.CellMouseDown += Grid_CellMouseDown;
         grid.SelectionChanged += (_, _) => UpdateSelectionButtons();
+    }
+
+    private void Grid_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (_systemOnly ||
+            e.Button != MouseButtons.Right ||
+            sender is not DataGridView grid ||
+            e.RowIndex < 0 ||
+            e.ColumnIndex < 0)
+        {
+            return;
+        }
+
+        grid.ClearSelection();
+        grid.Rows[e.RowIndex].Selected = true;
+        grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+
+        var row = grid.Rows[e.RowIndex];
+        var columnName = grid.Columns[e.ColumnIndex].Name;
+        _reportContextMenu?.Dispose();
+        var menu = new ContextMenuStrip();
+        _reportContextMenu = menu;
+        var groupedRow = row.Tag is FileLogGroup or AppLogGroup;
+        var deleteItem = new ToolStripMenuItem(groupedRow ? "Delete group..." : "Delete record...");
+        deleteItem.Click += async (_, _) => await DeleteSelectedAsync(allowRuleCreation: false);
+        menu.Items.Add(deleteItem);
+
+        RuleSuggestion suggestion = default;
+        var canCreateRule = row.Tag is LogViewEntry entry
+            ? TryBuildCellRuleSuggestion(GetGridCategory(grid), columnName, entry, out suggestion)
+            : row.Tag is FileLogGroup fileGroup
+                ? TryBuildGroupCellRuleSuggestion(
+                    LogRuleCategory.File,
+                    FileGroupDisplayColumnName(),
+                    fileGroup.Key,
+                    out suggestion)
+                : row.Tag is AppLogGroup appGroup &&
+                  TryBuildGroupCellRuleSuggestion(
+                      LogRuleCategory.App,
+                      AppGroupDisplayColumnName(),
+                      appGroup.Key,
+                      out suggestion);
+
+        var createRuleItem = new ToolStripMenuItem("Create rule...")
+        {
+            Enabled = canCreateRule
+        };
+        if (canCreateRule)
+            createRuleItem.Click += async (_, _) => await CreateRuleAsync(suggestion);
+        menu.Items.Add(createRuleItem);
+        menu.Show(Cursor.Position);
+    }
+
+    private LogRuleCategory GetGridCategory(DataGridView grid) =>
+        grid == gridApp
+            ? LogRuleCategory.App
+            : grid == gridUser
+                ? LogRuleCategory.User
+                : LogRuleCategory.File;
+
+    public static bool TryBuildCellRuleSuggestion(
+        LogRuleCategory reportCategory,
+        string columnName,
+        LogViewEntry entry,
+        out RuleSuggestion suggestion)
+    {
+        suggestion = default;
+        var value = "";
+        var formCategory = reportCategory;
+        var ruleType = reportCategory == LogRuleCategory.User ? "event" : "file";
+        var includeSubfolders = false;
+
+        if (reportCategory == LogRuleCategory.File)
+        {
+            switch (columnName)
+            {
+                case "File":
+                    value = entry.Subject;
+                    break;
+                case "Extension":
+                    if (entry.Fields.TryGetValue("Extension", out var extension))
+                        value = string.IsNullOrWhiteSpace(extension)
+                            ? ""
+                            : "*" + (extension.StartsWith('.') ? extension : "." + extension);
+                    break;
+                case "Folder":
+                    value = entry.Folder;
+                    ruleType = "folder";
+                    includeSubfolders = true;
+                    break;
+                case "App":
+                    value = entry.App;
+                    formCategory = LogRuleCategory.App;
+                    ruleType = "process";
+                    break;
+            }
+        }
+        else if (reportCategory == LogRuleCategory.App)
+        {
+            if (columnName == "App")
+                value = entry.App;
+            else if (columnName == "Path")
+                value = entry.Path;
+            ruleType = "process";
+        }
+        else if (reportCategory == LogRuleCategory.User && columnName == "Event")
+        {
+            value = entry.Subject;
+        }
+
+        value = value.Trim();
+        if (value.Length == 0 || value == "*")
+            return false;
+
+        suggestion = new RuleSuggestion(value, formCategory, ruleType, includeSubfolders);
+        return true;
+    }
+
+    public static bool TryBuildGroupCellRuleSuggestion(
+        LogRuleCategory reportCategory,
+        string columnName,
+        string groupValue,
+        out RuleSuggestion suggestion)
+    {
+        suggestion = default;
+        var value = groupValue.Trim();
+        if (value.Length == 0 || value.StartsWith("(unknown ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (reportCategory == LogRuleCategory.File)
+        {
+            suggestion = columnName switch
+            {
+                "File" => new RuleSuggestion(value, LogRuleCategory.File, "file", false),
+                "Extension" when !value.Equals("(no extension)", StringComparison.OrdinalIgnoreCase) =>
+                    new RuleSuggestion(
+                        "*" + (value.StartsWith('.') ? value : "." + value),
+                        LogRuleCategory.File,
+                        "file",
+                        false),
+                "Folder" => new RuleSuggestion(value, LogRuleCategory.File, "folder", true),
+                "App" => new RuleSuggestion(value, LogRuleCategory.App, "process", false),
+                _ => default
+            };
+        }
+        else if (reportCategory == LogRuleCategory.App)
+        {
+            suggestion = columnName switch
+            {
+                "App" or "Path" => new RuleSuggestion(
+                    value, LogRuleCategory.App, "process", false),
+                _ => default
+            };
+        }
+
+        return !string.IsNullOrWhiteSpace(suggestion.Value);
     }
 
 
@@ -495,6 +676,11 @@ public partial class ViewLogForm : Form
 
     private async void DeleteButton_Click(object? sender, EventArgs e)
     {
+        await DeleteSelectedAsync(allowRuleCreation: true);
+    }
+
+    private async Task DeleteSelectedAsync(bool allowRuleCreation)
+    {
         var grid = GetActiveGrid();
         if (grid == null)
             return;
@@ -537,7 +723,12 @@ public partial class ViewLogForm : Form
         var category = GetActiveCategory();
         var selectedGroupCount = fileGroups.Count + appGroups.Count;
         using var deleteForm = new DeleteLogRecordsForm(
-            ids.Count, sectionName, category, groupedDeletion, selectedGroupCount);
+            ids.Count,
+            sectionName,
+            category,
+            groupedDeletion,
+            selectedGroupCount,
+            allowRuleCreation);
         if (deleteForm.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -574,10 +765,21 @@ public partial class ViewLogForm : Form
 
             var deleted = await ServicePipeClient.DeleteRecordsAsync(tableName, ids.ToArray());
             var rulesCreated = createRules ? CreateExclusionRulesForEntries(entries, deleteForm.MatchType) : 0;
-            RefreshActiveTab();
-            statusLabel.Text = rulesCreated > 0
+            RemoveDeletedRowsFromGrid(grid, selectedRows, ids);
+            var completionStatus = rulesCreated > 0
                 ? $"Deleted {deleted:N0} selected record(s) and created {rulesCreated:N0} exclusion rule(s)."
                 : $"Deleted {deleted:N0} selected record(s).";
+            statusLabel.Text = completionStatus;
+            if (IsHandleCreated && !IsDisposed)
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed)
+                        return;
+                    RefreshActiveTab();
+                    statusLabel.Text = completionStatus;
+                }));
+            }
         }
         catch (Exception ex)
         {
@@ -593,6 +795,32 @@ public partial class ViewLogForm : Form
         {
             Cursor = Cursors.Default;
         }
+    }
+
+    private void RemoveDeletedRowsFromGrid(
+        DataGridView grid,
+        IReadOnlyCollection<DataGridViewRow> selectedRows,
+        IReadOnlySet<long> deletedIds)
+    {
+        var selected = selectedRows.ToHashSet();
+        for (var rowIndex = grid.Rows.Count - 1; rowIndex >= 0; rowIndex--)
+        {
+            var row = grid.Rows[rowIndex];
+            var remove = selected.Contains(row);
+            if (!remove &&
+                row.Tag is LogViewEntry entry &&
+                long.TryParse(entry.Id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            {
+                remove = deletedIds.Contains(id);
+            }
+
+            if (remove)
+                grid.Rows.RemoveAt(rowIndex);
+        }
+
+        grid.ClearSelection();
+        UpdateSelectionButtons();
+        UpdatePageStatus();
     }
 
     private List<long> ReadGroupRecordIds(
@@ -756,18 +984,38 @@ public partial class ViewLogForm : Form
             return;
         }
 
-        using var form = new AddLogRuleForm(formCategory, suggestedValue);
+        await CreateRuleAsync(new RuleSuggestion(
+            suggestedValue,
+            formCategory,
+            ruleType,
+            includeSubfolders));
+    }
+
+    private async Task CreateRuleAsync(RuleSuggestion suggestion)
+    {
+        var category = GetActiveCategory();
+        var isFileActivityProcessFilter =
+            category == LogRuleCategory.File &&
+            suggestion.RuleType.Equals("process", StringComparison.OrdinalIgnoreCase);
+        using var form = new AddLogRuleForm(
+            suggestion.FormCategory,
+            suggestion.Value,
+            suggestion.RuleType,
+            exclusionOnly: isFileActivityProcessFilter);
         if (form.ShowDialog(this) != DialogResult.OK)
             return;
 
         var settings = AppSettings.Load();
+        var ruleValue = isFileActivityProcessFilter
+            ? AppSettings.NormalizeProcessName(form.RuleValue)
+            : form.RuleValue;
         var rule = new ActivityRuleSetting
         {
             Enabled = form.RuleEnabled,
-            RuleType = ruleType,
+            RuleType = suggestion.RuleType,
             Action = form.IsInclude ? "Include" : "Exclude",
-            Value = form.RuleValue,
-            IncludeSubfolders = includeSubfolders
+            Value = ruleValue,
+            IncludeSubfolders = suggestion.IncludeSubfolders
         };
 
         var target = category switch
@@ -777,15 +1025,20 @@ public partial class ViewLogForm : Form
             _ => settings.UserActivityRuleSettings
         };
 
-        var duplicate = target.Any(existing =>
-            existing.RuleType.Equals(rule.RuleType, StringComparison.OrdinalIgnoreCase) &&
-            existing.Value.Equals(rule.Value, StringComparison.OrdinalIgnoreCase) &&
-            existing.Action.Equals(rule.Action, StringComparison.OrdinalIgnoreCase) &&
-            existing.IncludeSubfolders == rule.IncludeSubfolders);
+        var duplicate = isFileActivityProcessFilter
+            ? settings.IsFileActivityProcessFiltered(rule.Value)
+            : target.Any(existing =>
+                existing.RuleType.Equals(rule.RuleType, StringComparison.OrdinalIgnoreCase) &&
+                existing.Value.Equals(rule.Value, StringComparison.OrdinalIgnoreCase) &&
+                existing.Action.Equals(rule.Action, StringComparison.OrdinalIgnoreCase) &&
+                existing.IncludeSubfolders == rule.IncludeSubfolders);
 
         if (duplicate)
         {
-            MessageBox.Show(this, "An equivalent rule already exists in this rules list.", "Add rule to rules list", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var message = isFileActivityProcessFilter
+                ? "This application is already in the filtered File Activity applications list."
+                : "An equivalent rule already exists in this rules list.";
+            MessageBox.Show(this, message, "Create rule", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -820,8 +1073,15 @@ public partial class ViewLogForm : Form
                 return;
         }
 
-        // Specific rules must precede broad catch-all rules because the first match wins.
-        target.Insert(0, rule);
+        if (isFileActivityProcessFilter)
+        {
+            settings.FilteredFileActivityProcesses.Add(rule.Value);
+        }
+        else
+        {
+            // Specific rules must precede broad catch-all rules because the first match wins.
+            target.Insert(0, rule);
+        }
 
         if (conflictingIds.TotalCount > 0)
         {
@@ -865,7 +1125,10 @@ public partial class ViewLogForm : Form
 
         _settingsChanged?.Invoke();
         RefreshLog();
-        MessageBox.Show(this, "The rule was added successfully.", "Add rule to rules list", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        var successMessage = isFileActivityProcessFilter
+            ? "The application was added to the filtered File Activity applications list."
+            : "The rule was added successfully.";
+        MessageBox.Show(this, successMessage, "Create rule", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private ConflictingRecordIds FindConflictingRecordIds(LogRuleCategory category, ActivityRuleSetting rule)
@@ -1472,40 +1735,48 @@ public partial class ViewLogForm : Form
             Cursor = Cursors.WaitCursor;
             statusLabel.Text = "Reading log page...";
             Application.DoEvents();
-            switch (tabs.SelectedTab?.Text)
+            _updatingCalendarCells = true;
+            try
             {
-                case "App Activity":
-                    _appTotal = _appGroupBy == "None"
-                        ? CountEntries("ProgramEvents", start, endExclusive)
-                        : CountAppGroups(start, endExclusive);
-                    _appPage = ClampPage(_appPage, _appTotal);
-                    if (_appGroupBy == "None")
-                        PopulateAppGrid(ReadAppEntries(start, endExclusive, _appPage));
-                    else
-                        PopulateAppGroups(ReadAppGroups(start, endExclusive, _appPage), start, endExclusive);
-                    gridApp.ClearSelection();
-                    break;
-                case "User Activity":
-                    _userTotal = CountEntries("UserEvents", start, endExclusive);
-                    _userPage = ClampPage(_userPage, _userTotal);
-                    PopulateUserGrid(ReadUserEntries(start, endExclusive, _userPage));
-                    gridUser.ClearSelection();
-                    break;
-                default:
-                    if (_fileGroupBy == "None")
-                    {
-                        _fileTotal = CountEntries("ActivityEvents", start, endExclusive);
-                        _filePage = ClampPage(_filePage, _fileTotal);
-                        PopulateFileGrid(ReadFileEntries(start, endExclusive, _filePage));
-                    }
-                    else
-                    {
-                        _fileTotal = CountFileGroups(start, endExclusive);
-                        _filePage = ClampPage(_filePage, _fileTotal);
-                        PopulateFileGroups(ReadFileGroups(start, endExclusive, _filePage), start, endExclusive);
-                    }
-                    gridFile.ClearSelection();
-                    break;
+                switch (tabs.SelectedTab?.Text)
+                {
+                    case "App Activity":
+                        _appTotal = _appGroupBy == "None"
+                            ? CountEntries("ProgramEvents", start, endExclusive)
+                            : CountAppGroups(start, endExclusive);
+                        _appPage = ClampPage(_appPage, _appTotal);
+                        if (_appGroupBy == "None")
+                            PopulateAppGrid(ReadAppEntries(start, endExclusive, _appPage));
+                        else
+                            PopulateAppGroups(ReadAppGroups(start, endExclusive, _appPage), start, endExclusive);
+                        gridApp.ClearSelection();
+                        break;
+                    case "User Activity":
+                        _userTotal = CountEntries("UserEvents", start, endExclusive);
+                        _userPage = ClampPage(_userPage, _userTotal);
+                        PopulateUserGrid(ReadUserEntries(start, endExclusive, _userPage));
+                        gridUser.ClearSelection();
+                        break;
+                    default:
+                        if (_fileGroupBy == "None")
+                        {
+                            _fileTotal = CountEntries("ActivityEvents", start, endExclusive);
+                            _filePage = ClampPage(_filePage, _fileTotal);
+                            PopulateFileGrid(ReadFileEntries(start, endExclusive, _filePage));
+                        }
+                        else
+                        {
+                            _fileTotal = CountFileGroups(start, endExclusive);
+                            _filePage = ClampPage(_filePage, _fileTotal);
+                            PopulateFileGroups(ReadFileGroups(start, endExclusive, _filePage), start, endExclusive);
+                        }
+                        gridFile.ClearSelection();
+                        break;
+                }
+            }
+            finally
+            {
+                _updatingCalendarCells = false;
             }
 
             UpdateSelectionButtons();
@@ -1553,9 +1824,17 @@ public partial class ViewLogForm : Form
             var appGroups = _appGroupBy == "None" ? new List<AppLogGroup>() : ReadAppGroups(start, endExclusive, _appPage);
             var userEntries = ReadUserEntries(start, endExclusive, _userPage);
 
-            if (_fileGroupBy == "None") PopulateFileGrid(fileEntries); else PopulateFileGroups(fileGroups, start, endExclusive);
-            if (_appGroupBy == "None") PopulateAppGrid(appEntries); else PopulateAppGroups(appGroups, start, endExclusive);
-            PopulateUserGrid(userEntries);
+            _updatingCalendarCells = true;
+            try
+            {
+                if (_fileGroupBy == "None") PopulateFileGrid(fileEntries); else PopulateFileGroups(fileGroups, start, endExclusive);
+                if (_appGroupBy == "None") PopulateAppGrid(appEntries); else PopulateAppGroups(appGroups, start, endExclusive);
+                PopulateUserGrid(userEntries);
+            }
+            finally
+            {
+                _updatingCalendarCells = false;
+            }
 
             gridApp.ClearSelection();
             gridFile.ClearSelection();
@@ -1584,7 +1863,7 @@ public partial class ViewLogForm : Form
                    DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
                    LastWriteDate, LastWriteTime, WriteCount, SizeAtLastWrite, DateClosed,
                    TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note,
-                   Scope, WindowsSid, SessionId
+                   Scope, WindowsSid, SessionId, ShowInCalendarView
             FROM ActivityEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_fileSortColumn, _fileSortAscending)}
@@ -1610,12 +1889,13 @@ public partial class ViewLogForm : Form
                 ["Write Count"] = ReadText(reader, 14), ["Size At Last Write"] = ReadText(reader, 15),
                 ["Date Closed"] = ReadText(reader, 16), ["Time Closed"] = ReadText(reader, 17), ["Size At Closing"] = ReadText(reader, 18),
                 ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22),
-                ["Scope"] = ReadText(reader, 23), ["Windows SID"] = ReadText(reader, 24), ["Session ID"] = ReadText(reader, 25)
+                ["Scope"] = ReadText(reader, 23), ["Windows SID"] = ReadText(reader, 24), ["Session ID"] = ReadText(reader, 25),
+                ["Show in Calendar View"] = ReadCalendarFlag(reader, 26) ? "Yes" : "No"
             };
 
             return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
                 EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)),
-                file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);
+                file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, ReadCalendarFlag(reader, 26), fields);
         }, usePaging);
     }
 
@@ -1625,7 +1905,7 @@ public partial class ViewLogForm : Form
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, ProgramName,
                    ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note,
-                   Scope, WindowsSid, SessionId
+                   Scope, WindowsSid, SessionId, ShowInCalendarView
             FROM ProgramEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_appSortColumn, _appSortAscending)}
@@ -1643,11 +1923,12 @@ public partial class ViewLogForm : Form
             ["Event"] = ReadText(reader, 4), ["App"] = ReadText(reader, 5), ["Process ID"] = ReadText(reader, 6),
             ["App Path"] = ReadText(reader, 7), ["Window Title"] = ReadText(reader, 8), ["User"] = ReadText(reader, 9),
             ["Computer"] = ReadText(reader, 10), ["DeskPulse Version"] = ReadText(reader, 11), ["Note"] = ReadText(reader, 12),
-            ["Scope"] = ReadText(reader, 13), ["Windows SID"] = ReadText(reader, 14), ["Session ID"] = ReadText(reader, 15)
+            ["Scope"] = ReadText(reader, 13), ["Windows SID"] = ReadText(reader, 14), ["Session ID"] = ReadText(reader, 15),
+            ["Show in Calendar View"] = ReadCalendarFlag(reader, 16) ? "Yes" : "No"
         };
         return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2),
             FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 5), "", ReadText(reader, 5),
-            ReadText(reader, 6), ReadText(reader, 7), fields);
+            ReadText(reader, 6), ReadText(reader, 7), ReadCalendarFlag(reader, 16), fields);
     }
 
     private List<LogViewEntry> ReadUserEntries(DateTime start, DateTime endExclusive, int page, bool usePaging = true)
@@ -1656,7 +1937,7 @@ public partial class ViewLogForm : Form
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, UserName,
                    MachineName, ProcessName, ProcessId, AppVersion, Note,
-                   Scope, WindowsSid, SessionId
+                   Scope, WindowsSid, SessionId, ShowInCalendarView
             FROM UserEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end
             {BuildOrderBy(_userSortColumn, _userSortAscending)}
@@ -1670,9 +1951,10 @@ public partial class ViewLogForm : Form
                 ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
                 ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
                 ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10),
-                ["Scope"] = ReadText(reader, 11), ["Windows SID"] = ReadText(reader, 12), ["Session ID"] = ReadText(reader, 13)
+                ["Scope"] = ReadText(reader, 11), ["Windows SID"] = ReadText(reader, 12), ["Session ID"] = ReadText(reader, 13),
+                ["Show in Calendar View"] = ReadCalendarFlag(reader, 14) ? "Yes" : "No"
             };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", fields);
+            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", ReadCalendarFlag(reader, 14), fields);
         }, usePaging);
     }
 
@@ -1714,6 +1996,8 @@ public partial class ViewLogForm : Form
     }
 
     private static string ReadText(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? "" : Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? "";
+    private static bool ReadCalendarFlag(SqliteDataReader reader, int ordinal) =>
+        !reader.IsDBNull(ordinal) && Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture) != 0;
 
     private static string EventDate(string createdAt, params string[] candidates)
     {
@@ -1789,12 +2073,13 @@ public partial class ViewLogForm : Form
             (
                 SELECT {AppGroupExpression()} AS GroupKey,
                        COUNT(*) AS RecordCount,
-                       MAX(CreatedAt) AS Latest
+                       MAX(CreatedAt) AS Latest,
+                       SUM(CASE WHEN ShowInCalendarView <> 0 THEN 1 ELSE 0 END) AS CalendarCount
                 FROM ProgramEvents
                 WHERE CreatedAt >= $start AND CreatedAt < $end
                 GROUP BY GroupKey
             )
-            SELECT GroupKey, RecordCount, Latest
+            SELECT GroupKey, RecordCount, Latest, CalendarCount
             FROM AllGroups
             ORDER BY {groupSortColumn} {groupSortDirection}, GroupKey ASC
             LIMIT $limit OFFSET $offset;
@@ -1804,7 +2089,10 @@ public partial class ViewLogForm : Form
         command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            result.Add(new AppLogGroup(ReadText(reader, 0), Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture)));
+            result.Add(new AppLogGroup(
+                ReadText(reader, 0),
+                Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture)));
         return result;
     }
 
@@ -1813,7 +2101,7 @@ public partial class ViewLogForm : Form
         var sql = $"""
             SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, ProgramName,
                    ProcessId, FilePath, WindowTitle, UserName, MachineName, AppVersion, Note,
-                   Scope, WindowsSid, SessionId
+                   Scope, WindowsSid, SessionId, ShowInCalendarView
             FROM ProgramEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end AND {AppGroupExpression()} = $groupKey
             {BuildOrderBy(_appSortColumn, _appSortAscending)};
@@ -1844,12 +2132,13 @@ public partial class ViewLogForm : Form
             (
                 SELECT {FileGroupExpression()} AS GroupKey,
                        COUNT(*) AS RecordCount,
-                       MAX(CreatedAt) AS Latest
+                       MAX(CreatedAt) AS Latest,
+                       SUM(CASE WHEN ShowInCalendarView <> 0 THEN 1 ELSE 0 END) AS CalendarCount
                 FROM ActivityEvents
                 WHERE CreatedAt >= $start AND CreatedAt < $end
                 GROUP BY GroupKey
             )
-            SELECT GroupKey, RecordCount, Latest
+            SELECT GroupKey, RecordCount, Latest, CalendarCount
             FROM AllGroups
             ORDER BY {groupSortColumn} {groupSortDirection}, GroupKey ASC
             LIMIT $limit OFFSET $offset;
@@ -1858,7 +2147,11 @@ public partial class ViewLogForm : Form
         command.Parameters.AddWithValue("$limit", _pageSize);
         command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
         using var reader = command.ExecuteReader();
-        while (reader.Read()) result.Add(new FileLogGroup(ReadText(reader, 0), Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture)));
+        while (reader.Read())
+            result.Add(new FileLogGroup(
+                ReadText(reader, 0),
+                Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture)));
         return result;
     }
 
@@ -1869,7 +2162,7 @@ public partial class ViewLogForm : Form
                    DateOpened, TimeOpened, SizeAtOpening, FirstWriteDate, FirstWriteTime,
                    LastWriteDate, LastWriteTime, WriteCount, SizeAtLastWrite, DateClosed,
                    TimeClosed, SizeAtClosing, InferredAction, ProcessName, ProcessId, Note,
-                   Scope, WindowsSid, SessionId
+                   Scope, WindowsSid, SessionId, ShowInCalendarView
             FROM ActivityEvents
             WHERE CreatedAt >= $start AND CreatedAt < $end AND {FileGroupExpression()} = $groupKey
             {BuildOrderBy(_fileSortColumn, _fileSortAscending)};
@@ -1895,10 +2188,11 @@ public partial class ViewLogForm : Form
             ["Write Count"] = ReadText(reader, 14), ["Size At Last Write"] = ReadText(reader, 15),
             ["Date Closed"] = ReadText(reader, 16), ["Time Closed"] = ReadText(reader, 17), ["Size At Closing"] = ReadText(reader, 18),
             ["Inferred Action"] = ReadText(reader, 19), ["Process"] = ReadText(reader, 20), ["Process ID"] = ReadText(reader, 21), ["Note"] = ReadText(reader, 22),
-            ["Scope"] = ReadText(reader, 23), ["Windows SID"] = ReadText(reader, 24), ["Session ID"] = ReadText(reader, 25)
+            ["Scope"] = ReadText(reader, 23), ["Windows SID"] = ReadText(reader, 24), ["Session ID"] = ReadText(reader, 25),
+            ["Show in Calendar View"] = ReadCalendarFlag(reader, 26) ? "Yes" : "No"
         };
         return new LogViewEntry(ReadText(reader, 0), createdAt, EventDate(createdAt, ReadText(reader, 7), ReadText(reader, 10), ReadText(reader, 12), ReadText(reader, 16)),
-            EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)), file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, fields);
+            EventTime(createdAt, ReadText(reader, 8), ReadText(reader, 11), ReadText(reader, 13), ReadText(reader, 17)), file, folder, ReadText(reader, 20), ReadText(reader, 21), fullPath, ReadCalendarFlag(reader, 26), fields);
     }
 
     private static void AddDateParameters(SqliteCommand command, DateTime start, DateTime endExclusive)
@@ -1921,6 +2215,7 @@ public partial class ViewLogForm : Form
             var row = gridFile.Rows[rowIndex];
             row.Cells[FileGroupDisplayColumnName()].Value = $"{(expanded ? "▼" : "▶")} {group.Key}";
             row.Cells["RecordCount"].Value = group.Count;
+            row.Cells["ShowInCalendarView"].Value = CalendarCheckState(group.MarkedCount, group.Count);
             row.Tag = group;
             row.DefaultCellStyle.Font = new System.Drawing.Font(gridFile.Font, System.Drawing.FontStyle.Bold);
             row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
@@ -1932,6 +2227,8 @@ public partial class ViewLogForm : Form
                     entry.Fields.TryGetValue("Extension", out var ext) ? ext : "",
                     GetFileActivity(entry), entry.Folder, entry.App);
                 gridFile.Rows[childIndex].Tag = entry;
+                gridFile.Rows[childIndex].Cells["ShowInCalendarView"].Value =
+                    entry.ShowInCalendarView ? CheckState.Checked : CheckState.Unchecked;
                 ConfigureNonGroupSummaryCell(gridFile.Rows[childIndex]);
             }
         }
@@ -1976,6 +2273,7 @@ public partial class ViewLogForm : Form
             var row = gridApp.Rows[rowIndex];
             row.Cells[AppGroupDisplayColumnName()].Value = $"{(expanded ? "▼" : "▶")} {group.Key}";
             row.Cells["RecordCount"].Value = group.Count;
+            row.Cells["ShowInCalendarView"].Value = CalendarCheckState(group.MarkedCount, group.Count);
             row.Tag = group;
             row.DefaultCellStyle.Font = new System.Drawing.Font(gridApp.Font, System.Drawing.FontStyle.Bold);
             row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
@@ -1993,6 +2291,8 @@ public partial class ViewLogForm : Form
                     entry.ProcessId,
                     entry.Path);
                 gridApp.Rows[childIndex].Tag = entry;
+                gridApp.Rows[childIndex].Cells["ShowInCalendarView"].Value =
+                    entry.ShowInCalendarView ? CheckState.Checked : CheckState.Unchecked;
                 ConfigureNonGroupSummaryCell(gridApp.Rows[childIndex]);
             }
         }
@@ -2054,6 +2354,7 @@ public partial class ViewLogForm : Form
 
             column.Visible =
                 column.Name == "RecordCount" ||
+                column.Name == "ShowInCalendarView" ||
                 hasExpandedGroups ||
                 column.Name.Equals(groupColumnName, StringComparison.Ordinal);
         }
@@ -2072,8 +2373,17 @@ public partial class ViewLogForm : Form
     {
         var rowIndex = grid.Rows.Add(values);
         grid.Rows[rowIndex].Tag = entry;
+        grid.Rows[rowIndex].Cells["ShowInCalendarView"].Value =
+            entry.ShowInCalendarView ? CheckState.Checked : CheckState.Unchecked;
         ConfigureNonGroupSummaryCell(grid.Rows[rowIndex]);
     }
+
+    private static CheckState CalendarCheckState(int markedCount, int totalCount) =>
+        markedCount <= 0
+            ? CheckState.Unchecked
+            : markedCount >= totalCount
+                ? CheckState.Checked
+                : CheckState.Indeterminate;
 
     private static void ConfigureGroupActionCell(DataGridViewRow row, bool expanded)
     {
@@ -2101,6 +2411,107 @@ public partial class ViewLogForm : Form
         if (row.DataGridView?.Columns["Summary"] is not { } summaryColumn)
             return;
         row.Cells[summaryColumn.Index] = new DataGridViewTextBoxCell();
+    }
+
+    private void Grid_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
+    {
+        if (sender is DataGridView grid &&
+            grid.IsCurrentCellDirty &&
+            grid.CurrentCell?.OwningColumn.Name == "ShowInCalendarView")
+        {
+            grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+    }
+
+    private async void Grid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (_updatingCalendarCells ||
+            _systemOnly ||
+            sender is not DataGridView grid ||
+            e.RowIndex < 0 ||
+            e.ColumnIndex < 0 ||
+            grid.Columns[e.ColumnIndex].Name != "ShowInCalendarView")
+        {
+            return;
+        }
+
+        var row = grid.Rows[e.RowIndex];
+        var showInCalendar = row.Cells[e.ColumnIndex].Value switch
+        {
+            CheckState.Checked => true,
+            bool value => value,
+            _ => false
+        };
+
+        try
+        {
+            string tableName;
+            IReadOnlyList<long> ids;
+            if (row.Tag is LogViewEntry entry)
+            {
+                tableName = GetTableName(grid);
+                ids = new[] { long.Parse(entry.Id, CultureInfo.InvariantCulture) };
+            }
+            else if (grid == gridFile && row.Tag is FileLogGroup fileGroup)
+            {
+                tableName = "ActivityEvents";
+                ids = ReadGroupRecordIds(
+                    tableName,
+                    FileGroupExpression(),
+                    fileGroup.Key,
+                    dateStart.Value,
+                    dateEnd.Value);
+            }
+            else if (grid == gridApp && row.Tag is AppLogGroup appGroup)
+            {
+                tableName = "ProgramEvents";
+                ids = ReadGroupRecordIds(
+                    tableName,
+                    AppGroupExpression(),
+                    appGroup.Key,
+                    dateStart.Value,
+                    dateEnd.Value);
+            }
+            else
+            {
+                return;
+            }
+
+            Cursor = Cursors.WaitCursor;
+            grid.Enabled = false;
+            await ServicePipeClient.SetCalendarVisibilityAsync(tableName, ids, showInCalendar);
+            statusLabel.Text = showInCalendar
+                ? "Added to Calendar View."
+                : "Removed from Calendar View.";
+            RefreshActiveTab();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                "DeskPulse could not update Calendar View.\n\n" + ex.Message,
+                "Calendar View",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            RefreshActiveTab();
+        }
+        finally
+        {
+            grid.Enabled = true;
+            Cursor = Cursors.Default;
+        }
+    }
+
+    private string GetTableName(DataGridView grid) =>
+        grid == gridFile ? "ActivityEvents" :
+        grid == gridApp ? "ProgramEvents" :
+        grid == gridUser ? "UserEvents" :
+        throw new ArgumentOutOfRangeException(nameof(grid));
+
+    private void CalendarViewButton_Click(object? sender, EventArgs e)
+    {
+        using var calendar = new CalendarViewForm(_databaseFilePath);
+        calendar.ShowDialog(this);
     }
 
     private void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
@@ -2322,9 +2733,15 @@ public partial class ViewLogForm : Form
     }
 }
 
-public sealed record FileLogGroup(string Key, int Count);
-public sealed record AppLogGroup(string Key, int Count);
+public sealed record FileLogGroup(string Key, int Count, int MarkedCount);
+public sealed record AppLogGroup(string Key, int Count, int MarkedCount);
 public readonly record struct GroupRuleSuggestion(
+    string Value,
+    LogRuleCategory FormCategory,
+    string RuleType,
+    bool IncludeSubfolders);
+
+public readonly record struct RuleSuggestion(
     string Value,
     LogRuleCategory FormCategory,
     string RuleType,
@@ -2340,4 +2757,5 @@ public sealed record LogViewEntry(
     string App,
     string ProcessId,
     string Path,
+    bool ShowInCalendarView,
     IReadOnlyDictionary<string, string> Fields);

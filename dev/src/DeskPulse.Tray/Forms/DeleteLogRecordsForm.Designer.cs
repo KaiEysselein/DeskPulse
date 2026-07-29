@@ -57,7 +57,7 @@ partial class DeleteLogRecordsForm
         layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
         layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-        layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+        layout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
         layout.Size = new System.Drawing.Size(496, 211);
         layout.TabIndex = 0;
         //
@@ -129,12 +129,12 @@ partial class DeleteLogRecordsForm
         buttonPanel.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
         buttonPanel.Controls.Add(cancelButton);
         buttonPanel.Controls.Add(deleteButton);
-        buttonPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+        buttonPanel.Anchor = System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
         buttonPanel.FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft;
         buttonPanel.Location = new System.Drawing.Point(3, 102);
         buttonPanel.Name = "buttonPanel";
-        buttonPanel.Padding = new System.Windows.Forms.Padding(0, 8, 0, 0);
-        buttonPanel.Size = new System.Drawing.Size(490, 63);
+        buttonPanel.Padding = new System.Windows.Forms.Padding(0, 8, 8, 0);
+        buttonPanel.Size = new System.Drawing.Size(490, 46);
         buttonPanel.TabIndex = 4;
         buttonPanel.WrapContents = false;
         //

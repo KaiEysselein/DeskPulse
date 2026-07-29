@@ -1,6 +1,6 @@
 # DeskPulse Roadmap
 
-## Current release: 0.3.4.4
+## Current release: 0.3.4.7
 
 - Protected system and per-user ProgramData databases and settings
 - SID, scope and Windows-session attribution
@@ -14,13 +14,6 @@
 - One DeskPulse form open from the tray at a time
 
 ## Planned
-
-### 0.3.4.5 — File Activity application exclusions
-
-- Redesign rule creation from File Activity so a user can exclude the application responsible for file events.
-- Preserve the selected record's process identity accurately and place the rule in the correct File Activity rule list.
-- Ensure retroactive cleanup uses the same process-matching semantics as live logging.
-- Add focused UI and end-to-end regression tests before enabling the option again.
 
 ### Calendar activity view
 

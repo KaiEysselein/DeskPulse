@@ -55,7 +55,7 @@ partial class AboutForm
         descriptionLabel.Name = "descriptionLabel";
         descriptionLabel.Size = new System.Drawing.Size(395, 62);
         descriptionLabel.TabIndex = 2;
-        descriptionLabel.Text = "DeskPulse quietly tracks selected file activity while you work. It helps you review what was opened, changed, or saved, and exports clear reports to Excel when needed.";
+        descriptionLabel.Text = "DeskPulse records selected file, application, and user-session activity. Review, group, filter, clean, and export your locally stored activity when needed.";
         // 
         // projectCaptionLabel
         // 

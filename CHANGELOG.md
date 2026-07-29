@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.4.7 — 2026-07-29
+
+- Routed individual and grouped Calendar updates through the authenticated DeskPulse service.
+- Fixed “attempt to write a readonly database” when marking records in the current-user log.
+- Added batching for large grouped Calendar updates while sharing the service database lock with live logging.
+
+## 0.3.4.6 — 2026-07-29
+
+- Added a persistent **Calendar** checkbox to File, App and User Activity records.
+- Added three-state Calendar checkboxes to grouped File and App Activity summaries for safe bulk marking.
+- Added Calendar View with an all-marked overview, bold marked dates and selected-day filtering.
+- Added automatic migration of existing databases with unchecked calendar flags.
+
+## 0.3.4.5 — 2026-07-29
+
+- Adds a cell-aware right-click menu to activity reports for deleting records and creating rules.
+- Pre-populates filename, extension, folder, application-name and executable-path rules from the clicked field.
+- Routes File Activity application exclusions through the enforced filtered-applications list used by live logging and historical cleanup.
+- Aligns form titles, labels, hints, confirmations, maintenance terminology, and storage guidance with current behavior.
+- Separates deletion from rule creation and makes cancellation the safe default in deletion confirmations.
+
 ## 0.3.4.4 — 2026-07-29
 
 - Advances the completed System/User attribution, historical preview, grouping, responsive rule handling, and PowerShell-free installation work to the 0.3.4.4 maintenance release.

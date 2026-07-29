@@ -32,6 +32,9 @@ public sealed partial class ExportDateRangeForm : Form
         startCalendar.SelectionStart = DateTime.Today;
         startCalendar.SelectionEnd = DateTime.Today;
         startCalendar.SetDate(DateTime.Today);
+        endCalendar.SelectionStart = DateTime.Today;
+        endCalendar.SelectionEnd = DateTime.Today;
+        endCalendar.SetDate(DateTime.Today);
     }
 
     private async Task ExportAsync()

@@ -431,14 +431,14 @@ partial class SettingsForm
         _storageGroupBox.Size = new System.Drawing.Size(820, 122);
         _storageGroupBox.TabIndex = 2;
         _storageGroupBox.TabStop = false;
-        _storageGroupBox.Text = "Storage";
+        _storageGroupBox.Text = "Export storage";
 
         // _dataFolderLabel
         _dataFolderLabel.Location = new System.Drawing.Point(18, 34);
         _dataFolderLabel.Name = "_dataFolderLabel";
         _dataFolderLabel.Size = new System.Drawing.Size(90, 22);
         _dataFolderLabel.TabIndex = 0;
-        _dataFolderLabel.Text = "Data folder";
+        _dataFolderLabel.Text = "Export folder";
 
         // _dataFolderTextBox
         _dataFolderTextBox.Location = new System.Drawing.Point(112, 30);
@@ -462,7 +462,7 @@ partial class SettingsForm
         _databaseHintLabel.Name = "_databaseHintLabel";
         _databaseHintLabel.Size = new System.Drawing.Size(650, 22);
         _databaseHintLabel.TabIndex = 3;
-        _databaseHintLabel.Text = "Live data: DeskPulse.db    Export report: DeskPulse-export.xlsx";
+        _databaseHintLabel.Text = "Excel exports are written here. The live database remains under protected ProgramData storage.";
 
         // _fileFilterGroupBox
         _fileFilterGroupBox.BackColor = System.Drawing.SystemColors.Window;
@@ -1023,7 +1023,7 @@ partial class SettingsForm
         _maintenanceUnwantedDataHintLabel.Name = "_maintenanceUnwantedDataHintLabel";
         _maintenanceUnwantedDataHintLabel.Size = new System.Drawing.Size(570, 56);
         _maintenanceUnwantedDataHintLabel.TabIndex = 1;
-        _maintenanceUnwantedDataHintLabel.Text = "Use this after creating Exclude rules for noisy files, folders, or processes. It removes only matching past file/program records and keeps the rules themselves.";
+        _maintenanceUnwantedDataHintLabel.Text = "Removes past File and App Activity matching current file, folder, application, and process exclusions. Exclusions are kept.";
 
         _maintenanceDatabaseCleanupGroupBox.BackColor = System.Drawing.SystemColors.Window;
         _maintenanceDatabaseCleanupGroupBox.Controls.Add(_maintenanceDeleteFileActivityButton);
@@ -1052,7 +1052,7 @@ partial class SettingsForm
         _maintenanceDeleteUserActivityButton.Name = "_maintenanceDeleteUserActivityButton";
         _maintenanceDeleteUserActivityButton.Size = new System.Drawing.Size(210, 30);
         _maintenanceDeleteUserActivityButton.TabIndex = 1;
-        _maintenanceDeleteUserActivityButton.Text = "Delete All User/Session Activity";
+        _maintenanceDeleteUserActivityButton.Text = "Delete All User Activity";
         _maintenanceDeleteUserActivityButton.UseVisualStyleBackColor = true;
         _maintenanceDeleteUserActivityButton.Click += MaintenanceDeleteUserActivityButton_Click;
 
@@ -1061,7 +1061,7 @@ partial class SettingsForm
         _maintenanceDeleteProgramActivityButton.Name = "_maintenanceDeleteProgramActivityButton";
         _maintenanceDeleteProgramActivityButton.Size = new System.Drawing.Size(190, 30);
         _maintenanceDeleteProgramActivityButton.TabIndex = 2;
-        _maintenanceDeleteProgramActivityButton.Text = "Delete All Program Activity";
+        _maintenanceDeleteProgramActivityButton.Text = "Delete All App Activity";
         _maintenanceDeleteProgramActivityButton.UseVisualStyleBackColor = true;
         _maintenanceDeleteProgramActivityButton.Click += MaintenanceDeleteProgramActivityButton_Click;
 
@@ -1271,7 +1271,7 @@ partial class SettingsForm
         _maintenancePastRecordsHintLabel.Location = new System.Drawing.Point(264, 36);
         _maintenancePastRecordsHintLabel.Name = "_maintenancePastRecordsHintLabel";
         _maintenancePastRecordsHintLabel.Size = new System.Drawing.Size(520, 24);
-        _maintenancePastRecordsHintLabel.Text = "Deletes existing file/program records that match current Exclude rules. It does not delete the rules themselves.";
+        _maintenancePastRecordsHintLabel.Text = "Deletes past File and App Activity matching current exclusions. Rules and filtered-app entries are kept.";
 
         // _maintenanceDiagnosticsTabPage
         _maintenanceDiagnosticsTabPage.BackColor = System.Drawing.SystemColors.Window;

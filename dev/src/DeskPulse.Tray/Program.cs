@@ -1139,6 +1139,32 @@ public static class ServicePipeClient
         return ParseAffectedCount(await SendAsync("DELETE_RECORDS|" + tableName + "|" + payload, TimeSpan.FromMinutes(5)));
     }
 
+    public static async Task<long> SetCalendarVisibilityAsync(
+        string tableName,
+        IReadOnlyList<long> ids,
+        bool showInCalendar)
+    {
+        if (ids == null || ids.Count == 0)
+            return 0;
+
+        var affected = 0L;
+        const int requestBatchSize = 2000;
+        for (var offset = 0; offset < ids.Count; offset += requestBatchSize)
+        {
+            var payload = string.Join(
+                ",",
+                ids.Skip(offset)
+                    .Take(requestBatchSize)
+                    .Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            var command =
+                "SET_CALENDAR_VISIBILITY|" + tableName + "|" +
+                (showInCalendar ? "1" : "0") + "|" + payload;
+            affected += ParseAffectedCount(await SendAsync(command, TimeSpan.FromMinutes(5)));
+        }
+
+        return affected;
+    }
+
     public static async Task<long> ClearTableAsync(string tableName)
     {
         return ParseAffectedCount(await SendAsync("CLEAR_TABLE|" + tableName, TimeSpan.FromMinutes(10)));

@@ -21,7 +21,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.3.4.4";
+    public const string Version = "0.3.4.7";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -1586,7 +1586,8 @@ public sealed class DeskPulseDatabase : IDisposable
                     Scope TEXT NULL,
                     WindowsSid TEXT NULL,
                     SessionId INTEGER NULL,
-                    Note TEXT NULL
+                    Note TEXT NULL,
+                    ShowInCalendarView INTEGER NOT NULL DEFAULT 0
                 );
                 """);
 
@@ -1594,6 +1595,7 @@ public sealed class DeskPulseDatabase : IDisposable
             EnsureColumnExists(connection, "ActivityEvents", "FolderPath", "TEXT NULL");
             EnsureColumnExists(connection, "ActivityEvents", "FileName", "TEXT NULL");
             EnsureColumnExists(connection, "ActivityEvents", "Extension", "TEXT NULL");
+            EnsureColumnExists(connection, "ActivityEvents", "ShowInCalendarView", "INTEGER NOT NULL DEFAULT 0");
             EnsureAttributionColumns(connection, "ActivityEvents");
 
             ExecuteNonQuery(connection,
@@ -1613,7 +1615,8 @@ public sealed class DeskPulseDatabase : IDisposable
                     Scope TEXT NULL,
                     WindowsSid TEXT NULL,
                     SessionId INTEGER NULL,
-                    Note TEXT NULL
+                    Note TEXT NULL,
+                    ShowInCalendarView INTEGER NOT NULL DEFAULT 0
                 );
                 """);
 
@@ -1656,7 +1659,8 @@ public sealed class DeskPulseDatabase : IDisposable
                     Scope TEXT NULL,
                     WindowsSid TEXT NULL,
                     SessionId INTEGER NULL,
-                    Note TEXT NULL
+                    Note TEXT NULL,
+                    ShowInCalendarView INTEGER NOT NULL DEFAULT 0
                 );
                 """);
 
@@ -1666,6 +1670,8 @@ public sealed class DeskPulseDatabase : IDisposable
             RemoveColumnIfExists(connection, "ProgramEvents", "EventType");
             EnsureAttributionColumns(connection, "UserEvents");
             EnsureAttributionColumns(connection, "ProgramEvents");
+            EnsureColumnExists(connection, "UserEvents", "ShowInCalendarView", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumnExists(connection, "ProgramEvents", "ShowInCalendarView", "INTEGER NOT NULL DEFAULT 0");
             BackfillAttributionColumns(connection);
 
             ExecuteNonQuery(
@@ -2132,6 +2138,60 @@ public sealed class DeskPulseDatabase : IDisposable
             }
 
             return deletedTotal;
+        }
+    }
+
+    public long SetCalendarVisibilityByIds(
+        string tableName,
+        IReadOnlyList<long> ids,
+        bool showInCalendar)
+    {
+        if (!IsKnownActivityTable(tableName))
+            throw new InvalidOperationException("Unknown DeskPulse table: " + tableName);
+        if (ids == null || ids.Count == 0)
+            return 0;
+
+        lock (_dbLock)
+        {
+            using var connection = new SqliteConnection(ConnectionString);
+            connection.Open();
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout=5000;");
+
+            var updatedTotal = 0L;
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                const int batchSize = 400;
+                for (var offset = 0; offset < ids.Count; offset += batchSize)
+                {
+                    var batch = ids.Skip(offset).Take(batchSize).Distinct().ToArray();
+                    using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.Parameters.AddWithValue("$show", showInCalendar ? 1 : 0);
+                    var names = new List<string>(batch.Length);
+                    for (var index = 0; index < batch.Length; index++)
+                    {
+                        var name = "$id" + index.ToString(CultureInfo.InvariantCulture);
+                        names.Add(name);
+                        command.Parameters.AddWithValue(name, batch[index]);
+                    }
+
+                    command.CommandText =
+                        "UPDATE " + tableName +
+                        " SET ShowInCalendarView = $show WHERE Id IN (" +
+                        string.Join(",", names) + ");";
+                    updatedTotal += command.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+
+            return updatedTotal;
         }
     }
 

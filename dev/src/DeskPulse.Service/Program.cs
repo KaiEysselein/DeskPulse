@@ -411,6 +411,7 @@ public sealed class DeskPulseWindowsService : ServiceBase
             case "STOP_LOAD_TEST": return _loadTest.Stop(WriteLoadTestEvent);
             case "LOAD_TEST_STATUS": return _loadTest.GetStatus();
             case "DELETE_RECORDS": return DeleteSelectedRecords(command, clientProcessId);
+            case "SET_CALENDAR_VISIBILITY": return SetCalendarVisibility(command, clientProcessId);
             case "CLEAR_TABLE": return ClearTable(command, clientProcessId);
             case "CLEAR_ALL_RECORDS": return ClearAllRecords(clientProcessId);
             case "SYSTEM_CLEAR_TABLE": return ClearSystemTable(command);
@@ -530,6 +531,33 @@ public sealed class DeskPulseWindowsService : ServiceBase
             return "OK|0";
 
         return ExecuteDatabaseWrite(clientProcessId, database => database.DeleteRecordsByIds(tableName, ids));
+    }
+
+    private string SetCalendarVisibility(string command, int clientProcessId)
+    {
+        var parts = command.Split('|', 4);
+        if (parts.Length != 4)
+            return "ERROR|Invalid Calendar View update request.";
+
+        var tableName = NormalizeActivityTable(parts[1]);
+        if (tableName == null)
+            return "ERROR|Unknown activity table.";
+        if (parts[2] is not ("0" or "1"))
+            return "ERROR|Invalid Calendar View value.";
+
+        var ids = parts[3].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => long.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+        if (ids.Length == 0)
+            return "OK|0";
+
+        var showInCalendar = parts[2] == "1";
+        return ExecuteDatabaseWrite(
+            clientProcessId,
+            database => database.SetCalendarVisibilityByIds(tableName, ids, showInCalendar));
     }
 
     private string ClearTable(string command, int clientProcessId)
