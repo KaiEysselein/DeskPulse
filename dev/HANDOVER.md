@@ -1,4 +1,4 @@
-# DeskPulse 0.3.4.0 Technical Development Handover
+# DeskPulse 0.4.0.3 Technical Development Handover
 
 ## Purpose and scope
 
@@ -8,7 +8,19 @@ Repository: https://github.com/KaiEysselein/DeskPulse
 
 ## Current release baseline
 
-DeskPulse **0.3.4.0** adds protected data-driven machine-wide policy, administrator override/fallback handling, revision warnings, aggregate candidate diagnostics, a dynamic administrator policy view, automated rule/layout tests and scrollable forms while retaining the protected storage architecture released in 0.3.3.0.
+DeskPulse **0.4.0.3** is the current patch baseline. It retains the protected storage and machine-wide policy architecture and adds integrated Records/Calendar navigation, Calendar record filtering and grouping, per-user startup/time preferences, and animated progress feedback for expensive view operations.
+
+Changes completed in the 0.4.0.1-0.4.0.3 patch sequence:
+
+- Added a three-second click-to-dismiss startup status message near the system tray.
+- Added installer and Current User Settings controls for the startup message while preserving upgrade choices.
+- Moved 24-hour versus AM/PM formatting into Current User Settings.
+- Integrated Calendar into the Log window and removed separate Calendar tray-menu commands.
+- Added one destination-labelled Records/Calendar toggle and one All records/Marked records toggle.
+- Added Calendar grouping/ungrouping and expandable groups by date, hour, activity and item.
+- Moved Export to the top toolbar and Records per page to the far left of paging controls.
+- Added animated progress feedback for loading, paging, sorting, grouping, expanding, collapsing and filtering large views.
+- Expanded the automated suite from 69 to 73 passing tests.
 
 Included changes since 0.3.0.0:
 

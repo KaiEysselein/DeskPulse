@@ -1,42 +1,37 @@
-# Version Check — 0.4.0.0
+# Version Check - 0.4.0.3
 
-Version **0.4.0.0** is the current milestone release. Historical version numbers in changelog entries and archived verification records are intentionally preserved.
+Version **0.4.0.3** is the current patch release. Version **0.4.0.0** remains the retained milestone baseline.
 
 ## Active references
 
-- `DeskPulse.Shared` AppInfo: `0.4.0.0`
-- Shared, service and tray project versions: `0.4.0.0`
-- Inno Setup installer and output filename: `0.4.0.0`
-- Publish folders: `dev\publish\v0.4.0.0\service` and `dev\publish\v0.4.0.0\tray`
-- Installer: `dev\publish\v0.4.0.0\installer\DeskPulse_Setup_0.4.0.0.exe`
-- Current approved installer folder: `releases\current`
+- `DeskPulse.Shared` AppInfo: `0.4.0.3`
+- Shared, service and tray project versions: `0.4.0.3`
+- Publish folders: `dev\publish\v0.4.0.3\service` and `dev\publish\v0.4.0.3\tray`
+- Installer: `dev\publish\v0.4.0.3\installer\DeskPulse_Setup_0.4.0.3.exe`
+- Current approved installer: `releases\current\DeskPulse_Setup_0.4.0.3.exe`
 - Retained milestone: `releases\v0.4.0.0`
-- GitHub tag target: `v0.4.0.0`
-- Installer SHA-256: `A0476960D306253FAA9BA73051A96A385DF4BCBA90E15CDF749C045CFA8E9A21`
+- GitHub tag target: `v0.4.0.3`
+- Installer SHA-256: `7F1F881F99C0CE5BF4F7419EC256E08BC5C20FF3C15C4DF8EBBF3DDFBE34A815`
 
-## 0.4.0.0 release checks
+## Final release checks
 
-- [x] Full Release build completes with zero warnings and zero errors.
-- [x] All 69 automated tests pass.
-- [x] Source audit confirms no installer/runtime PowerShell execution.
-- [x] Self-contained service and tray outputs exist under `dev\publish\v0.4.0.0`.
-- [x] ESET scans the unpacked service (221 objects) and tray (499 objects) with zero detections.
-- [x] Inno Setup creates `DeskPulse_Setup_0.4.0.0.exe`.
-- [x] ESET scans the installer and all 728 embedded objects with zero detections.
-- [x] The clean installer is copied to `releases\current`.
-- [x] The live installer completes successfully.
-- [x] Installed service and tray hashes match the published 0.4.0.0 binaries.
-- [x] Installed service reports Running and Automatic; the installed tray is running as 0.4.0.0.
-- [x] The all-users Startup shortcut exists and no DeskPulse scheduled startup task remains.
-- [x] ESET scans both installed executables (710 objects) with zero detections.
+- [x] Release build completes with zero warnings and zero errors.
+- [x] All 73 automated tests pass.
+- [x] Self-contained service and tray outputs exist under `dev\publish\v0.4.0.3`.
+- [x] Inno Setup creates `DeskPulse_Setup_0.4.0.3.exe`.
+- [x] The approved installer is copied to `releases\current`.
+- [x] Silent upgrade completes with installer exit code 0.
+- [x] Installed service and tray report version `0.4.0.3`.
+- [x] Installed service is Running with Automatic startup.
+- [x] Exactly one tray process is active in the current session.
+- [x] Installed service and tray SHA-256 hashes match the published binaries.
+- [x] Current-user SQLite `integrity_check` and `quick_check` return `ok`.
 
-## Existing architecture acceptance
+## Binary hashes
 
-- [x] ProgramData migration, ACL, schema and SQLite integrity passed during 0.3.2.x acceptance.
-- [x] SID/session routing and simultaneous-user isolation passed during 0.3.2.x acceptance.
-- [x] Named-pipe authorization and system/current-user maintenance boundaries passed.
-- [x] Current-user and system log/settings process isolation passed.
+- Published/installed service: `83F009CE8E6D5A4D87C6E85629B09121912D376B9790089F92550D2D6030ADBA`
+- Published/installed tray: `EA79E7F56A4BAD5D4B8C67E7C065829D24E1EDA1CE8112B4E286380179B82402`
 
 ## Scope boundary
 
-DeskPulse provides no combined all-users log. Current-user actions target only the calling user's SID database; administrator log and maintenance target only the protected system database. Rule-candidate diagnostics store bounded aggregate process names and file extensions only.
+DeskPulse provides no combined all-users log. Current-user actions target only the calling user's SID database; administrator log and maintenance target only the protected system database.

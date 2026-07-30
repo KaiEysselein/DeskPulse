@@ -1,6 +1,6 @@
 # DeskPulse Roadmap
 
-## Current release: 0.4.0.0
+## Current release: 0.4.0.3
 
 - Protected system and per-user ProgramData databases and settings
 - SID, scope and Windows-session attribution
@@ -12,17 +12,18 @@
 - Complete date-range export with progress
 - Optional folder-opening suppression
 - One DeskPulse form open from the tray at a time
+- Integrated Records and Calendar layouts
+- Calendar marking, All/Marked filtering and expandable header grouping
+- Per-user startup status and time-format preferences
+- Animated progress feedback for large view operations
 
 ## Planned
 
-### Calendar activity view
+### Calendar aggregation enhancements
 
-Add a Calendar view under Log with month, day and hourly drill-down.
-
-- Month cells show compact selectable daily summaries.
-- Double-clicking a day opens hourly summaries.
-- Double-clicking an hour opens the existing log filtered to that hour.
-- Aggregate efficiently in SQLite rather than loading raw rows.
+- Add compact daily summary metrics to month cells.
+- Add optional hour-level drill-down summaries.
+- Move further high-volume aggregation into grouped SQLite queries.
 
 ### Pause-state model
 

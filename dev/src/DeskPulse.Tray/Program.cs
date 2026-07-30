@@ -45,6 +45,20 @@ internal static class Program
             return;
         }
 
+        var splashSettingIndex = Array.FindIndex(
+            args,
+            a => a.Equals("--set-startup-splash", StringComparison.OrdinalIgnoreCase));
+        if (splashSettingIndex >= 0)
+        {
+            var settings = AppSettings.Load();
+            settings.ShowStartupSplash =
+                splashSettingIndex + 1 < args.Length &&
+                bool.TryParse(args[splashSettingIndex + 1], out var enabled) &&
+                enabled;
+            settings.Save();
+            return;
+        }
+
         if (TryHandleInstallLifecycleCommand(args))
             return;
 
@@ -480,6 +494,7 @@ public sealed class TrayAppContext : ApplicationContext
     private Process? _activeExternalWindowProcess;
     private readonly System.Windows.Forms.Timer _focusLossTimer;
     private readonly System.Windows.Forms.Timer _safetyTimer;
+    private StartupSplashForm? _startupSplash;
 
     public TrayAppContext()
     {
@@ -500,11 +515,6 @@ public sealed class TrayAppContext : ApplicationContext
         personalMenu.ToolTipText = currentUserToolTip;
         var currentUserLogMenuItem = AddMenuCommand(personalMenu.DropDownItems, "Log...", OpenViewLog);
         currentUserLogMenuItem.ToolTipText = currentUserToolTip;
-        var currentUserCalendarMenuItem = AddMenuCommand(
-            personalMenu.DropDownItems,
-            "Calendar View...",
-            OpenCalendarView);
-        currentUserCalendarMenuItem.ToolTipText = "Shows Calendar-marked records for the current Windows user.";
         personalMenu.DropDownItems.Add(new ToolStripSeparator());
         var currentUserSettingsMenuItem = AddMenuCommand(personalMenu.DropDownItems, "Settings...", OpenSettings);
         currentUserSettingsMenuItem.ToolTipText = currentUserToolTip;
@@ -520,11 +530,6 @@ public sealed class TrayAppContext : ApplicationContext
             "System Log...",
             OpenSystemLog);
         systemLogMenuItem.ToolTipText = administratorToolTip;
-        var systemCalendarMenuItem = AddMenuCommand(
-            administratorMenu.DropDownItems,
-            "System Calendar View...",
-            OpenSystemCalendarView);
-        systemCalendarMenuItem.ToolTipText = "Shows Calendar-marked records from the protected system database. Requires administrator approval.";
         administratorMenu.DropDownItems.Add(new ToolStripSeparator());
         var systemSettingsMenuItem = AddMenuCommand(
             administratorMenu.DropDownItems,
@@ -557,6 +562,12 @@ public sealed class TrayAppContext : ApplicationContext
                 ShowTrayMenuAfterShellFlyoutCloses();
         };
         _ = ServicePipeClient.SendAsync("TRAY_STARTED");
+
+        if (AppSettings.Load().ShowStartupSplash)
+        {
+            _startupSplash = new StartupSplashForm();
+            _startupSplash.Show();
+        }
 
         var stateTimer = new System.Windows.Forms.Timer { Interval = 750 };
         stateTimer.Tick += async (_, _) =>
@@ -668,6 +679,7 @@ public sealed class TrayAppContext : ApplicationContext
     {
         if (response.Equals("CRITICAL_PAUSED", StringComparison.OrdinalIgnoreCase))
         {
+            _startupSplash?.SetStatus("Logging is paused by a safety safeguard.");
             _loggingPaused = true;
             _pauseLoggingMenuItem.Text = "Resume Logging";
             SetTrayState(AppIconState.Warning, "DeskPulse - Critical safety pause");
@@ -677,6 +689,7 @@ public sealed class TrayAppContext : ApplicationContext
         if (response.Equals("PAUSED", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("OK|PAUSED", StringComparison.OrdinalIgnoreCase))
         {
+            _startupSplash?.SetStatus("Activity logging is paused.");
             _loggingPaused = true;
             _pauseLoggingMenuItem.Text = "Resume Logging";
             SetTrayState(AppIconState.Paused, "DeskPulse - Logging paused");
@@ -686,12 +699,14 @@ public sealed class TrayAppContext : ApplicationContext
         if (response.Equals("ACTIVE", StringComparison.OrdinalIgnoreCase) ||
             response.Equals("OK|ACTIVE", StringComparison.OrdinalIgnoreCase))
         {
+            _startupSplash?.SetStatus("Activity monitoring is running.");
             _loggingPaused = false;
             _pauseLoggingMenuItem.Text = "Pause Logging";
             SetTrayState(AppIconState.Normal, AppInfo.AppName);
             return;
         }
 
+        _startupSplash?.SetStatus("The DeskPulse service needs attention.");
         SetTrayState(AppIconState.Warning, "DeskPulse - Service attention required");
 
         if (showErrors)
@@ -755,63 +770,6 @@ public sealed class TrayAppContext : ApplicationContext
         {
             MessageBox.Show(
                 "DeskPulse could not open the system log.\n\n" + ex.Message,
-                "DeskPulse",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
-    private void OpenCalendarView()
-    {
-        try
-        {
-            var executablePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(executablePath))
-                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
-
-            _ = Process.Start(new ProcessStartInfo
-            {
-                FileName = executablePath,
-                Arguments = "--personal-calendar",
-                UseShellExecute = false,
-                WorkingDirectory = AppContext.BaseDirectory
-            });
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                "DeskPulse could not open Calendar View.\n\n" + ex.Message,
-                "DeskPulse",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
-    }
-
-    private void OpenSystemCalendarView()
-    {
-        try
-        {
-            var executablePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(executablePath))
-                throw new InvalidOperationException("DeskPulse could not determine its executable path.");
-
-            _ = Process.Start(new ProcessStartInfo
-            {
-                FileName = executablePath,
-                Arguments = "--system-calendar",
-                UseShellExecute = true,
-                Verb = "runas",
-                WorkingDirectory = AppContext.BaseDirectory
-            });
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            // The user cancelled the Windows UAC prompt.
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                "DeskPulse could not open System Calendar View.\n\n" + ex.Message,
                 "DeskPulse",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);

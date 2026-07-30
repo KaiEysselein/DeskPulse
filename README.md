@@ -6,7 +6,7 @@
 
 It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
 
-**Current version:** `0.4.0.0`
+**Current version:** `0.4.0.3`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
@@ -31,6 +31,9 @@ DeskPulse is designed for local use. Activity data remains on the computer unles
 - Configurable Windows-system activity suppression
 - Application-based File Activity filtering
 - Paged log views with details and export
+- Integrated Records and Calendar layouts with marked-record filtering and header grouping
+- Animated progress feedback while large views are loaded, sorted, grouped or expanded
+- Per-user startup status message and 24-hour/AM-PM time preference
 - Database cleanup using the current rules
 - Pause and resume control
 - Service CPU and RAM safeguards
@@ -68,9 +71,9 @@ The shared transparent PNG and ICO resources are stored under `dev\Resources`.
 
 The uninstaller removes the application, service and startup registration while preserving system and per-user databases.
 
-## 0.3.4 release boundary
+## 0.4 release boundary
 
-Version 0.4.0.0 adds direct Current User and elevated System Calendar views to the tray menu, with independent refreshable windows and protected System Log Calendar marking.
+Version 0.4 adds Calendar marking and an integrated Calendar layout to the Current User and elevated System logs. Patch 0.4.0.3 unifies Records and Calendar navigation, adds All records/Marked records filtering, Calendar header grouping, startup-status preferences and animated progress feedback for large view transformations.
 
 ## Activity filtering
 

@@ -24,6 +24,7 @@ public partial class ViewLogForm : Form
     private string _fileGroupBy = "None";
     private string _appGroupBy = "None";
     private bool _use12HourTime;
+    private CalendarViewForm? _calendarView;
     private bool _applyingPeriod;
     private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedAppGroups = new(StringComparer.Ordinal);
@@ -57,6 +58,7 @@ public partial class ViewLogForm : Form
     private bool _fileGroupSortAscending;
     private string _userSortColumn = "CreatedAt";
     private bool _userSortAscending;
+    private int _viewProgressDepth;
 
     public ViewLogForm(
         Action? settingsChanged = null,
@@ -85,8 +87,9 @@ public partial class ViewLogForm : Form
         }
 
         _pageSize = LoadPageSize();
-        _use12HourTime = LoadUse12HourTime();
-        timeFormatCombo.SelectedItem = _use12HourTime ? "12-hour" : "24-hour";
+        _use12HourTime = settings.Use12HourTime;
+        dateStart.CustomFormat = _use12HourTime ? "dd/MM/yyyy hh:mm tt" : "dd/MM/yyyy HH:mm";
+        dateEnd.CustomFormat = dateStart.CustomFormat;
         pageSizeInput.Value = Math.Clamp(_pageSize, (int)pageSizeInput.Minimum, (int)pageSizeInput.Maximum);
         dateStart.Value = GetFirstRecordedDate();
         dateEnd.Value = DateTime.Now;
@@ -134,7 +137,13 @@ public partial class ViewLogForm : Form
         {
             UpdateGroupByControls();
             RefreshLog();
+            if (LoadCalendarViewPreference())
+                ShowCalendarView();
+            else
+                ShowDataView();
         };
+        var viewToolTip = new ToolTip();
+        viewToolTip.SetToolTip(calendarViewButton, "Switch between Data View and Calendar View.");
         FormClosed += (_, _) =>
         {
             _reportContextMenu?.Dispose();
@@ -489,7 +498,7 @@ public partial class ViewLogForm : Form
 
         if (grid == gridFile)
         {
-            _fileGroupBy = _fileGroupBy == grouping ? "None" : grouping;
+            _fileGroupBy = ToggleHeaderGrouping(_fileGroupBy, grouping);
             _fileGroupSortColumn = "Latest";
             _fileGroupSortAscending = false;
             _expandedFileGroups.Clear();
@@ -497,7 +506,7 @@ public partial class ViewLogForm : Form
         }
         else
         {
-            _appGroupBy = _appGroupBy == grouping ? "None" : grouping;
+            _appGroupBy = ToggleHeaderGrouping(_appGroupBy, grouping);
             _appGroupSortColumn = "Latest";
             _appGroupSortAscending = false;
             _expandedAppGroups.Clear();
@@ -507,6 +516,11 @@ public partial class ViewLogForm : Form
         UpdateGroupByControls();
         RefreshActiveTab();
     }
+
+    public static string ToggleHeaderGrouping(string currentGrouping, string clickedGrouping) =>
+        string.Equals(currentGrouping, clickedGrouping, StringComparison.Ordinal)
+            ? "None"
+            : clickedGrouping;
 
     private bool TryGetHeaderGrouping(
         DataGridView grid,
@@ -1430,6 +1444,12 @@ public partial class ViewLogForm : Form
 
     private void ExportButton_Click(object? sender, EventArgs e)
     {
+        if (calendarHostPanel.Visible && _calendarView != null)
+        {
+            ExportCalendarView();
+            return;
+        }
+
         var grid = GetActiveGrid();
         var total = GetActiveTotal();
         if (grid == null || total == 0)
@@ -1510,6 +1530,49 @@ public partial class ViewLogForm : Form
 
         if (closeAfterSuccessfulExport)
             Close();
+    }
+
+    private void ExportCalendarView()
+    {
+        var selectionName = _calendarView?.SelectedDateFilter is DateTime selectedDate
+            ? selectedDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)
+            : "all-marked";
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Export displayed Calendar records",
+            Filter = "Excel Workbook (*.xlsx)|*.xlsx",
+            DefaultExt = "xlsx",
+            AddExtension = true,
+            FileName = $"DeskPulse-Calendar-{selectionName}.xlsx"
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            Cursor = Cursors.WaitCursor;
+            var exportedCount = _calendarView!.ExportDisplayedRecords(dialog.FileName);
+            MessageBox.Show(
+                this,
+                $"Exported {exportedCount:N0} displayed Calendar record(s).",
+                "Calendar export",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            Process.Start(new ProcessStartInfo { FileName = dialog.FileName, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                "DeskPulse could not export Calendar View.\n\n" + ex.Message,
+                "Calendar export",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
     }
 
     private int ExportCompleteLog(
@@ -1657,33 +1720,6 @@ public partial class ViewLogForm : Form
         {
             _updatingGroupByCombo = false;
         }
-    }
-
-    private void TimeFormatCombo_SelectedIndexChanged(object? sender, EventArgs e)
-    {
-        _use12HourTime = string.Equals(timeFormatCombo.SelectedItem?.ToString(), "12-hour", StringComparison.Ordinal);
-        SaveUse12HourTime(_use12HourTime);
-        if (IsHandleCreated) RefreshActiveTab();
-    }
-
-    private static bool LoadUse12HourTime()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(ViewSettingsRegistryPath);
-            return key?.GetValue("ViewLogUse12HourTime") is int value && value != 0;
-        }
-        catch { return false; }
-    }
-
-    private static void SaveUse12HourTime(bool value)
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(ViewSettingsRegistryPath);
-            key?.SetValue("ViewLogUse12HourTime", value ? 1 : 0, RegistryValueKind.DWord);
-        }
-        catch { }
     }
 
     private static int LoadPageSize()
@@ -1839,6 +1875,11 @@ public partial class ViewLogForm : Form
 
     private void RefreshActiveTab()
     {
+        RunWithViewProgress("Updating the displayed records...", RefreshActiveTabCore);
+    }
+
+    private void RefreshActiveTabCore()
+    {
         var start = dateStart.Value;
         var endExclusive = dateEnd.Value;
         if (endExclusive <= start) return;
@@ -1909,6 +1950,11 @@ public partial class ViewLogForm : Form
 
     private void RefreshLog()
     {
+        RunWithViewProgress("Loading and arranging the activity log...", RefreshLogCore);
+    }
+
+    private void RefreshLogCore()
+    {
         var start = dateStart.Value;
         var endExclusive = dateEnd.Value;
 
@@ -1965,6 +2011,26 @@ public partial class ViewLogForm : Form
         finally
         {
             Cursor = Cursors.Default;
+        }
+    }
+
+    private void RunWithViewProgress(string message, Action operation)
+    {
+        if (_viewProgressDepth > 0 || !IsHandleCreated || !Visible)
+        {
+            operation();
+            return;
+        }
+
+        _viewProgressDepth++;
+        using var progress = ViewProgressSession.Start(message);
+        try
+        {
+            operation();
+        }
+        finally
+        {
+            _viewProgressDepth--;
         }
     }
 
@@ -2626,12 +2692,93 @@ public partial class ViewLogForm : Form
 
     private void CalendarViewButton_Click(object? sender, EventArgs e)
     {
-        using var calendar = new CalendarViewForm(
+        if (calendarHostPanel.Visible)
+            ShowDataView();
+        else
+            ShowCalendarView();
+    }
+
+    private void ShowDataView()
+    {
+        if (_calendarView?.SelectedDateFilter is DateTime selectedDate)
+        {
+            _applyingPeriod = true;
+            try
+            {
+                dateStart.Value = ClampPickerValue(dateStart, selectedDate.Date);
+                dateEnd.Value = ClampPickerValue(dateEnd, selectedDate.Date.AddDays(1));
+                periodCombo.SelectedItem = "Custom";
+            }
+            finally
+            {
+                _applyingPeriod = false;
+            }
+            ResetPages();
+            RefreshLog();
+        }
+        calendarHostPanel.Visible = false;
+        tabs.Visible = true;
+        pagingPanel.Visible = true;
+        statusLabel.Visible = true;
+        calendarViewButton.Text = "Calendar View";
+        UpdateGroupByControls();
+        UpdateSelectionButtons();
+        SaveCalendarViewPreference(false);
+    }
+
+    private void ShowCalendarView()
+    {
+        _calendarView ??= CreateEmbeddedCalendar();
+        tabs.Visible = false;
+        pagingPanel.Visible = false;
+        statusLabel.Visible = false;
+        groupByLabel.Visible = false;
+        createRuleButton.Enabled = false;
+        deleteButton.Enabled = false;
+        calendarHostPanel.Visible = true;
+        calendarHostPanel.BringToFront();
+        calendarViewButton.Text = "Data View";
+        _calendarView.RefreshCalendar();
+        SaveCalendarViewPreference(true);
+    }
+
+    private CalendarViewForm CreateEmbeddedCalendar()
+    {
+        var calendar = new CalendarViewForm(
             _databaseFilePath,
             _systemOnly
                 ? "DeskPulse - System Calendar View"
-                : "DeskPulse - Calendar View");
-        calendar.ShowDialog(this);
+                : "DeskPulse - Calendar View",
+            _use12HourTime)
+        {
+            TopLevel = false,
+            FormBorderStyle = FormBorderStyle.None,
+            Dock = DockStyle.Fill,
+            WindowState = FormWindowState.Normal
+        };
+        calendarHostPanel.Controls.Add(calendar);
+        calendar.Show();
+        return calendar;
+    }
+
+    private static bool LoadCalendarViewPreference()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(ViewSettingsRegistryPath);
+            return key?.GetValue("ViewLogCalendarView") is int value && value != 0;
+        }
+        catch { return false; }
+    }
+
+    private static void SaveCalendarViewPreference(bool calendarView)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(ViewSettingsRegistryPath);
+            key?.SetValue("ViewLogCalendarView", calendarView ? 1 : 0, RegistryValueKind.DWord);
+        }
+        catch { }
     }
 
     private void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)

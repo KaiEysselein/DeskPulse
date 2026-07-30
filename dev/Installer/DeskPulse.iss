@@ -1,15 +1,15 @@
 #define MyAppName "DeskPulse"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.0.0"
+  #define MyAppVersion "0.4.0.3"
 #endif
 #ifndef MyAppChannel
   #define MyAppChannel "Stable"
 #endif
 #ifndef PublishFolder
-  #define PublishFolder "v0.4.0.0"
+  #define PublishFolder "v0.4.0.3"
 #endif
 #ifndef OutputBaseFilename
-  #define OutputBaseFilename "DeskPulse_Setup_0.4.0.0"
+  #define OutputBaseFilename "DeskPulse_Setup_0.4.0.3"
 #endif
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"
@@ -54,6 +54,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "startupsplash"; Description: "Show a DeskPulse startup message near the system tray"; GroupDescription: "Startup options:"; Flags: checkedonce
 
 [Dirs]
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveruninstall
@@ -83,6 +84,8 @@ Name: "{commonstartup}\DeskPulse Tray"; Filename: "{app}\Tray\{#TrayExeName}"; P
 ; LocalSystem service starts. The service then migrates the live database into
 ; its protected ProgramData SID folder.
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--initialize-settings"; Flags: runhidden waituntilterminated runasoriginaluser
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--set-startup-splash true"; Flags: runhidden waituntilterminated runasoriginaluser; Tasks: startupsplash; Check: IsFreshInstall
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--set-startup-splash false"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsFreshInstallAndSplashDisabled
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--disable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
 Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Service\{#ServiceExeName}"" start= auto DisplayName= ""DeskPulse Service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse background monitoring service"""; Flags: runhidden waituntilterminated
@@ -170,6 +173,16 @@ begin
   Result :=
     (PreviousDeskPulseVersion = '') or
     (not FileExists(ExpandConstant('{commonappdata}\DeskPulse\Config\admin-rules.yaml')));
+end;
+
+function IsFreshInstall: Boolean;
+begin
+  Result := PreviousDeskPulseVersion = '';
+end;
+
+function IsFreshInstallAndSplashDisabled: Boolean;
+begin
+  Result := IsFreshInstall and (not WizardIsTaskSelected('startupsplash'));
 end;
 
 function ServiceExists(const Service: string): Boolean;

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.0.3 - 2026-07-30
+
+- Added an animated progress window for Log and Calendar loading, paging, sorting, grouping, ungrouping, expansion, collapse, and record-filter changes.
+- Runs the progress animation on an independent UI thread so it remains visibly active while large record sets are processed.
+
+## 0.4.0.2 - 2026-07-30
+
+- Replaced the separate Data View and Calendar View controls with one destination-labelled toggle button.
+- Added a single All records/Marked records Calendar filter that remembers the current user's choice.
+- Added double-click Calendar header grouping and ungrouping by date, hour, activity, or item.
+- Added expandable and collapsible Calendar group rows.
+- Renamed the Calendar date checkbox to All dates to distinguish it from the record filter.
+
+## 0.4.0.1 - 2026-07-30
+
+- Added a three-second, click-to-dismiss startup status message near the system tray.
+- Added fresh-install and Current User Settings controls for the per-user startup message preference while preserving it during upgrades.
+- Moved the 24-hour versus AM/PM preference into Current User Settings and applied it to Log and Calendar views.
+- Integrated Calendar View into the Log window behind a remembered Data View / Calendar View toggle.
+- Removed the standalone current-user and administrator Calendar tray-menu commands.
+- Added calendar-date handoff to Data View and explicit export of the displayed Calendar records.
+- Moved Export to the top toolbar and Records per page to the far left of the paging toolbar.
+- Improved compact-window toolbar layout and retained double-click header grouping/ungrouping.
+
 ## 0.4.0.0 — 2026-07-29
 
 - Added **Current User → Calendar View** to the tray menu.

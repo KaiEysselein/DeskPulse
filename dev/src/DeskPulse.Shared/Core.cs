@@ -21,7 +21,7 @@ namespace DeskPulse;
 public static class AppInfo
 {
     public const string AppName = "DeskPulse";
-    public const string Version = "0.4.0.0";
+    public const string Version = "0.4.0.3";
     public const string GitHubUrl = "https://github.com/KaiEysselein/DeskPulse";
     public const string PipeName = "DeskPulse.Service.0.2";
 }
@@ -5320,6 +5320,10 @@ public sealed class AppSettings
 
     public bool StartWithWindows { get; set; }
 
+    public bool ShowStartupSplash { get; set; } = true;
+
+    public bool Use12HourTime { get; set; }
+
     public double ServiceSafetyWarningCpuPercent { get; set; } = 30;
     public double ServiceSafetyCriticalCpuPercent { get; set; } = 45;
     public double ServiceSafetyWarningMemoryPercent { get; set; } = 30;
@@ -5427,6 +5431,8 @@ public sealed class AppSettings
             DataFolderPath = DataFolderPath,
             IgnoreTempFolders = IgnoreTempFolders,
             StartWithWindows = StartWithWindows,
+            ShowStartupSplash = ShowStartupSplash,
+            Use12HourTime = Use12HourTime,
             ServiceSafetyWarningCpuPercent = ServiceSafetyWarningCpuPercent,
             ServiceSafetyCriticalCpuPercent = ServiceSafetyCriticalCpuPercent,
             ServiceSafetyWarningMemoryPercent = ServiceSafetyWarningMemoryPercent,

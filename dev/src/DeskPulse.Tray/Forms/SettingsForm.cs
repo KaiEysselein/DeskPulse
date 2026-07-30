@@ -52,6 +52,8 @@ public partial class SettingsForm : Form
     private Button _resetSafetyDefaultsButton = null!;
     private CheckBox _trackWindowsSystemActivityCheckBox = null!;
     private CheckBox _logFolderOpeningsCheckBox = null!;
+    private CheckBox _showStartupSplashCheckBox = null!;
+    private ComboBox _timeFormatComboBox = null!;
     private Button _configureFilteredFileActivityProcessesButton = null!;
     private Label _filteredFileActivityProcessesSummaryLabel = null!;
     private HashSet<string> _filteredFileActivityProcesses = new(StringComparer.OrdinalIgnoreCase);
@@ -231,8 +233,8 @@ public partial class SettingsForm : Form
     private void ConfigureGeneralActivityLogging()
     {
         _behaviourGroupBox.Text = "Activity logging";
-        _behaviourGroupBox.Height = 230;
-        _storageGroupBox.Top = 448;
+        _behaviourGroupBox.Height = 280;
+        _storageGroupBox.Top = 498;
 
         _logProgramActivityCheckBox.Location = new System.Drawing.Point(18, 30);
         _logProgramActivityCheckBox.Width = 350;
@@ -306,6 +308,32 @@ public partial class SettingsForm : Form
             ForeColor = System.Drawing.SystemColors.GrayText,
             Text = "When disabled, DeskPulse suppresses routine Windows files, folders, services, and background processes."
         };
+
+        _showStartupSplashCheckBox = new CheckBox
+        {
+            Text = "Show startup message near the system tray",
+            Left = 18,
+            Top = 228,
+            Width = 350,
+            Height = 22,
+            UseVisualStyleBackColor = true
+        };
+        var timeFormatLabel = new Label
+        {
+            Text = "Time format:",
+            Left = 410,
+            Top = 231,
+            Width = 85,
+            Height = 22
+        };
+        _timeFormatComboBox = new ComboBox
+        {
+            Left = 500,
+            Top = 226,
+            Width = 120,
+            DropDownStyle = ComboBoxStyle.DropDownList
+        };
+        _timeFormatComboBox.Items.AddRange(new object[] { "24-hour", "AM/PM" });
         _trackWindowsSystemActivityCheckBox.CheckedChanged += (_, _) =>
         {
             var active = !_trackWindowsSystemActivityCheckBox.Checked;
@@ -321,6 +349,9 @@ public partial class SettingsForm : Form
         _behaviourGroupBox.Controls.Add(processHint);
         _behaviourGroupBox.Controls.Add(_trackWindowsSystemActivityCheckBox);
         _behaviourGroupBox.Controls.Add(windowsHint);
+        _behaviourGroupBox.Controls.Add(_showStartupSplashCheckBox);
+        _behaviourGroupBox.Controls.Add(timeFormatLabel);
+        _behaviourGroupBox.Controls.Add(_timeFormatComboBox);
     }
 
     private void ConfigureFilteredFileActivityProcessesButton_Click(object? sender, EventArgs e)
@@ -1295,6 +1326,8 @@ public partial class SettingsForm : Form
                 "DeskPulse Tray startup is managed for all Windows users by the installer.");
         }
         _logProgramActivityCheckBox.Checked = settings.LogProgramActivity;
+        _showStartupSplashCheckBox.Checked = settings.ShowStartupSplash;
+        _timeFormatComboBox.SelectedItem = settings.Use12HourTime ? "AM/PM" : "24-hour";
         _logFolderOpeningsCheckBox.Checked = settings.LogFolderOpenings;
         _filteredFileActivityProcesses = new HashSet<string>(settings.FilteredFileActivityProcesses ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
         if (!settings.LogExplorerFileActivity)
@@ -3289,6 +3322,8 @@ public partial class SettingsForm : Form
             DataFolderPath = dataFolder,
             IgnoreTempFolders = _ignoreTempFoldersCheckBox.Checked,
             StartWithWindows = startWithWindows,
+            ShowStartupSplash = _showStartupSplashCheckBox.Checked,
+            Use12HourTime = string.Equals(_timeFormatComboBox.SelectedItem?.ToString(), "AM/PM", StringComparison.Ordinal),
             ServiceSafetyWarningCpuPercent = existingSettings.ServiceSafetyWarningCpuPercent,
             ServiceSafetyCriticalCpuPercent = existingSettings.ServiceSafetyCriticalCpuPercent,
             ServiceSafetyWarningMemoryPercent = existingSettings.ServiceSafetyWarningMemoryPercent,
