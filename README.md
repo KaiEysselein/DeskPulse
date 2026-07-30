@@ -6,7 +6,7 @@
 
 It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
 
-**Current version:** `0.4.0.4`
+**Current version:** `0.4.0.5`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
@@ -73,7 +73,7 @@ The uninstaller removes the application, service and startup registration while 
 
 ## 0.4 release boundary
 
-Version 0.4 adds Calendar marking and an integrated Calendar layout to the Current User and elevated System logs. Patch 0.4.0.4 ensures File, App and User Activity all appear and adds Details-column grouping and summarisation.
+Version 0.4 adds Calendar marking and an integrated Calendar layout to the Current User and elevated System logs. Patch 0.4.0.5 makes File, App and User Activity report tables consistently collapsible with expandable group summaries.
 
 ## Activity filtering
 

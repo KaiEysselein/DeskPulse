@@ -1,4 +1,4 @@
-# DeskPulse 0.4.0.4 Technical Development Handover
+# DeskPulse 0.4.0.5 Technical Development Handover
 
 ## Purpose and scope
 
@@ -8,9 +8,9 @@ Repository: https://github.com/KaiEysselein/DeskPulse
 
 ## Current release baseline
 
-DeskPulse **0.4.0.4** is the current patch baseline. It retains the protected storage and machine-wide policy architecture, ensures Calendar View includes File, App and User Activity, and adds Details-column grouping and summarisation.
+DeskPulse **0.4.0.5** is the current patch baseline. It retains the protected storage and machine-wide policy architecture and provides collapsible grouped rows across File, App and User Activity reports.
 
-Changes completed in the 0.4.0.1-0.4.0.4 patch sequence:
+Changes completed in the 0.4.0.1-0.4.0.5 patch sequence:
 
 - Added a three-second click-to-dismiss startup status message near the system tray.
 - Added installer and Current User Settings controls for the startup message while preserving upgrade choices.
@@ -19,9 +19,10 @@ Changes completed in the 0.4.0.1-0.4.0.4 patch sequence:
 - Added one destination-labelled Records/Calendar toggle and one All records/Marked records toggle.
 - Added Calendar grouping/ungrouping and expandable groups by date, hour, activity, item and details.
 - Added a tested multi-source Calendar query for File, App and User Activity.
+- Added User Activity grouping by date, event, user and computer with expandable rows and summaries.
 - Moved Export to the top toolbar and Records per page to the far left of paging controls.
 - Added animated progress feedback for loading, paging, sorting, grouping, expanding, collapsing and filtering large views.
-- Expanded the automated suite from 69 to 75 passing tests.
+- Expanded the automated suite from 69 to 79 passing tests.
 
 Included changes since 0.3.0.0:
 

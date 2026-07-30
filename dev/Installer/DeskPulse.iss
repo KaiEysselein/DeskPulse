@@ -1,15 +1,15 @@
 #define MyAppName "DeskPulse"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.0.4"
+  #define MyAppVersion "0.4.0.5"
 #endif
 #ifndef MyAppChannel
   #define MyAppChannel "Stable"
 #endif
 #ifndef PublishFolder
-  #define PublishFolder "v0.4.0.4"
+  #define PublishFolder "v0.4.0.5"
 #endif
 #ifndef OutputBaseFilename
-  #define OutputBaseFilename "DeskPulse_Setup_0.4.0.4"
+  #define OutputBaseFilename "DeskPulse_Setup_0.4.0.5"
 #endif
 #define MyAppPublisher "Kai Eysselein"
 #define ServiceName "DeskPulse.Service"

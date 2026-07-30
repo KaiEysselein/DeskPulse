@@ -23,11 +23,13 @@ public partial class ViewLogForm : Form
     private int _pageSize = DefaultPageSize;
     private string _fileGroupBy = "None";
     private string _appGroupBy = "None";
+    private string _userGroupBy = "None";
     private bool _use12HourTime;
     private CalendarViewForm? _calendarView;
     private bool _applyingPeriod;
     private readonly HashSet<string> _expandedFileGroups = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedAppGroups = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _expandedUserGroups = new(StringComparer.Ordinal);
     private bool _updatingGroupByCombo;
     private bool _updatingCalendarCells;
     private readonly System.Windows.Forms.Timer _headerClickTimer = new()
@@ -52,6 +54,8 @@ public partial class ViewLogForm : Form
     private bool _appSortAscending;
     private string _appGroupSortColumn = "Latest";
     private bool _appGroupSortAscending;
+    private string _userGroupSortColumn = "Latest";
+    private bool _userGroupSortAscending;
     private string _fileSortColumn = "CreatedAt";
     private bool _fileSortAscending;
     private string _fileGroupSortColumn = "Latest";
@@ -334,7 +338,7 @@ public partial class ViewLogForm : Form
         _reportContextMenu?.Dispose();
         var menu = new ContextMenuStrip();
         _reportContextMenu = menu;
-        var groupedRow = row.Tag is FileLogGroup or AppLogGroup;
+        var groupedRow = row.Tag is FileLogGroup or AppLogGroup or UserLogGroup;
         var deleteItem = new ToolStripMenuItem(groupedRow ? "Delete group..." : "Delete record...");
         deleteItem.Click += async (_, _) => await DeleteSelectedAsync(allowRuleCreation: false);
         menu.Items.Add(deleteItem);
@@ -504,13 +508,21 @@ public partial class ViewLogForm : Form
             _expandedFileGroups.Clear();
             _filePage = 0;
         }
-        else
+        else if (grid == gridApp)
         {
             _appGroupBy = ToggleHeaderGrouping(_appGroupBy, grouping);
             _appGroupSortColumn = "Latest";
             _appGroupSortAscending = false;
             _expandedAppGroups.Clear();
             _appPage = 0;
+        }
+        else if (grid == gridUser)
+        {
+            _userGroupBy = ToggleHeaderGrouping(_userGroupBy, grouping);
+            _userGroupSortColumn = "Latest";
+            _userGroupSortAscending = false;
+            _expandedUserGroups.Clear();
+            _userPage = 0;
         }
 
         UpdateGroupByControls();
@@ -561,6 +573,14 @@ public partial class ViewLogForm : Form
                     "Path" => "Path",
                     _ => null
                 },
+            LogRuleCategory.User => header switch
+            {
+                "Date" => "Date",
+                "Event" => "Event",
+                "User" => "User",
+                "Computer" => "Computer",
+                _ => null
+            },
             _ => null
         };
 
@@ -588,6 +608,8 @@ public partial class ViewLogForm : Form
             ? GetFileGroupSortColumn(originalHeaderText)
             : grid == gridApp && _appGroupBy != "None"
                 ? GetAppGroupSortColumn(originalHeaderText)
+                : grid == gridUser && _userGroupBy != "None"
+                    ? GetUserGroupSortColumn(originalHeaderText)
                 : GetDatabaseSortColumn(grid, originalHeaderText);
         if (databaseColumn == null)
             return;
@@ -612,10 +634,20 @@ public partial class ViewLogForm : Form
         }
         else if (grid == gridUser)
         {
-            _userSortAscending = string.Equals(_userSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
-                ? !_userSortAscending
-                : true;
-            _userSortColumn = databaseColumn;
+            if (_userGroupBy != "None")
+            {
+                _userGroupSortAscending = string.Equals(_userGroupSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                    ? !_userGroupSortAscending
+                    : true;
+                _userGroupSortColumn = databaseColumn;
+            }
+            else
+            {
+                _userSortAscending = string.Equals(_userSortColumn, databaseColumn, StringComparison.OrdinalIgnoreCase)
+                    ? !_userSortAscending
+                    : true;
+                _userSortColumn = databaseColumn;
+            }
             _userPage = 0;
         }
         else
@@ -644,6 +676,8 @@ public partial class ViewLogForm : Form
                 ? _fileGroupSortAscending
                 : grid == gridApp && _appGroupBy != "None"
                     ? _appGroupSortAscending
+                    : grid == gridUser && _userGroupBy != "None"
+                        ? _userGroupSortAscending
                     : GetSortAscending(grid));
         RefreshActiveTab();
     }
@@ -659,6 +693,13 @@ public partial class ViewLogForm : Form
         headerText.Equals("Records", StringComparison.OrdinalIgnoreCase)
             ? "RecordCount"
             : headerText.Equals(AppGroupDisplayHeaderText(), StringComparison.OrdinalIgnoreCase)
+                ? "GroupKey"
+                : null;
+
+    private string? GetUserGroupSortColumn(string headerText) =>
+        headerText.Equals("Records", StringComparison.OrdinalIgnoreCase)
+            ? "RecordCount"
+            : headerText.Equals(UserGroupDisplayHeaderText(), StringComparison.OrdinalIgnoreCase)
                 ? "GroupKey"
                 : null;
 
@@ -741,7 +782,8 @@ public partial class ViewLogForm : Form
             grid!.SelectedRows.Cast<DataGridViewRow>().Any(row =>
                 row.Tag is LogViewEntry ||
                 grid == gridFile && row.Tag is FileLogGroup ||
-                grid == gridApp && row.Tag is AppLogGroup);
+                grid == gridApp && row.Tag is AppLogGroup ||
+                grid == gridUser && row.Tag is UserLogGroup);
     }
 
     private bool TryGetGroupRuleSuggestion(
@@ -825,7 +867,10 @@ public partial class ViewLogForm : Form
         var appGroups = grid == gridApp
             ? selectedRows.Select(row => row.Tag).OfType<AppLogGroup>().ToList()
             : new List<AppLogGroup>();
-        var groupedDeletion = fileGroups.Count > 0 || appGroups.Count > 0;
+        var userGroups = grid == gridUser
+            ? selectedRows.Select(row => row.Tag).OfType<UserLogGroup>().ToList()
+            : new List<UserLogGroup>();
+        var groupedDeletion = fileGroups.Count > 0 || appGroups.Count > 0 || userGroups.Count > 0;
         var ids = entries
             .Select(entry => long.Parse(entry.Id, CultureInfo.InvariantCulture))
             .ToHashSet();
@@ -838,13 +883,17 @@ public partial class ViewLogForm : Form
             ids.UnionWith(ReadGroupRecordIds(
                 "ProgramEvents", AppGroupExpression(), group.Key,
                 dateStart.Value, dateEnd.Value));
+        foreach (var group in userGroups)
+            ids.UnionWith(ReadGroupRecordIds(
+                "UserEvents", UserGroupExpression(), group.Key,
+                dateStart.Value, dateEnd.Value));
 
         if (ids.Count == 0)
             return;
 
         var sectionName = tabs.SelectedTab?.Text ?? "activity";
         var category = GetActiveCategory();
-        var selectedGroupCount = fileGroups.Count + appGroups.Count;
+        var selectedGroupCount = fileGroups.Count + appGroups.Count + userGroups.Count;
         using var deleteForm = new DeleteLogRecordsForm(
             ids.Count,
             sectionName,
@@ -1680,13 +1729,21 @@ public partial class ViewLogForm : Form
             _expandedAppGroups.Clear();
             _appPage = 0;
         }
-        else
+        else if (tabs.SelectedTab?.Text == "File Activity")
         {
             _fileGroupBy = selected;
             _fileGroupSortColumn = "Latest";
             _fileGroupSortAscending = false;
             _expandedFileGroups.Clear();
             _filePage = 0;
+        }
+        else
+        {
+            _userGroupBy = selected;
+            _userGroupSortColumn = "Latest";
+            _userGroupSortAscending = false;
+            _expandedUserGroups.Clear();
+            _userPage = 0;
         }
 
         if (IsHandleCreated) RefreshActiveTab();
@@ -1695,16 +1752,24 @@ public partial class ViewLogForm : Form
     private void UpdateGroupByControls()
     {
         var tabName = tabs.SelectedTab?.Text;
-        var supportsGrouping = tabName is "File Activity" or "App Activity";
+        var supportsGrouping = tabName is "File Activity" or "App Activity" or "User Activity";
         groupByLabel.Visible = supportsGrouping;
         groupByCombo.Visible = false;
         if (!supportsGrouping)
             return;
 
-        var options = tabName == "App Activity"
-            ? new[] { "None", "Date", "Application", "Process ID", "Path" }
-            : new[] { "None", "Date", "File name", "Extension", "Folder", "Application", "Activity" };
-        var selected = tabName == "App Activity" ? _appGroupBy : _fileGroupBy;
+        var options = tabName switch
+        {
+            "App Activity" => new[] { "None", "Date", "Application", "Process ID", "Path" },
+            "User Activity" => new[] { "None", "Date", "Event", "User", "Computer" },
+            _ => new[] { "None", "Date", "File name", "Extension", "Folder", "Application", "Activity" }
+        };
+        var selected = tabName switch
+        {
+            "App Activity" => _appGroupBy,
+            "User Activity" => _userGroupBy,
+            _ => _fileGroupBy
+        };
         groupByLabel.Text = selected == "None"
             ? "Double-click a heading to group"
             : $"Grouped: {selected}";
@@ -1870,6 +1935,7 @@ public partial class ViewLogForm : Form
     {
         "File Activity" => _fileGroupBy != "None",
         "App Activity" => _appGroupBy != "None",
+        "User Activity" => _userGroupBy != "None",
         _ => false
     };
 
@@ -1906,9 +1972,14 @@ public partial class ViewLogForm : Form
                         gridApp.ClearSelection();
                         break;
                     case "User Activity":
-                        _userTotal = CountEntries("UserEvents", start, endExclusive);
+                        _userTotal = _userGroupBy == "None"
+                            ? CountEntries("UserEvents", start, endExclusive)
+                            : CountUserGroups(start, endExclusive);
                         _userPage = ClampPage(_userPage, _userTotal);
-                        PopulateUserGrid(ReadUserEntries(start, endExclusive, _userPage));
+                        if (_userGroupBy == "None")
+                            PopulateUserGrid(ReadUserEntries(start, endExclusive, _userPage));
+                        else
+                            PopulateUserGroups(ReadUserGroups(start, endExclusive, _userPage), start, endExclusive);
                         gridUser.ClearSelection();
                         break;
                     default:
@@ -1974,21 +2045,24 @@ public partial class ViewLogForm : Form
             _appTotal = _appGroupBy == "None"
                 ? CountEntries("ProgramEvents", start, endExclusive)
                 : CountAppGroups(start, endExclusive);
-            _userTotal = CountEntries("UserEvents", start, endExclusive);
+            _userTotal = _userGroupBy == "None"
+                ? CountEntries("UserEvents", start, endExclusive)
+                : CountUserGroups(start, endExclusive);
             ClampAllPages();
 
             var fileEntries = _fileGroupBy == "None" ? ReadFileEntries(start, endExclusive, _filePage) : new List<LogViewEntry>();
             var fileGroups = _fileGroupBy == "None" ? new List<FileLogGroup>() : ReadFileGroups(start, endExclusive, _filePage);
             var appEntries = _appGroupBy == "None" ? ReadAppEntries(start, endExclusive, _appPage) : new List<LogViewEntry>();
             var appGroups = _appGroupBy == "None" ? new List<AppLogGroup>() : ReadAppGroups(start, endExclusive, _appPage);
-            var userEntries = ReadUserEntries(start, endExclusive, _userPage);
+            var userEntries = _userGroupBy == "None" ? ReadUserEntries(start, endExclusive, _userPage) : new List<LogViewEntry>();
+            var userGroups = _userGroupBy == "None" ? new List<UserLogGroup>() : ReadUserGroups(start, endExclusive, _userPage);
 
             _updatingCalendarCells = true;
             try
             {
                 if (_fileGroupBy == "None") PopulateFileGrid(fileEntries); else PopulateFileGroups(fileGroups, start, endExclusive);
                 if (_appGroupBy == "None") PopulateAppGrid(appEntries); else PopulateAppGroups(appGroups, start, endExclusive);
-                PopulateUserGrid(userEntries);
+                if (_userGroupBy == "None") PopulateUserGrid(userEntries); else PopulateUserGroups(userGroups, start, endExclusive);
             }
             finally
             {
@@ -2123,18 +2197,20 @@ public partial class ViewLogForm : Form
             {pagingClause}
             """;
 
-        return ReadEntries(sql, start, endExclusive, page, reader =>
+        return ReadEntries(sql, start, endExclusive, page, CreateUserEntry, usePaging);
+    }
+
+    private LogViewEntry CreateUserEntry(SqliteDataReader reader)
+    {
+        var fields = new Dictionary<string, string>
         {
-            var fields = new Dictionary<string, string>
-            {
-                ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
-                ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
-                ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10),
-                ["Scope"] = ReadText(reader, 11), ["Windows SID"] = ReadText(reader, 12), ["Session ID"] = ReadText(reader, 13),
-                ["Show in Calendar View"] = ReadCalendarFlag(reader, 14) ? "Yes" : "No"
-            };
-            return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", ReadCalendarFlag(reader, 14), fields);
-        }, usePaging);
+            ["ID"] = ReadText(reader, 0), ["Created At"] = ReadText(reader, 1), ["Date"] = ReadText(reader, 2), ["Time"] = ReadText(reader, 3),
+            ["Event"] = ReadText(reader, 4), ["User"] = ReadText(reader, 5), ["Computer"] = ReadText(reader, 6),
+            ["Process"] = ReadText(reader, 7), ["Process ID"] = ReadText(reader, 8), ["DeskPulse Version"] = ReadText(reader, 9), ["Note"] = ReadText(reader, 10),
+            ["Scope"] = ReadText(reader, 11), ["Windows SID"] = ReadText(reader, 12), ["Session ID"] = ReadText(reader, 13),
+            ["Show in Calendar View"] = ReadCalendarFlag(reader, 14) ? "Yes" : "No"
+        };
+        return new LogViewEntry(ReadText(reader, 0), ReadText(reader, 1), ReadText(reader, 2), FormatDisplayTime(ReadText(reader, 3)), ReadText(reader, 4), "", ReadText(reader, 5), ReadText(reader, 8), "", ReadCalendarFlag(reader, 14), fields);
     }
 
     private List<LogViewEntry> ReadEntries(string sql, DateTime start, DateTime endExclusive, int page, Func<SqliteDataReader, LogViewEntry> factory, bool usePaging = true, string? groupKey = null)
@@ -2228,6 +2304,74 @@ public partial class ViewLogForm : Form
         "Path" => "COALESCE(NULLIF(FilePath, ''), '(unknown path)')",
         _ => "''"
     };
+
+    private string UserGroupExpression() => _userGroupBy switch
+    {
+        "Date" => "COALESCE(NULLIF(EventDate, ''), substr(CreatedAt, 1, 10))",
+        "Event" => "COALESCE(NULLIF(EventDescription, ''), '(unknown event)')",
+        "User" => "COALESCE(NULLIF(UserName, ''), '(unknown user)')",
+        "Computer" => "COALESCE(NULLIF(MachineName, ''), '(unknown computer)')",
+        _ => "''"
+    };
+
+    private int CountUserGroups(DateTime start, DateTime endExclusive)
+    {
+        using var connection = OpenReadConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM (SELECT {UserGroupExpression()} AS GroupKey FROM UserEvents WHERE CreatedAt >= $start AND CreatedAt < $end GROUP BY GroupKey);";
+        AddDateParameters(command, start, endExclusive);
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private List<UserLogGroup> ReadUserGroups(DateTime start, DateTime endExclusive, int page)
+    {
+        var result = new List<UserLogGroup>();
+        using var connection = OpenReadConnection();
+        using var command = connection.CreateCommand();
+        var groupSortColumn = _userGroupSortColumn is "GroupKey" or "RecordCount" or "Latest"
+            ? _userGroupSortColumn
+            : "Latest";
+        var groupSortDirection = _userGroupSortAscending ? "ASC" : "DESC";
+        command.CommandText = $"""
+            WITH AllGroups AS
+            (
+                SELECT {UserGroupExpression()} AS GroupKey,
+                       COUNT(*) AS RecordCount,
+                       MAX(CreatedAt) AS Latest,
+                       SUM(CASE WHEN ShowInCalendarView <> 0 THEN 1 ELSE 0 END) AS CalendarCount
+                FROM UserEvents
+                WHERE CreatedAt >= $start AND CreatedAt < $end
+                GROUP BY GroupKey
+            )
+            SELECT GroupKey, RecordCount, Latest, CalendarCount
+            FROM AllGroups
+            ORDER BY {groupSortColumn} {groupSortDirection}, GroupKey ASC
+            LIMIT $limit OFFSET $offset;
+            """;
+        AddDateParameters(command, start, endExclusive);
+        command.Parameters.AddWithValue("$limit", _pageSize);
+        command.Parameters.AddWithValue("$offset", Math.Max(0, page) * _pageSize);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            result.Add(new UserLogGroup(
+                ReadText(reader, 0),
+                Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture)));
+        return result;
+    }
+
+    private List<LogViewEntry> ReadUserGroupEntries(DateTime start, DateTime endExclusive, string key)
+    {
+        var sql = $"""
+            SELECT Id, CreatedAt, EventDate, EventTime, EventDescription, UserName,
+                   MachineName, ProcessName, ProcessId, AppVersion, Note,
+                   Scope, WindowsSid, SessionId, ShowInCalendarView
+            FROM UserEvents
+            WHERE CreatedAt >= $start AND CreatedAt < $end AND {UserGroupExpression()} = $groupKey
+            {BuildOrderBy(_userSortColumn, _userSortAscending)};
+            """;
+        return ReadEntries(sql, start, endExclusive, 0, CreateUserEntry, false, key);
+    }
 
     private int CountAppGroups(DateTime start, DateTime endExclusive)
     {
@@ -2508,12 +2652,54 @@ public partial class ViewLogForm : Form
         _ => _appGroupBy
     };
 
+    private string UserGroupDisplayHeaderText() => _userGroupBy;
+
     private void PopulateUserGrid(IEnumerable<LogViewEntry> entries)
     {
-        SetRecordCountColumnVisible(gridUser, false);
+        RestoreDetailColumnVisibility(gridUser);
         gridUser.Rows.Clear();
         foreach (var e in entries) AddRow(gridUser, e, e.Id, e.Date, e.Time, e.Subject, e.App, e.Fields.TryGetValue("Computer", out var computer) ? computer : "");
     }
+
+    private void PopulateUserGroups(IEnumerable<UserLogGroup> groups, DateTime start, DateTime endExclusive)
+    {
+        SetGroupedColumnVisibility(gridUser, UserGroupDisplayColumnName(), _expandedUserGroups.Count > 0);
+        gridUser.Rows.Clear();
+        foreach (var group in groups)
+        {
+            var expanded = _expandedUserGroups.Contains(group.Key);
+            var rowIndex = gridUser.Rows.Add();
+            var row = gridUser.Rows[rowIndex];
+            row.Cells[UserGroupDisplayColumnName()].Value = $"{(expanded ? "▼" : "▶")} {group.Key}";
+            row.Cells["RecordCount"].Value = group.Count;
+            row.Cells["ShowInCalendarView"].Value = CalendarCheckState(group.MarkedCount, group.Count);
+            row.Tag = group;
+            row.DefaultCellStyle.Font = new System.Drawing.Font(gridUser.Font, System.Drawing.FontStyle.Bold);
+            row.DefaultCellStyle.BackColor = System.Drawing.SystemColors.ControlLight;
+            ConfigureGroupActionCell(row, expanded);
+            if (!expanded)
+                continue;
+
+            foreach (var entry in ReadUserGroupEntries(start, endExclusive, group.Key))
+            {
+                var childIndex = gridUser.Rows.Add(
+                    entry.Id, entry.Date, entry.Time, "    " + entry.Subject, entry.App,
+                    entry.Fields.TryGetValue("Computer", out var computer) ? computer : "");
+                gridUser.Rows[childIndex].Tag = entry;
+                gridUser.Rows[childIndex].Cells["ShowInCalendarView"].Value =
+                    entry.ShowInCalendarView ? CheckState.Checked : CheckState.Unchecked;
+                ConfigureNonGroupSummaryCell(gridUser.Rows[childIndex]);
+            }
+        }
+    }
+
+    private string UserGroupDisplayColumnName() => _userGroupBy switch
+    {
+        "Date" => "Date",
+        "User" => "User",
+        "Computer" => "Computer",
+        _ => "Event"
+    };
 
     private static void SetRecordCountColumnVisible(DataGridView grid, bool visible)
     {
@@ -2647,6 +2833,16 @@ public partial class ViewLogForm : Form
                     tableName,
                     AppGroupExpression(),
                     appGroup.Key,
+                    dateStart.Value,
+                    dateEnd.Value);
+            }
+            else if (grid == gridUser && row.Tag is UserLogGroup userGroup)
+            {
+                tableName = "UserEvents";
+                ids = ReadGroupRecordIds(
+                    tableName,
+                    UserGroupExpression(),
+                    userGroup.Key,
                     dateStart.Value,
                     dateEnd.Value);
             }
@@ -2830,6 +3026,13 @@ public partial class ViewLogForm : Form
             return true;
         }
 
+        if (grid == gridUser && row.Tag is UserLogGroup userGroup)
+        {
+            if (!_expandedUserGroups.Add(userGroup.Key))
+                _expandedUserGroups.Remove(userGroup.Key);
+            return true;
+        }
+
         return false;
     }
 
@@ -2841,6 +3044,8 @@ public partial class ViewLogForm : Form
                 fileGroup.Key, dateStart.Value, dateEnd.Value),
             AppLogGroup appGroup when grid == gridApp => ReadAppGroupSummary(
                 appGroup.Key, dateStart.Value, dateEnd.Value),
+            UserLogGroup userGroup when grid == gridUser => ReadUserGroupSummary(
+                userGroup.Key, dateStart.Value, dateEnd.Value),
             _ => null
         };
 
@@ -2964,6 +3169,51 @@ public partial class ViewLogForm : Form
         return fields;
     }
 
+    private IReadOnlyDictionary<string, string> ReadUserGroupSummary(
+        string groupKey,
+        DateTime start,
+        DateTime endExclusive)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["Grouped by"] = _userGroupBy,
+            ["Group"] = groupKey,
+            ["Selected period"] = $"{start:dd/MM/yyyy HH:mm:ss} — {endExclusive:dd/MM/yyyy HH:mm:ss}"
+        };
+
+        using var connection = OpenReadConnection();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT COUNT(*), MIN(CreatedAt), MAX(CreatedAt),
+                       COUNT(DISTINCT NULLIF(EventDescription, '')),
+                       COUNT(DISTINCT NULLIF(UserName, '')),
+                       COUNT(DISTINCT NULLIF(MachineName, ''))
+                FROM UserEvents
+                WHERE CreatedAt >= $start AND CreatedAt < $end
+                  AND {UserGroupExpression()} = $groupKey;
+                """;
+            AddDateParameters(command, start, endExclusive);
+            command.Parameters.AddWithValue("$groupKey", groupKey);
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                fields["Total records"] = ReadText(reader, 0);
+                fields["Oldest activity"] = ReadText(reader, 1);
+                fields["Newest activity"] = ReadText(reader, 2);
+                fields["Unique events"] = ReadText(reader, 3);
+                fields["Unique users"] = ReadText(reader, 4);
+                fields["Unique computers"] = ReadText(reader, 5);
+            }
+        }
+
+        fields["Top events"] = ReadTopGroupValues(
+            connection, "UserEvents", UserGroupExpression(),
+            "COALESCE(NULLIF(EventDescription, ''), '(unknown event)')",
+            groupKey, start, endExclusive);
+        return fields;
+    }
+
     private static string ReadTopGroupValues(
         SqliteConnection connection,
         string table,
@@ -3002,6 +3252,7 @@ public partial class ViewLogForm : Form
 
 public sealed record FileLogGroup(string Key, int Count, int MarkedCount);
 public sealed record AppLogGroup(string Key, int Count, int MarkedCount);
+public sealed record UserLogGroup(string Key, int Count, int MarkedCount);
 public readonly record struct GroupRuleSuggestion(
     string Value,
     LogRuleCategory FormCategory,

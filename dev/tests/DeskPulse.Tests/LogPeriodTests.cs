@@ -211,6 +211,10 @@ public sealed class HeaderGroupingTests
     [InlineData(LogRuleCategory.App, "App", "Application")]
     [InlineData(LogRuleCategory.App, "Process ID", "Process ID")]
     [InlineData(LogRuleCategory.App, "Path", "Path")]
+    [InlineData(LogRuleCategory.User, "Date", "Date")]
+    [InlineData(LogRuleCategory.User, "Event", "Event")]
+    [InlineData(LogRuleCategory.User, "User", "User")]
+    [InlineData(LogRuleCategory.User, "Computer", "Computer")]
     public void SupportedHeaderMapsToGrouping(
         LogRuleCategory category,
         string header,
@@ -224,7 +228,7 @@ public sealed class HeaderGroupingTests
     [InlineData(LogRuleCategory.File, "Time")]
     [InlineData(LogRuleCategory.File, "Calendar")]
     [InlineData(LogRuleCategory.App, "Records")]
-    [InlineData(LogRuleCategory.User, "User")]
+    [InlineData(LogRuleCategory.User, "Time")]
     public void UnsupportedHeaderDoesNotGroup(LogRuleCategory category, string header)
     {
         Assert.Null(ViewLogForm.GetHeaderGrouping(category, header));

@@ -2,16 +2,16 @@
 
 ## Current release
 
-The current DeskPulse patch release is **0.4.0.4**.
+The current DeskPulse patch release is **0.4.0.5**.
 
 - Repository: `https://github.com/KaiEysselein/DeskPulse`
-- GitHub release tag: `v0.4.0.4`
+- GitHub release tag: `v0.4.0.5`
 - Retained milestone folder: `releases\v0.4.0.0`
-- Current approved installer: `releases\current\DeskPulse_Setup_0.4.0.4.exe`
+- Current approved installer: `releases\current\DeskPulse_Setup_0.4.0.5.exe`
 - Active development source: `dev`
 - Detailed technical handover: `dev\HANDOVER.md`
 
-Version 0.4.0.4 ensures Calendar View includes File, App and User Activity and supports grouping and summarising the Details column.
+Version 0.4.0.5 provides collapsible grouped rows and summaries across File, App and User Activity report tables.
 
 ## Architecture and security boundary
 
@@ -24,7 +24,7 @@ Version 0.4.0.4 ensures Calendar View includes File, App and User Activity and s
 
 ## Verification
 
-The Release build, 75 automated tests, installer build, silent upgrade, installed versions, service state, process count, SQLite integrity and binary hashes are recorded in `VERSION_CHECK.md`.
+The Release build, 79 automated tests, installer build, silent upgrade, installed versions, service state, process count, SQLite integrity and binary hashes are recorded in `VERSION_CHECK.md`.
 
 ## Release retention
 

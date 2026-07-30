@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0.5 - 2026-07-30
+
+- Added collapsible grouped rows to User Activity by date, event, user or computer.
+- Applied expand/collapse, group summaries, Calendar marking and grouped deletion consistently across File, App and User Activity tables.
+- Added regression coverage for every User Activity grouping header.
+
 ## 0.4.0.4 - 2026-07-30
 
 - Ensured Calendar View loads File, App and User Activity through one tested multi-source query.
