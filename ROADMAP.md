@@ -1,6 +1,6 @@
 # DeskPulse Roadmap
 
-## Current release: 0.4.0.3
+## Current release: 0.4.0.4
 
 - Protected system and per-user ProgramData databases and settings
 - SID, scope and Windows-session attribution
@@ -13,7 +13,8 @@
 - Optional folder-opening suppression
 - One DeskPulse form open from the tray at a time
 - Integrated Records and Calendar layouts
-- Calendar marking, All/Marked filtering and expandable header grouping
+- Calendar marking, All/Marked filtering and expandable grouping across File, App and User Activity
+- Calendar Details-column grouping and summarisation
 - Per-user startup status and time-format preferences
 - Animated progress feedback for large view operations
 

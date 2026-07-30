@@ -7,6 +7,60 @@ namespace DeskPulse.Tests;
 public sealed class CalendarViewTests
 {
     [Fact]
+    public void CalendarQueryReturnsFileAppAndUserActivity()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "DeskPulse.Tests", Guid.NewGuid().ToString("N"));
+        var databasePath = Path.Combine(folder, "calendar-sources.db");
+
+        try
+        {
+            using (var database = new DeskPulseDatabase(databasePath))
+                database.Initialize();
+
+            using var connection = new SqliteConnection($"Data Source={databasePath}");
+            connection.Open();
+            using (var insert = connection.CreateCommand())
+            {
+                insert.CommandText =
+                    """
+                    INSERT INTO ActivityEvents (CreatedAt, ActivityType, Item, FileName, FullPath)
+                    VALUES ('2026-07-30 08:00:00.000', 'Opened', 'report.docx', 'report.docx', 'C:\Docs\report.docx');
+                    INSERT INTO ProgramEvents (CreatedAt, EventDescription, ProgramName, WindowTitle)
+                    VALUES ('2026-07-30 09:00:00.000', 'Started', 'Word', 'Quarterly report');
+                    INSERT INTO UserEvents (CreatedAt, EventDescription, UserName)
+                    VALUES ('2026-07-30 10:00:00.000', 'SessionUnlocked', 'Kai');
+                    """;
+                insert.ExecuteNonQuery();
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = CalendarViewForm.BuildEntriesQuery(markedRecordsOnly: false);
+            using var reader = command.ExecuteReader();
+            var activityTypes = new List<string>();
+            while (reader.Read())
+                activityTypes.Add(reader.GetString(1));
+
+            Assert.Equal(
+                new[] { "User Activity", "App Activity", "File Activity" },
+                activityTypes);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DetailsHeaderGroupsAndUngroups()
+    {
+        Assert.Equal("Details", CalendarViewForm.GetHeaderGrouping("Details"));
+        Assert.Equal("Details", CalendarViewForm.ToggleHeaderGrouping("Item", "Details"));
+        Assert.Equal("None", CalendarViewForm.ToggleHeaderGrouping("Details", "Details"));
+    }
+
+    [Fact]
     public void InitializeAddsCalendarFlagToEveryActivityTable()
     {
         var folder = Path.Combine(Path.GetTempPath(), "DeskPulse.Tests", Guid.NewGuid().ToString("N"));

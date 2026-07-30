@@ -75,7 +75,7 @@ public sealed class CalendarViewForm : Form
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(12, 6, 0, 0),
-            Text = "Double-click Date, Time, Activity, or Item to group or ungroup."
+            Text = "Double-click Date, Time, Activity, Item, or Details to group or ungroup."
         };
         header.Controls.Add(headerText);
         header.Controls.Add(_recordFilterButton);
@@ -153,22 +153,7 @@ public sealed class CalendarViewForm : Form
             using var connection = new SqliteConnection(_connectionString);
             connection.Open();
             using var command = connection.CreateCommand();
-            var filter = _markedRecordsOnly ? "WHERE ShowInCalendarView <> 0" : "";
-            command.CommandText =
-                $"""
-                SELECT CreatedAt, 'File Activity', COALESCE(NULLIF(FileName, ''), NULLIF(FullPath, ''), Item), COALESCE(FullPath, '')
-                FROM ActivityEvents
-                {filter}
-                UNION ALL
-                SELECT CreatedAt, 'App Activity', COALESCE(ProgramName, ''), COALESCE(FilePath, '')
-                FROM ProgramEvents
-                {filter}
-                UNION ALL
-                SELECT CreatedAt, 'User Activity', COALESCE(EventDescription, ''), COALESCE(UserName, '')
-                FROM UserEvents
-                {filter}
-                ORDER BY CreatedAt DESC;
-                """;
+            command.CommandText = BuildEntriesQuery(_markedRecordsOnly);
 
             using var reader = command.ExecuteReader();
             while (reader.Read())
@@ -239,7 +224,8 @@ public sealed class CalendarViewForm : Form
                     "Date" => 0,
                     "Hour" => 1,
                     "Activity" => 2,
-                    _ => 3
+                    "Item" => 3,
+                    _ => 4
                 };
                 values[groupColumn] = $"{(expanded ? "▼" : "▶")} {group.Key}";
                 var rowIndex = _grid.Rows.Add(values);
@@ -298,6 +284,7 @@ public sealed class CalendarViewForm : Form
         "Hour" => entry.CreatedAt.ToString(_use12HourTime ? "hh:00 tt" : "HH:00", CultureInfo.InvariantCulture),
         "Activity" => entry.ActivityType,
         "Item" => string.IsNullOrWhiteSpace(entry.Subject) ? "(no item)" : entry.Subject,
+        "Details" => string.IsNullOrWhiteSpace(entry.Details) ? "(no details)" : entry.Details,
         _ => ""
     };
 
@@ -305,19 +292,54 @@ public sealed class CalendarViewForm : Form
     {
         if (e.ColumnIndex < 0)
             return;
-        var grouping = _grid.Columns[e.ColumnIndex].Name switch
-        {
-            "Date" => "Date",
-            "Time" => "Hour",
-            "ActivityType" => "Activity",
-            "Subject" => "Item",
-            _ => null
-        };
+        var grouping = GetHeaderGrouping(_grid.Columns[e.ColumnIndex].Name);
         if (grouping == null)
             return;
-        _groupBy = _groupBy == grouping ? "None" : grouping;
+        _groupBy = ToggleHeaderGrouping(_groupBy, grouping);
         _expandedGroups.Clear();
         ShowEntries(_selectedDateFilter);
+    }
+
+    public static string? GetHeaderGrouping(string columnName) => columnName switch
+    {
+        "Date" => "Date",
+        "Time" => "Hour",
+        "ActivityType" => "Activity",
+        "Subject" => "Item",
+        "Details" => "Details",
+        _ => null
+    };
+
+    public static string ToggleHeaderGrouping(string currentGrouping, string clickedGrouping) =>
+        currentGrouping == clickedGrouping ? "None" : clickedGrouping;
+
+    public static string BuildEntriesQuery(bool markedRecordsOnly)
+    {
+        var filter = markedRecordsOnly ? "WHERE ShowInCalendarView <> 0" : "";
+        return
+            $"""
+            SELECT CreatedAt,
+                   'File Activity' AS ActivityType,
+                   COALESCE(NULLIF(FileName, ''), NULLIF(FullPath, ''), NULLIF(Item, ''), '(no item)') AS Subject,
+                   COALESCE(NULLIF(FullPath, ''), NULLIF(Note, ''), '') AS Details
+            FROM ActivityEvents
+            {filter}
+            UNION ALL
+            SELECT CreatedAt,
+                   'App Activity' AS ActivityType,
+                   COALESCE(NULLIF(ProgramName, ''), NULLIF(EventDescription, ''), '(no app)') AS Subject,
+                   COALESCE(NULLIF(WindowTitle, ''), NULLIF(FilePath, ''), NULLIF(EventDescription, ''), '') AS Details
+            FROM ProgramEvents
+            {filter}
+            UNION ALL
+            SELECT CreatedAt,
+                   'User Activity' AS ActivityType,
+                   COALESCE(NULLIF(EventDescription, ''), '(no event)') AS Subject,
+                   COALESCE(NULLIF(UserName, ''), NULLIF(Note, ''), '') AS Details
+            FROM UserEvents
+            {filter}
+            ORDER BY CreatedAt DESC;
+            """;
     }
 
     private void Grid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)

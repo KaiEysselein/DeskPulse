@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0.4 - 2026-07-30
+
+- Ensured Calendar View loads File, App and User Activity through one tested multi-source query.
+- Improved Calendar App and User rows with meaningful item and detail fallbacks.
+- Added double-click grouping, summarising and ungrouping for the Calendar Details column.
+- Added regression coverage for all Calendar activity sources and Details grouping.
+
 ## 0.4.0.3 - 2026-07-30
 
 - Added an animated progress window for Log and Calendar loading, paging, sorting, grouping, ungrouping, expansion, collapse, and record-filter changes.
