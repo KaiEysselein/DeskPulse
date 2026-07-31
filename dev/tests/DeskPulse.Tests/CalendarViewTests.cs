@@ -110,6 +110,29 @@ public sealed class CalendarViewTests
     }
 
     [Fact]
+    public void CalendarTabGroupingStateIsIndependentPerActivityType()
+    {
+        var groupings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["File Activity"] = "None",
+            ["App Activity"] = "None",
+            ["User Activity"] = "None"
+        };
+
+        CalendarViewForm.ToggleTabGrouping(groupings, "File Activity", "Date");
+
+        Assert.Equal("Date", groupings["File Activity"]);
+        Assert.Equal("None", groupings["App Activity"]);
+        Assert.Equal("None", groupings["User Activity"]);
+
+        CalendarViewForm.ToggleTabGrouping(groupings, "App Activity", "Item");
+
+        Assert.Equal("Date", groupings["File Activity"]);
+        Assert.Equal("Item", groupings["App Activity"]);
+        Assert.Equal("None", groupings["User Activity"]);
+    }
+
+    [Fact]
     public void InitializeAddsCalendarFlagToEveryActivityTable()
     {
         var folder = Path.Combine(Path.GetTempPath(), "DeskPulse.Tests", Guid.NewGuid().ToString("N"));

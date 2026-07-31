@@ -52,10 +52,6 @@ VersionInfoCompany={#MyAppPublisher}
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
-[Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "startupsplash"; Description: "Show a DeskPulse startup message near the system tray"; GroupDescription: "Startup options:"; Flags: checkedonce
-
 [Dirs]
 Name: "{commonappdata}\DeskPulse"; Permissions: users-modify; Flags: uninsneveruninstall
 Name: "{commonappdata}\DeskPulse\Config"; Permissions: admins-full system-full; Flags: uninsneveruninstall
@@ -76,7 +72,7 @@ Type: files; Name: "{commonstartup}\DeskPulse Tray.lnk"
 [Icons]
 Name: "{group}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"
 Name: "{group}\Uninstall DeskPulse"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\DeskPulse"; Filename: "{app}\Tray\{#TrayExeName}"; Check: ShouldCreateDesktopShortcut
 Name: "{commonstartup}\DeskPulse Tray"; Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--tray"; WorkingDir: "{app}\Tray"
 
 [Run]
@@ -84,8 +80,7 @@ Name: "{commonstartup}\DeskPulse Tray"; Filename: "{app}\Tray\{#TrayExeName}"; P
 ; LocalSystem service starts. The service then migrates the live database into
 ; its protected ProgramData SID folder.
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--initialize-settings"; Flags: runhidden waituntilterminated runasoriginaluser
-Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--set-startup-splash true"; Flags: runhidden waituntilterminated runasoriginaluser; Tasks: startupsplash; Check: IsFreshInstall
-Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--set-startup-splash false"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsFreshInstallAndSplashDisabled
+Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--set-startup-splash true"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsFreshInstall
 Filename: "{app}\Tray\{#TrayExeName}"; Parameters: "--disable-startup"; Flags: runhidden waituntilterminated runasoriginaluser
 Filename: "{sys}\sc.exe"; Parameters: "create {#ServiceName} binPath= ""{app}\Service\{#ServiceExeName}"" start= auto DisplayName= ""DeskPulse Service"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "description {#ServiceName} ""DeskPulse background monitoring service"""; Flags: runhidden waituntilterminated
@@ -180,9 +175,12 @@ begin
   Result := PreviousDeskPulseVersion = '';
 end;
 
-function IsFreshInstallAndSplashDisabled: Boolean;
+function ShouldCreateDesktopShortcut: Boolean;
 begin
-  Result := IsFreshInstall and (not WizardIsTaskSelected('startupsplash'));
+  { New installations create the shortcut by default. Upgrades and reinstalls
+    preserve the existing choice by recreating it only when it already exists. }
+  Result := IsFreshInstall or
+    FileExists(ExpandConstant('{autodesktop}\DeskPulse.lnk'));
 end;
 
 function ServiceExists(const Service: string): Boolean;

@@ -22,8 +22,18 @@ public sealed class CalendarViewForm : Form
     private readonly bool _use12HourTime;
     private List<CalendarEntry> _entries = new();
     private DateTime? _selectedDateFilter;
-    private string _groupBy = "None";
-    private readonly HashSet<string> _expandedGroups = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _groupByByActivityType = new(StringComparer.Ordinal)
+    {
+        ["File Activity"] = "None",
+        ["App Activity"] = "None",
+        ["User Activity"] = "None"
+    };
+    private readonly Dictionary<string, HashSet<string>> _expandedGroupsByActivityType = new(StringComparer.Ordinal)
+    {
+        ["File Activity"] = new(StringComparer.Ordinal),
+        ["App Activity"] = new(StringComparer.Ordinal),
+        ["User Activity"] = new(StringComparer.Ordinal)
+    };
     private readonly Font _groupFont;
     private int _viewProgressDepth;
     private bool _updatingGrid;
@@ -137,7 +147,6 @@ public sealed class CalendarViewForm : Form
 
             selectedPage.Controls.Add(_grid);
             _grid.Dock = DockStyle.Fill;
-            _expandedGroups.Clear();
             ShowEntriesCore(_selectedDateFilter);
         };
         _activityTabs.TabPages[0].Controls.Add(_grid);
@@ -213,6 +222,8 @@ public sealed class CalendarViewForm : Form
             _selectedDateFilter = selectedDate;
             DateFilterChanged?.Invoke(selectedDate);
             var activityType = SelectedActivityType;
+            var groupBy = _groupByByActivityType[activityType];
+            var expandedGroups = _expandedGroupsByActivityType[activityType];
             var activityEntries = _entries.Where(entry => entry.ActivityType == activityType);
             var visibleEntries = selectedDate.HasValue
                 ? activityEntries.Where(entry => entry.CreatedAt.Date == selectedDate.Value.Date)
@@ -221,7 +232,7 @@ public sealed class CalendarViewForm : Form
             _grid.Rows.Clear();
             var count = 0;
             var entries = visibleEntries.ToList();
-            if (_groupBy == "None")
+            if (groupBy == "None")
             {
                 foreach (var entry in entries)
                 {
@@ -231,11 +242,11 @@ public sealed class CalendarViewForm : Form
             }
             else
             {
-                foreach (var group in entries.GroupBy(GetGroupKey))
+                foreach (var group in entries.GroupBy(entry => GetGroupKey(entry, groupBy)))
                 {
-                    var expanded = _expandedGroups.Contains(group.Key);
+                    var expanded = expandedGroups.Contains(group.Key);
                     var values = new object[] { "", "", "", "", $"{group.Count():N0} record(s)" };
-                    var groupColumn = _groupBy switch
+                    var groupColumn = groupBy switch
                     {
                         "Date" => 0,
                         "Hour" => 1,
@@ -307,7 +318,7 @@ public sealed class CalendarViewForm : Form
         _grid.Rows[rowIndex].Tag = entry;
     }
 
-    private string GetGroupKey(CalendarEntry entry) => _groupBy switch
+    private string GetGroupKey(CalendarEntry entry, string groupBy) => groupBy switch
     {
         "Date" => entry.CreatedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         "Hour" => entry.CreatedAt.ToString(_use12HourTime ? "hh:00 tt" : "HH:00", CultureInfo.InvariantCulture),
@@ -324,8 +335,9 @@ public sealed class CalendarViewForm : Form
         var grouping = GetHeaderGrouping(_grid.Columns[e.ColumnIndex].Name);
         if (grouping == null)
             return;
-        _groupBy = ToggleHeaderGrouping(_groupBy, grouping);
-        _expandedGroups.Clear();
+        var activityType = SelectedActivityType;
+        ToggleTabGrouping(_groupByByActivityType, activityType, grouping);
+        _expandedGroupsByActivityType[activityType].Clear();
         ShowEntriesCore(_selectedDateFilter);
     }
 
@@ -341,6 +353,17 @@ public sealed class CalendarViewForm : Form
 
     public static string ToggleHeaderGrouping(string currentGrouping, string clickedGrouping) =>
         currentGrouping == clickedGrouping ? "None" : clickedGrouping;
+
+    public static string ToggleTabGrouping(
+        IDictionary<string, string> groupings,
+        string activityType,
+        string clickedGrouping)
+    {
+        var currentGrouping = groupings.TryGetValue(activityType, out var value) ? value : "None";
+        var updatedGrouping = ToggleHeaderGrouping(currentGrouping, clickedGrouping);
+        groupings[activityType] = updatedGrouping;
+        return updatedGrouping;
+    }
 
     public static string BuildEntriesQuery(bool markedRecordsOnly)
     {
@@ -375,8 +398,9 @@ public sealed class CalendarViewForm : Form
     {
         if (e.RowIndex < 0 || _grid.Rows[e.RowIndex].Tag is not CalendarGroup group)
             return;
-        if (!_expandedGroups.Add(group.Key))
-            _expandedGroups.Remove(group.Key);
+        var expandedGroups = _expandedGroupsByActivityType[SelectedActivityType];
+        if (!expandedGroups.Add(group.Key))
+            expandedGroups.Remove(group.Key);
         ShowEntriesCore(_selectedDateFilter);
     }
 
