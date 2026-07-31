@@ -1,7 +1,7 @@
 param(
     [ValidateSet('Stable', 'Nightly')]
     [string]$ReleaseChannel = 'Stable',
-    [string]$Version = '0.4.0.5',
+    [string]$Version = '0.4.0.6',
     [string]$PublishFolder = "v$Version",
     [string]$InstallerBaseName = $(if ($ReleaseChannel -eq 'Nightly') { 'DeskPulse_Setup_Nightly' } else { "DeskPulse_Setup_$Version" }),
     [switch]$SkipReleaseCopy

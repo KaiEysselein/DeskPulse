@@ -53,6 +53,55 @@ public sealed class CalendarViewTests
     }
 
     [Fact]
+    public void MarkedCalendarQueryReturnsOnlySelectedRecordsFromEveryTab()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "DeskPulse.Tests", Guid.NewGuid().ToString("N"));
+        var databasePath = Path.Combine(folder, "calendar-selected.db");
+
+        try
+        {
+            using (var database = new DeskPulseDatabase(databasePath))
+                database.Initialize();
+
+            using var connection = new SqliteConnection($"Data Source={databasePath}");
+            connection.Open();
+            using (var insert = connection.CreateCommand())
+            {
+                insert.CommandText =
+                    """
+                    INSERT INTO ActivityEvents (CreatedAt, ActivityType, Item, ShowInCalendarView)
+                    VALUES ('2026-07-30 08:00:00.000', 'Opened', 'selected.docx', 1),
+                           ('2026-07-30 08:01:00.000', 'Opened', 'hidden.docx', 0);
+                    INSERT INTO ProgramEvents (CreatedAt, EventDescription, ProgramName, ShowInCalendarView)
+                    VALUES ('2026-07-30 09:00:00.000', 'Started', 'Selected App', 1),
+                           ('2026-07-30 09:01:00.000', 'Started', 'Hidden App', 0);
+                    INSERT INTO UserEvents (CreatedAt, EventDescription, UserName, ShowInCalendarView)
+                    VALUES ('2026-07-30 10:00:00.000', 'SessionUnlocked', 'Selected User', 1),
+                           ('2026-07-30 10:01:00.000', 'SessionLocked', 'Hidden User', 0);
+                    """;
+                insert.ExecuteNonQuery();
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = CalendarViewForm.BuildEntriesQuery(markedRecordsOnly: true);
+            using var reader = command.ExecuteReader();
+            var subjects = new List<string>();
+            while (reader.Read())
+                subjects.Add(reader.GetString(2));
+
+            Assert.Equal(
+                new[] { "SessionUnlocked", "Selected App", "selected.docx" },
+                subjects);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
     public void DetailsHeaderGroupsAndUngroups()
     {
         Assert.Equal("Details", CalendarViewForm.GetHeaderGrouping("Details"));

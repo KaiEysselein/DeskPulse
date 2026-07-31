@@ -8,7 +8,6 @@ using System.Linq;
 using System.Windows.Forms;
 using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
-using Microsoft.Win32;
 
 namespace DeskPulse;
 
@@ -16,19 +15,18 @@ public sealed class CalendarViewForm : Form
 {
     private readonly string _connectionString;
     private readonly MonthCalendar _calendar = new() { MaxSelectionCount = 1, ShowTodayCircle = true };
-    private const string PreferenceRegistryPath = @"Software\DeskPulse";
     private readonly CheckBox _showAll = new() { Text = "All dates", Checked = true, AutoSize = true };
-    private readonly Button _recordFilterButton = new() { Width = 122, Height = 28 };
     private readonly Label _status = new() { AutoSize = false, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly TabControl _activityTabs = new();
     private readonly DataGridView _grid = new();
     private readonly bool _use12HourTime;
     private List<CalendarEntry> _entries = new();
     private DateTime? _selectedDateFilter;
-    private bool _markedRecordsOnly;
     private string _groupBy = "None";
     private readonly HashSet<string> _expandedGroups = new(StringComparer.Ordinal);
     private readonly Font _groupFont;
     private int _viewProgressDepth;
+    private bool _updatingGrid;
 
     public event Action<DateTime?>? DateFilterChanged;
     public DateTime? SelectedDateFilter => _selectedDateFilter;
@@ -39,7 +37,6 @@ public sealed class CalendarViewForm : Form
         bool use12HourTime = false)
     {
         _use12HourTime = use12HourTime;
-        _markedRecordsOnly = LoadMarkedRecordsOnlyPreference();
         _groupFont = new Font(SystemFonts.MessageBoxFont ?? SystemFonts.DefaultFont, FontStyle.Bold);
         _connectionString = new SqliteConnectionStringBuilder
         {
@@ -61,16 +58,6 @@ public sealed class CalendarViewForm : Form
             Height = 44,
             Padding = new Padding(12, 8, 12, 4)
         };
-        _recordFilterButton.Dock = DockStyle.Left;
-        _recordFilterButton.Text = _markedRecordsOnly ? "All records" : "Marked records";
-        _recordFilterButton.Click += (_, _) =>
-        {
-            _markedRecordsOnly = !_markedRecordsOnly;
-            SaveMarkedRecordsOnlyPreference(_markedRecordsOnly);
-            _recordFilterButton.Text = _markedRecordsOnly ? "All records" : "Marked records";
-            _expandedGroups.Clear();
-            LoadCalendarEntries();
-        };
         var headerText = new Label
         {
             Dock = DockStyle.Fill,
@@ -78,7 +65,6 @@ public sealed class CalendarViewForm : Form
             Text = "Double-click Date, Time, Activity, Item, or Details to group or ungroup."
         };
         header.Controls.Add(headerText);
-        header.Controls.Add(_recordFilterButton);
 
         var leftPanel = new Panel { Dock = DockStyle.Left, Width = 260, Padding = new Padding(12, 8, 8, 12) };
         _calendar.Dock = DockStyle.Top;
@@ -93,7 +79,8 @@ public sealed class CalendarViewForm : Form
         leftPanel.Controls.Add(_status);
 
         ConfigureGrid();
-        Controls.Add(_grid);
+        ConfigureActivityTabs();
+        Controls.Add(_activityTabs);
         Controls.Add(leftPanel);
         Controls.Add(header);
 
@@ -136,12 +123,33 @@ public sealed class CalendarViewForm : Form
         _grid.CellDoubleClick += Grid_CellDoubleClick;
     }
 
+    private void ConfigureActivityTabs()
+    {
+        _activityTabs.Dock = DockStyle.Fill;
+        AddActivityTab("Files", "File Activity");
+        AddActivityTab("Apps", "App Activity");
+        AddActivityTab("User Activity", "User Activity");
+        _activityTabs.SelectedIndexChanged += (_, _) =>
+        {
+            var selectedPage = _activityTabs.SelectedTab;
+            if (selectedPage == null)
+                return;
+
+            selectedPage.Controls.Add(_grid);
+            _grid.Dock = DockStyle.Fill;
+            _expandedGroups.Clear();
+            ShowEntriesCore(_selectedDateFilter);
+        };
+        _activityTabs.TabPages[0].Controls.Add(_grid);
+    }
+
+    private void AddActivityTab(string title, string activityType) =>
+        _activityTabs.TabPages.Add(new TabPage(title) { Tag = activityType });
+
     private void LoadCalendarEntries()
     {
         RunWithViewProgress(
-            _markedRecordsOnly
-                ? "Loading and arranging marked Calendar records..."
-                : "Loading and arranging all Calendar records...",
+            "Loading selected Calendar records...",
             LoadCalendarEntriesCore);
     }
 
@@ -153,7 +161,7 @@ public sealed class CalendarViewForm : Form
             using var connection = new SqliteConnection(_connectionString);
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = BuildEntriesQuery(_markedRecordsOnly);
+            command.CommandText = BuildEntriesQuery(markedRecordsOnly: true);
 
             using var reader = command.ExecuteReader();
             while (reader.Read())
@@ -196,56 +204,77 @@ public sealed class CalendarViewForm : Form
 
     private void ShowEntriesCore(DateTime? selectedDate)
     {
-        _selectedDateFilter = selectedDate;
-        DateFilterChanged?.Invoke(selectedDate);
-        var visibleEntries = selectedDate.HasValue
-            ? _entries.Where(entry => entry.CreatedAt.Date == selectedDate.Value.Date)
-            : _entries;
+        if (_updatingGrid)
+            return;
 
-        _grid.Rows.Clear();
-        var count = 0;
-        var entries = visibleEntries.ToList();
-        if (_groupBy == "None")
+        _updatingGrid = true;
+        try
         {
-            foreach (var entry in entries)
+            _selectedDateFilter = selectedDate;
+            DateFilterChanged?.Invoke(selectedDate);
+            var activityType = SelectedActivityType;
+            var activityEntries = _entries.Where(entry => entry.ActivityType == activityType);
+            var visibleEntries = selectedDate.HasValue
+                ? activityEntries.Where(entry => entry.CreatedAt.Date == selectedDate.Value.Date)
+                : activityEntries;
+
+            _grid.Rows.Clear();
+            var count = 0;
+            var entries = visibleEntries.ToList();
+            if (_groupBy == "None")
             {
-                AddEntryRow(entry);
-                count++;
-            }
-        }
-        else
-        {
-            foreach (var group in entries.GroupBy(GetGroupKey))
-            {
-                var expanded = _expandedGroups.Contains(group.Key);
-                var values = new object[] { "", "", "", "", $"{group.Count():N0} record(s)" };
-                var groupColumn = _groupBy switch
+                foreach (var entry in entries)
                 {
-                    "Date" => 0,
-                    "Hour" => 1,
-                    "Activity" => 2,
-                    "Item" => 3,
-                    _ => 4
-                };
-                values[groupColumn] = $"{(expanded ? "▼" : "▶")} {group.Key}";
-                var rowIndex = _grid.Rows.Add(values);
-                _grid.Rows[rowIndex].Tag = new CalendarGroup(group.Key);
-                _grid.Rows[rowIndex].DefaultCellStyle.Font = _groupFont;
-                if (expanded)
-                {
-                    foreach (var entry in group)
-                        AddEntryRow(entry);
+                    AddEntryRow(entry);
+                    count++;
                 }
-                count += group.Count();
             }
-        }
+            else
+            {
+                foreach (var group in entries.GroupBy(GetGroupKey))
+                {
+                    var expanded = _expandedGroups.Contains(group.Key);
+                    var values = new object[] { "", "", "", "", $"{group.Count():N0} record(s)" };
+                    var groupColumn = _groupBy switch
+                    {
+                        "Date" => 0,
+                        "Hour" => 1,
+                        "Activity" => 2,
+                        "Item" => 3,
+                        _ => 4
+                    };
+                    values[groupColumn] = $"{(expanded ? "▼" : "▶")} {group.Key}";
+                    var rowIndex = _grid.Rows.Add(values);
+                    _grid.Rows[rowIndex].Tag = new CalendarGroup(group.Key);
+                    _grid.Rows[rowIndex].DefaultCellStyle.Font = _groupFont;
+                    if (expanded)
+                    {
+                        foreach (var entry in group)
+                            AddEntryRow(entry);
+                    }
+                    count += group.Count();
+                }
+            }
 
-        var recordDescription = _markedRecordsOnly ? "marked record(s)" : "record(s)";
-        _status.Text = selectedDate.HasValue
-            ? $"{count:N0} {recordDescription} on {selectedDate.Value:dd MMMM yyyy}."
-            : $"{count:N0} {recordDescription} across all dates.\r\nBold dates contain Calendar-marked records.";
-        _grid.ClearSelection();
+            var recordDescription = activityType switch
+            {
+                "File Activity" => "selected file record(s)",
+                "App Activity" => "selected app record(s)",
+                _ => "selected user activity record(s)"
+            };
+            _status.Text = selectedDate.HasValue
+                ? $"{count:N0} {recordDescription} on {selectedDate.Value:dd MMMM yyyy}."
+                : $"{count:N0} {recordDescription} across all dates.\r\nBold dates contain selected Calendar records.";
+            _grid.ClearSelection();
+        }
+        finally
+        {
+            _updatingGrid = false;
+        }
     }
+
+    private string SelectedActivityType =>
+        _activityTabs.SelectedTab?.Tag as string ?? "File Activity";
 
     private void RunWithViewProgress(string message, Action operation)
     {
@@ -297,7 +326,7 @@ public sealed class CalendarViewForm : Form
             return;
         _groupBy = ToggleHeaderGrouping(_groupBy, grouping);
         _expandedGroups.Clear();
-        ShowEntries(_selectedDateFilter);
+        ShowEntriesCore(_selectedDateFilter);
     }
 
     public static string? GetHeaderGrouping(string columnName) => columnName switch
@@ -348,34 +377,15 @@ public sealed class CalendarViewForm : Form
             return;
         if (!_expandedGroups.Add(group.Key))
             _expandedGroups.Remove(group.Key);
-        ShowEntries(_selectedDateFilter);
-    }
-
-    private static bool LoadMarkedRecordsOnlyPreference()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(PreferenceRegistryPath);
-            return key?.GetValue("CalendarMarkedRecordsOnly") is not int value || value != 0;
-        }
-        catch { return true; }
-    }
-
-    private static void SaveMarkedRecordsOnlyPreference(bool markedOnly)
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(PreferenceRegistryPath);
-            key?.SetValue("CalendarMarkedRecordsOnly", markedOnly ? 1 : 0, RegistryValueKind.DWord);
-        }
-        catch { }
+        ShowEntriesCore(_selectedDateFilter);
     }
 
     public int ExportDisplayedRecords(string fileName)
     {
+        var activityEntries = _entries.Where(entry => entry.ActivityType == SelectedActivityType);
         var visibleEntries = (_selectedDateFilter.HasValue
-            ? _entries.Where(entry => entry.CreatedAt.Date == _selectedDateFilter.Value.Date)
-            : _entries).ToList();
+            ? activityEntries.Where(entry => entry.CreatedAt.Date == _selectedDateFilter.Value.Date)
+            : activityEntries).ToList();
         using var workbook = new XLWorkbook();
         var worksheet = workbook.Worksheets.Add("Calendar");
         var headers = new[] { "Date", "Time", "Activity", "Item", "Details" };

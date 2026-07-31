@@ -2,8 +2,8 @@
 # Do not use this script over an installer-managed installation without uninstalling first.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$serviceSource = Join-Path $root 'publish\v0.4.0.5\service'
-$traySource = Join-Path $root 'publish\v0.4.0.5\tray'
+$serviceSource = Join-Path $root 'publish\v0.4.0.6\service'
+$traySource = Join-Path $root 'publish\v0.4.0.6\tray'
 $installRoot = Join-Path $env:ProgramFiles 'DeskPulse'
 $serviceInstall = Join-Path $installRoot 'Service'
 $trayInstall = Join-Path $installRoot 'Tray'

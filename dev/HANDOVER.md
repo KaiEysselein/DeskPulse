@@ -1,313 +1,102 @@
-# DeskPulse 0.4.0.5 Technical Development Handover
+# DeskPulse Technical Development Handover
 
-## Purpose and scope
+## Purpose
 
-This is the detailed technical handover for the active source under `dev`. It covers architecture, runtime behaviour, safeguards, installation lifecycle logging, build and verification requirements. Repository-level release continuity and GitHub-facing documentation are maintained separately in `..\HANDOVER.md`.
+This is the current technical handover for the active source under `dev`. Repository-level release continuity is maintained in `..\HANDOVER.md`.
 
-Repository: https://github.com/KaiEysselein/DeskPulse
+Repository: `https://github.com/KaiEysselein/DeskPulse`
 
-## Current release baseline
+## Release and working-tree status
 
-DeskPulse **0.4.0.5** is the current patch baseline. It retains the protected storage and machine-wide policy architecture and provides collapsible grouped rows across File, App and User Activity reports.
+- Released baseline: **0.4.0.5**
+- Maintenance release target: **0.4.0.6**
+- Current branch: `main`
+- Released baseline commit: `d419589` (`Release DeskPulse 0.4.0.5`)
 
-Changes completed in the 0.4.0.1-0.4.0.5 patch sequence:
+The working tree contains an unreleased Calendar refinement:
 
-- Added a three-second click-to-dismiss startup status message near the system tray.
-- Added installer and Current User Settings controls for the startup message while preserving upgrade choices.
-- Moved 24-hour versus AM/PM formatting into Current User Settings.
-- Integrated Calendar into the Log window and removed separate Calendar tray-menu commands.
-- Added one destination-labelled Records/Calendar toggle and one All records/Marked records toggle.
-- Added Calendar grouping/ungrouping and expandable groups by date, hour, activity, item and details.
-- Added a tested multi-source Calendar query for File, App and User Activity.
-- Added User Activity grouping by date, event, user and computer with expandable rows and summaries.
-- Moved Export to the top toolbar and Records per page to the far left of paging controls.
-- Added animated progress feedback for loading, paging, sorting, grouping, expanding, collapsing and filtering large views.
-- Expanded the automated suite from 69 to 79 passing tests.
+- Calendar records are separated into Files, Apps and User Activity tabs.
+- Each tab displays and exports only its corresponding activity type.
+- Calendar always loads records explicitly selected for Calendar view.
+- The former All records/Marked records toggle and registry preference are removed.
+- A query test covers selected and unselected records across all three activity sources.
 
-Included changes since 0.3.0.0:
+Build and full-suite verification remain pending. Do not describe these changes as released until the complete 0.4.0.6 acceptance workflow has passed.
 
-- Added a dedicated modal Excel-export progress form shared by current-user and system logs.
-- Closed the owning Log window after successful export while preserving it on cancellation or failure.
-- Restored deferred first-click tray-menu dispatch and dismissed the Windows 11 hidden-icons flyout before showing DeskPulse commands.
-- Published and installed the Normal, Paused and Warning runtime icon files.
-- Fitted standalone Current User and System Log and Settings windows to the active working area and explicitly centered, restored and activated them.
-- Kept ordinary Settings unelevated with General and Rules only.
-- Added an **Administrator settings...** tray action that starts a separate process with the Windows UAC `runas` verb.
-- Required `--administrator-settings` to validate an elevated administrator token before showing Maintenance only.
-- Made the elevated process lifetime match the Administrator settings window lifetime.
-- Left service-side named-pipe authorization and the ProgramData system/per-user database architecture explicitly pending.
-- Fixed View Log export being cancelled by the generic focus-loss timer when its native Save dialog opened.
-
-- Fixed **Settings → Maintenance → Clean database with current rules...** closing Settings before its confirmation dialog appeared.
-- Excluded the Settings form from the generic tray focus-loss auto-close mechanism; Settings now remains open until explicitly closed.
-- Kept the database-housekeeping confirmation and completion dialogs explicitly owned by Settings.
-- Added User Activity records for DeskPulse installation, update, and same-version reinstallation.
-- Corrected Normal, Paused, and Warning tray icon transparency and regenerated their multi-size ICO assets.
-- Enabled and migrated User Activity rules for diagnostic-load, service-resource-warning and critical-safety-pause events.
-- Staggered diagnostic CPU workers and reserved duty-cycle headroom below the 50% service-side hard cap.
-- Completed a static audit of explicitly wired button handlers; no missing named Click handlers were found. This does not replace runtime functional testing.
-
-Historical version references remain unchanged in archived verification and release-history documents.
-
-## Architecture
+## Solution architecture
 
 DeskPulse consists of three .NET 8 Windows projects:
 
-- `DeskPulse.Service`: privileged automatic Windows service; ETW monitoring, application and session monitoring, database writes, named-pipe server, diagnostic load generation and resource safeguards.
-- `DeskPulse.Tray`: non-elevated WinForms tray application; Settings, View Log, Export, Maintenance, safeguard status/recovery and named-pipe client.
+- `DeskPulse.Service`: privileged automatic Windows service responsible for ETW monitoring, application and session monitoring, database writes, named-pipe service commands, diagnostic load generation and resource safeguards.
+- `DeskPulse.Tray`: non-elevated WinForms tray application providing current-user and administrator entry points, logs, settings, export, maintenance and safeguard recovery.
 - `DeskPulse.Shared`: shared settings, models, rules, SQLite access and monitoring logic.
 
-The service owns all SQLite write operations. The tray opens the activity database read-only for views, counts, statistics and exports.
+The service owns all SQLite write operations. Tray and log processes open activity databases read-only for views, counts, statistics and exports.
 
-### 0.3.2.x storage migration work in progress
+## Storage, identity and session routing
 
-The development working tree now contains the first ProgramData storage foundation:
+- User activity is stored under `C:\ProgramData\DeskPulse\Users\<Windows-SID>\DeskPulse.db`.
+- System activity is stored under `C:\ProgramData\DeskPulse\System\DeskPulse-System.db`.
+- File and application events are attributed by process session and SID.
+- Program monitoring covers resolvable interactive Windows sessions.
+- Unattributable or machine-scoped events fall back to the protected System database.
+- The tray uses a session-local mutex, allowing one tray instance per Windows session.
+- The legacy Documents database migration is guarded so only the first eligible SID receives the former single-user history.
 
-- live user activity is routed to `C:\ProgramData\DeskPulse\Users\<Windows-SID>\DeskPulse.db`;
-- the LocalSystem service resolves the active console user's SID from the session token;
-- startup without an interactive session falls back to `C:\ProgramData\DeskPulse\System\DeskPulse-System.db`;
-- the legacy Documents database is transferred with SQLite online backup, integrity validation, a retained pre-migration backup and rollback cleanup;
-- SID folders receive protected ACLs granting full control only to LocalSystem and administrators, with read-only access for the owning user;
-- uninstall preserves the new system and per-user database folders.
+## Settings ownership
 
-The database, attribution, simultaneous-session routing, tray startup and
-service-side pipe-authorization foundations described below are now complete.
+- Per-user preferences and File, App and User Activity rules are stored under `C:\ProgramData\DeskPulse\Users\<Windows-SID>\Settings\settings.json`.
+- Machine-wide safeguard settings and System Event rules are stored in `C:\ProgramData\DeskPulse\System\settings.json`.
+- User settings and rule reloads are resolved from the verified caller SID.
+- System-scoped events are evaluated only against the protected system rule set.
 
-The migration foundation was runtime-tested on 2026-07-23 against the installed
-0.3.2.0 database. SQLite integrity and table counts were checked before and
-after migration, protected ACLs were confirmed, service restart retained the
-SID database, and uninstall/reinstall preserved it. The test identified and
-fixed migration-only SQLite connection pooling and Inno Setup directory
-ownership before the final successful run.
+## Security boundary and named-pipe authorization
 
-The next attribution/routing slice was also completed and runtime-tested on
-2026-07-23:
+- Mutating user commands are accepted only from the installed `DeskPulse.Tray.exe` under protected Program Files.
+- User database commands target the verified client's SID database.
+- Diagnostic load control and historical repair additionally require elevation and local Administrators membership.
+- Read-only service status is available to authenticated local clients.
+- Identity, installation-path or privilege failures return explicit errors and do not execute the command.
 
-- `ActivityEvents`, `UserEvents` and `ProgramEvents` now store `Scope`,
-  `WindowsSid` and `SessionId`;
-- existing SID-database rows are backfilled as user-scoped with their database
-  SID, while unknown historical session IDs remain null;
-- new file and program activity records carry the active user's SID and Windows
-  session ID;
-- service lifecycle, installation lifecycle, diagnostic and safeguard events
-  are routed to the system database with system scope;
-- process monitoring now targets the resolved interactive session instead of
-  the LocalSystem service's session 0.
+DeskPulse intentionally provides no combined all-users log and no administrator path into another user's personal database.
 
-The installed upgrade passed schema, routing, restart and SQLite integrity
-checks for both the user and system databases. Simultaneous-session routing is
-now implemented in the development baseline:
+## User and administrator interfaces
 
-- ETW file records resolve their owning process session and SID before choosing
-  a database writer;
-- the service keeps a protected writer per resolved SID and retains system
-  fallback for unattributable events;
-- program monitoring scans every resolvable interactive session rather than
-  only the active console session;
-- service session-change records use the Windows-supplied session ID;
-- database-changing named-pipe commands use the connecting client's process
-  session instead of whichever console session happens to be active;
-- the tray uses a session-local mutex so each Windows session can have one tray
-  instance without blocking trays in other sessions.
+- **Current User → Log...** opens only the calling user's SID database.
+- **Current User → Settings...** exposes per-user General, Rules and user-scoped Maintenance functions.
+- Current-user Log and Settings run as separate unelevated processes so closing them cannot terminate the background tray.
+- **Administrator → System Log...** opens only the protected System database through UAC.
+- **Administrator → System Settings and Maintenance...** exposes machine-wide settings, System Event rules and System database maintenance.
+- Elevated processes terminate when their windows close.
+- Only one DeskPulse form is opened from a tray instance at a time.
 
-Single-session installation, caller-routed pipe operations, duplicate-tray
-prevention, service restart and both-database integrity were verified on
-2026-07-23. A second standard local account was subsequently tested in parallel:
+## Maintenance ownership
 
-- the installer-created `DeskPulse Tray` scheduled task launched the tray
-  automatically and unelevated at that user's logon;
-- one tray ran in each Windows session;
-- the second SID database contained only records attributed to that SID and its
-  session IDs;
-- the legacy Documents database migration is now guarded so only the first SID
-  can receive the former single-user history;
-- the standard user's Administrator settings action correctly invoked Windows
-  UAC for administrator credentials.
-
-The first two-user test exposed and corrected the legacy migration guard before
-final acceptance. The contaminated test SID database was removed and recreated
-cleanly; the original SID database and backups were unaffected.
-
-The final acceptance rerun found that the scheduled task action had lost the
-tray working directory, producing task result `1` for TestAccount. The
-registration script now sets:
-
-- executable: installed `DeskPulse.Tray.exe`;
-- argument: `--tray`;
-- working directory: the installed Tray folder;
-- principal: built-in Users, Limited;
-- multiple instances: Parallel.
-
-The installer was rebuilt and the live task now contains all three action
-values. Its PowerShell 5 registration path uses
-`[System.IO.Path]::GetDirectoryName` for compatibility.
-
-The same final switch test exposed a service-start race while Windows had no
-active console user between sessions. `FileIoMonitor` now loads protected
-system settings and routes to the System database when no interactive SID can
-be resolved, instead of throwing from `AppSettings.Load()`. Session changes
-reload user settings when a SID becomes available again. The corrected build
-was installed and the service started successfully.
-
-### Named-pipe command authorization
-
-The service now resolves the connecting named-pipe client's process ID and
-token before accepting state-changing commands:
-
-- mutating user commands are accepted only from the installed
-  `DeskPulse.Tray.exe` under protected Program Files;
-- database commands continue to target the verified client's SID database;
-- diagnostic load control and historical repair additionally require an
-  elevated token and local Administrators membership;
-- read-only service status remains available to authenticated local clients;
-- identity or privilege failures return an explicit pipe error without running
-  the command.
-
-Runtime verification on 2026-07-23 confirmed that direct PowerShell clients
-could read status but could not delete records, start diagnostic load or invoke
-historical repair. The installed unelevated tray remained authorized for its
-expected per-user and installation-lifecycle commands.
-
-### System and per-user settings ownership
-
-Settings are now separated by ownership:
-
-- per-user preferences and File, User and App Activity rules are stored in
-  `C:\ProgramData\DeskPulse\Users\<Windows-SID>\Settings\settings.json`;
-- each Settings folder grants full control only to LocalSystem,
-  administrators and its owning SID, while the sibling activity database
-  remains read-only to that user;
-- machine-wide service safeguard thresholds and restart-pause persistence are
-  stored in `C:\ProgramData\DeskPulse\System\settings.json`, writable only by
-  LocalSystem and administrators;
-- named-pipe settings reloads resolve the verified caller process and refresh
-  only that caller SID's cached rules;
-- file and program events are evaluated against the rules belonging to the
-  process/session SID;
-- system-scoped service and lifecycle events are evaluated only against the
-  protected system rule set, so an ordinary user cannot suppress them through
-  per-user rules;
-- a fresh SID receives independent defaults and resolves its default data path
-  through the SID's registered Windows profile rather than the LocalSystem
-  profile.
-
-The installed upgrade was verified on 2026-07-23. The original user's migrated
-rule counts matched the legacy settings backup (36 combined, 23 File, 17 User
-and 13 App rules), the system settings file contained only the safeguard
-properties, the owning user could write its Settings child folder, and its
-database remained read-only. A settings backup was retained at
-`Documents\DeskPulse Backups\DeskPulse-settings-before-split-2026-07-23.json`.
-
-Administrator Settings now includes an editable **Rules → System Events** page.
-Its enabled event rules persist as
-`SystemUserActivityRuleSettings` in the protected system settings file.
-Ordinary Settings exposes only the calling user's rules. Existing system
-settings files without the system-rule property load the complete safe default
-rule set, including service start and stop events, in Administrator Settings.
-
-### Isolated personal and administrator system logs
-
-DeskPulse deliberately provides no combined or all-users log view:
-
-- the tray menu groups ordinary actions under **Current User** and elevated
-  machine-wide actions under **Administrator**;
-- **Current User** contains Log and Settings, including the
-  user-scoped Maintenance page;
-- Current-user Settings runs in its own unelevated `--personal-settings` process,
-  so its window and message loop are independent of the background tray;
-- **Administrator** contains System Log and System Settings and Maintenance;
-  hover text identifies those actions as requiring administrator approval
-  before Windows prompts;
-- both left- and right-clicking the tray icon open the same complete menu;
-- the tray permits only one DeskPulse form at a time; another Log, Settings,
-  System or About window is not opened until the active form closes;
-- **Log...** remains bound only to the calling user's SID database;
-- the current-user Log runs in its own unelevated `--personal-log` process, so closing
-  the window cannot terminate the background tray;
-- each SID folder grants read access only to its owning user, LocalSystem and
-  administrators at the Windows ACL level;
-- DeskPulse does not expose another user's records through an administrator UI;
-- **System Log (Administrator)...** launches a separate short-lived process
-  through Windows UAC and rejects an unelevated `--system-log` launch;
-- the System Log opens only
-  `C:\ProgramData\DeskPulse\System\DeskPulse-System.db` read-only, supports
-  paging, sorting, details and current-page export, and hides deletion and
-  rule-creation controls;
-- the System folder ACL grants access only to LocalSystem and administrators,
-  removing the former ordinary Users read permission.
-
-Closing the System Log ends its elevated process. This preserves clear
-per-user isolation while keeping shared service, installation and safeguard
-activity available to administrators.
-
-### Optional folder-opening suppression
-
-Current-user Settings includes **Log folder openings**, enabled by default for
-backward compatibility. When disabled, the service uses the directory flags
-on Windows ETW file-create events to omit directory opens and their matching
-write/close activity for that SID. It does not infer folders from a blank
-extension, so genuine extensionless files remain eligible for File Activity
-logging.
-
-The installer starts the background tray explicitly with `--tray`; it never
-uses a log-window command as its post-install launch. Runtime regression
-testing confirmed that closing the separate current-user Log process leaves the
-original tray PID running.
-
-### Maintenance ownership
-
-Maintenance follows the same ownership boundary:
-
-- ordinary Settings includes **Maintenance**, whose cleanup and clear
-  commands are routed by the verified tray process SID to that user's database;
-- the service loads rules for the requesting process SID, not whichever
-  console session happens to be active;
-- Administrator Settings labels its page **System Maintenance** and targets
-  only `C:\ProgramData\DeskPulse\System\DeskPulse-System.db`;
-- system housekeeping, table clears, clear-all and historical repair use
-  separate `SYSTEM_*` service commands that require the installed tray,
-  elevation and local Administrators membership;
-- every destructive system maintenance operation first creates a consistent
-  SQLite backup under
-  `C:\ProgramData\DeskPulse\System\Backups\DeskPulse-System-before-maintenance-<timestamp>.db`;
-- confirmation text names the exact target and states that personal SID
-  databases are not affected.
-
-DeskPulse provides no administrator maintenance path that enumerates, cleans
-or clears another user's personal database.
-
-### Historical 0.3.2.0 storage and security boundary
-
-The administrator-settings split in 0.3.2.0 is a UI and process-lifetime change only. The live database remains `%USERPROFILE%\Documents\DeskPulse\DeskPulse.db`, shared settings remain under `%ProgramData%\DeskPulse`, and existing named-pipe command authorization is unchanged. Do not describe this release as having completed service-side administrative security or multi-user data isolation.
-
-The 0.3.2.x continuation is responsible for the service-owned system/per-user database layout, event scope and SID routing, safe migration with rollback, system/per-user rule ownership, access-control changes and service-side verification of administrative pipe clients.
+- User maintenance targets only the verified caller's SID database.
+- System maintenance targets only `C:\ProgramData\DeskPulse\System\DeskPulse-System.db`.
+- Destructive system maintenance first creates a consistent SQLite backup under `C:\ProgramData\DeskPulse\System\Backups`.
+- Confirmation text must name the exact target and confirm that personal SID databases are unaffected.
 
 ## Service safeguards
 
-DeskPulse includes:
+DeskPulse monitors service CPU and working-set RAM once per second.
 
-- Once-per-second monitoring of DeskPulse.Service CPU and working-set RAM use.
-- Configurable CPU and RAM warning and critical thresholds.
-- Configurable sustained warning and critical durations.
-- Warning event logging while activity logging continues.
-- Critical event logging and immediate safety pause of activity logging.
-- Optional persistence of the critical pause across service and Windows restarts.
-- **Keep logging paused after restart following a critical trigger** enabled by default.
-- Explicit **Resume Logging** recovery.
-- Safeguard configuration under **Settings → Maintenance**.
-- Validation requiring warning values to remain below their corresponding critical values.
-
-Default safeguard values:
+Default values:
 
 | Level | CPU | Service RAM | Sustained period |
 |---|---:|---:|---:|
 | Warning | 30% | 30% | 5 seconds |
 | Critical | 45% | 45% | 10 seconds |
 
-## Diagnostic safeguard tests
+Behaviour:
 
-Run these commands from an elevated administrator terminal; the service rejects
-diagnostic load control from an unelevated client.
+- warning events are logged while activity logging continues;
+- critical events are logged and activity logging is safety-paused;
+- critical pause persistence across restarts is configurable and enabled by default;
+- Resume Logging clears the safety pause;
+- validation requires warning values below their corresponding critical values.
+
+Diagnostic test commands must be run from an elevated terminal:
 
 ```powershell
 & "C:\Program Files\DeskPulse\Tray\DeskPulse.Tray.exe" --test-service-cpu 40 60
@@ -317,87 +106,95 @@ diagnostic load control from an unelevated client.
 & "C:\Program Files\DeskPulse\Tray\DeskPulse.Tray.exe" --stop-service-load-test
 ```
 
-Aliases for the combined test are `--load` and `-l`; `--ram` may be used instead of `--memory`.
+Service-side limits:
 
-Safety limits are enforced service-side:
-
-- CPU target never exceeds 50%.
-- RAM target never exceeds 50% of total physical memory.
-- Requests above 50% are rejected.
-- Duration is limited to 1–300 seconds.
-- Only one test may run at a time.
-- Tests can be stopped from the live test window or command line.
+- CPU target maximum: 50%.
+- RAM target maximum: 50% of total physical memory.
+- Duration: 1–300 seconds.
+- Only one load test may run at a time.
 
 ## Installation lifecycle logging
 
-After the service starts successfully, the installer records one User Activity event:
+After the service starts successfully, the installer records one lifecycle event through the service:
 
-- **DeskPulse installed** when no prior installed executable is detected.
-- **DeskPulse updated** when the detected prior version differs from 0.3.4.0.
-- **DeskPulse reinstalled** when 0.3.4.0 is installed over the same version.
+- **DeskPulse installed** when no prior installed executable is detected;
+- **DeskPulse updated** when the prior installed version differs from the new version;
+- **DeskPulse reinstalled** when the same version is installed again.
 
-The installer invokes the tray in non-UI command mode. The tray retries the service named-pipe command for up to 15 seconds, and the service remains the sole SQLite writer. The record contains the installing user, machine, new version, and previous version where applicable. Existing user choices for these event types are not overwritten.
+The tray retries the named-pipe lifecycle command for up to 15 seconds. The service remains the sole SQLite writer.
 
-## Tray icon assets
-
-The Normal, Paused, and Warning PNG files use true RGBA transparency. Their ICO files contain transparent frames at 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256 pixels.
-
-## Build, publish and install
+## Build and release workflow for 0.4.0.6
 
 Run from the development folder:
 
 ```powershell
-cd D:\Kai\GitHub\DeskPulse\dev
-Get-ChildItem -Path . -Recurse -File | Unblock-File
+clear
+
+Set-Location "D:\Kai\GitHub\DeskPulse\dev"
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build.ps1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Installer\Build-Installer.ps1"
-Start-Process ".\publish\v0.3.4.0\installer\DeskPulse_Setup_0.3.4.0.exe"
+dotnet test ".\DeskPulse.sln" -c Release --no-build
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1" -Version "0.4.0.6"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Installer\Build-Installer.ps1" -Version "0.4.0.6"
 ```
 
-The installer build copies the approved installer to:
+Expected generated paths:
 
 ```text
-D:\Kai\GitHub\DeskPulse\releases\current
-D:\Kai\GitHub\DeskPulse\releases\v0.3.3.0 (retained milestone baseline)
+D:\Kai\GitHub\DeskPulse\dev\publish\v0.4.0.6\service
+D:\Kai\GitHub\DeskPulse\dev\publish\v0.4.0.6\tray
+D:\Kai\GitHub\DeskPulse\dev\publish\v0.4.0.6\installer\DeskPulse_Setup_0.4.0.6.exe
+D:\Kai\GitHub\DeskPulse\releases\current\DeskPulse_Setup_0.4.0.6.exe
 ```
 
-Release versions whose fourth component is zero are retained under their own release folder. The formal GitHub Release tag is:
+Because 0.4.0.6 is a patch release, `releases\v0.4.0.0` remains the retained milestone folder and must not be replaced.
 
-```text
-v0.3.4.0
-```
+The current project and script defaults still identify 0.4.0.5. Version changes to 0.4.0.6 must be applied deliberately as part of the release preparation, then verified before commit.
 
-## Acceptance verification
+## 0.4.0.6 acceptance checklist
 
-1. Build succeeds with zero errors.
-2. Publish outputs exist under `publish\v0.3.4.0\service` and `publish\v0.3.4.0\tray`.
-3. The installer is created as `DeskPulse_Setup_0.3.4.0.exe`.
-4. Installer upgrades the accepted 0.3.0.0 or 0.3.0.1 installation.
-5. Service and tray report version 0.3.4.0.
-6. Exactly one tray instance appears in the active user session.
-7. DeskPulse.Service starts automatically and remains responsive.
-8. File, App and User Activity records are written normally.
-9. **Clean database with current rules...** displays confirmation, performs cleanup, and leaves Settings stable.
-10. Install, update, or reinstall writes the correct lifecycle User Activity event.
-11. Normal, Paused, and Warning icons display without rectangular or checkerboard backgrounds.
-12. A warning-level diagnostic test records one warning and keeps logging active.
-13. A critical-level diagnostic test pauses logging and records the critical event.
-14. With restart persistence enabled, the critical pause survives service or Windows restart.
-15. **Resume Logging** clears the safety pause and restores monitoring.
-16. Diagnostic tests cannot exceed 50% CPU or 50% RAM and can be stopped manually.
-17. Installer is copied to `releases\current` while `releases\v0.3.3.0` remains unchanged.
-18. GitHub-facing README, CHANGELOG, release notes and handovers identify 0.3.4.0 as current.
-19. Ordinary Settings shows General and Rules only without requesting elevation.
-20. Administrator settings requests UAC, rejects an unelevated command-line launch, shows Maintenance only, and leaves no elevated DeskPulse process after closing.
-21. View Log remains open through the Save dialog and creates the selected Excel workbook.
+1. Review the Calendar working-tree diff and confirm the intended UX.
+2. Update project and script version defaults to 0.4.0.6.
+3. Release build completes with zero errors.
+4. Full automated test suite passes.
+5. Calendar tests cover selected and unselected File, App and User Activity records.
+6. Publish outputs exist under `publish\v0.4.0.6\service` and `publish\v0.4.0.6\tray`.
+7. Installer is created as `DeskPulse_Setup_0.4.0.6.exe`.
+8. Installer upgrades the accepted 0.4.0.5 installation.
+9. Installed service and tray report version 0.4.0.6.
+10. Exactly one tray process runs in the active Windows session.
+11. Service starts automatically and remains responsive.
+12. File, App and User Activity records continue to be written correctly.
+13. Calendar shows separate Files, Apps and User Activity tabs.
+14. Each Calendar tab shows and exports only its own selected records.
+15. Removed Calendar toggle and preference leave no stale UI or registry dependency.
+16. Current-user and System logs retain their data-isolation boundaries.
+17. Per-user and System maintenance target only their authorized databases.
+18. SQLite integrity checks pass for the current user and System databases.
+19. Current approved installer is copied to `releases\current`.
+20. `releases\v0.4.0.0` remains unchanged.
+21. README, CHANGELOG, VERSION_CHECK and both handovers identify 0.4.0.6 only after acceptance.
+22. Commit, tag and GitHub release are created only after all required checks pass.
 
-The 0.3.2.x storage and security acceptance was completed on 2026-07-23. Final 0.3.4.0 build, packaging and installation results are recorded in the repository `VERSION_CHECK.md`.
+## Generated content and repository housekeeping
 
-## Planned medium feature — Calendar activity view
+The following are regenerable and should not be treated as source history:
 
-Add a Calendar view under View Log with month, day and hourly drill-down. The month view will show selectable compact daily summaries; double-clicking a day will show hourly summaries, and double-clicking an hour will open the existing filtered log view. The design must support selectable file, file-type, application, user and Explorer activity metrics and use grouped SQLite queries rather than loading raw rows for calendar summaries.
+- `dev\publish`
+- project `bin` folders
+- project `obj` folders
+- temporary smoke-test projects and outputs
 
-## Future installer item
+Retain deliberately:
 
-Consider optional machine-wide tray startup for all Windows users. Before implementation, resolve concurrent-session behaviour, per-session duplicate prevention, shared versus per-user settings, and database path/ownership. Prefer an **At logon of any user** scheduled task rather than changing only the HKCU Run registration.
+- source and tests;
+- release documentation;
+- `releases\current`;
+- retained milestone folders;
+- verification evidence still needed for audit or rollback.
+
+## Planned work after 0.4.0.6
+
+1. Distinct session-only and persistent pause modes.
+2. More concurrent-session runtime regression coverage.
+3. Further Calendar aggregation and drill-down enhancements where justified.
