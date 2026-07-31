@@ -41,3 +41,7 @@ Persistent pause remains available for critical service-resource safeguards.
 - Repeat two-user simultaneous-session acceptance after future routing changes.
 - Verify scheduled-task startup after clean installation and Windows sign-in.
 - Add automated coverage for single-window tray behavior where practical.
+
+## Known bugs — next work
+
+- [ ] Calendar: Double-clicking the title bar collapses all groups, but the collapsed state persists when switching between Files, Apps and User Activity tabs. This shared state causes erratic behaviour; make collapse/expand state tab-specific or reset it when changing tabs.
