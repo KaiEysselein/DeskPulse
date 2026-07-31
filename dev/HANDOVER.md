@@ -6,22 +6,26 @@ This is the current technical handover for the active source under `dev`. Reposi
 
 Repository: `https://github.com/KaiEysselein/DeskPulse`
 
-## Release and working-tree status
+## Release status
 
-- Released baseline: **0.4.0.5**
-- Maintenance release target: **0.4.0.6**
+- Current release: **0.4.0.6**
 - Current branch: `main`
-- Released baseline commit: `d419589` (`Release DeskPulse 0.4.0.5`)
+- Release code commit: `6fd84ca`
+- Release tag target: `v0.4.0.6`
+- Automated tests: **81 passed, 0 failed, 0 skipped**
+- Current installer: `..\releases\current\DeskPulse_Setup_0.4.0.6.exe`
 
-The working tree contains an unreleased Calendar refinement:
+### 0.4.0.6 release content
 
 - Calendar records are separated into Files, Apps and User Activity tabs.
 - Each tab displays and exports only its corresponding activity type.
-- Calendar always loads records explicitly selected for Calendar view.
+- Calendar loads only records explicitly selected for Calendar view.
 - The former All records/Marked records toggle and registry preference are removed.
-- A query test covers selected and unselected records across all three activity sources.
-
-Build and full-suite verification remain pending. Do not describe these changes as released until the complete 0.4.0.6 acceptance workflow has passed.
+- Grouping and expanded/collapsed group state are independent for each Calendar tab.
+- The installer no longer displays an Additional Tasks page.
+- Fresh installs enable the desktop shortcut and startup message by default.
+- Upgrades and same-version reinstalls preserve existing shortcut and startup-message choices.
+- Repository handovers and retained generated output were cleaned up.
 
 ## Solution architecture
 
@@ -70,6 +74,26 @@ DeskPulse intentionally provides no combined all-users log and no administrator 
 - Elevated processes terminate when their windows close.
 - Only one DeskPulse form is opened from a tray instance at a time.
 
+## Calendar model
+
+- Calendar loads only records with `ShowInCalendarView <> 0`.
+- One multi-source query loads File, App and User Activity.
+- Files, Apps and User Activity are presented in separate tabs.
+- Each tab filters and exports only its corresponding activity type.
+- Grouping mode and expanded-group keys are stored per activity tab.
+- Switching tabs must not clear, inherit or corrupt another tab's grouping state.
+- Header double-click affects only the active tab.
+- Group-row double-click changes only the active tab's expanded-group set.
+
+## Installer behaviour
+
+- The Additional Tasks page is not shown.
+- Fresh installs create the desktop shortcut and enable the startup message.
+- Upgrade and same-version reinstall detection uses the existing installed DeskPulse executable version.
+- Upgrade/reinstall preserves the desktop shortcut by checking whether it existed before files are replaced.
+- Upgrade/reinstall leaves the saved startup-message preference untouched.
+- Installation lifecycle records distinguish Installed, Updated and Reinstalled.
+
 ## Maintenance ownership
 
 - User maintenance targets only the verified caller's SID database.
@@ -80,8 +104,6 @@ DeskPulse intentionally provides no combined all-users log and no administrator 
 ## Service safeguards
 
 DeskPulse monitors service CPU and working-set RAM once per second.
-
-Default values:
 
 | Level | CPU | Service RAM | Sustained period |
 |---|---:|---:|---:|
@@ -113,17 +135,7 @@ Service-side limits:
 - Duration: 1–300 seconds.
 - Only one load test may run at a time.
 
-## Installation lifecycle logging
-
-After the service starts successfully, the installer records one lifecycle event through the service:
-
-- **DeskPulse installed** when no prior installed executable is detected;
-- **DeskPulse updated** when the prior installed version differs from the new version;
-- **DeskPulse reinstalled** when the same version is installed again.
-
-The tray retries the named-pipe lifecycle command for up to 15 seconds. The service remains the sole SQLite writer.
-
-## Build and release workflow for 0.4.0.6
+## Build and release workflow
 
 Run from the development folder:
 
@@ -133,12 +145,12 @@ clear
 Set-Location "D:\Kai\GitHub\DeskPulse\dev"
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build.ps1"
-dotnet test ".\DeskPulse.sln" -c Release --no-build
+dotnet test ".\tests\DeskPulse.Tests\DeskPulse.Tests.csproj" --configuration Release --no-build
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1" -Version "0.4.0.6"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Installer\Build-Installer.ps1" -Version "0.4.0.6"
 ```
 
-Expected generated paths:
+Generated paths:
 
 ```text
 D:\Kai\GitHub\DeskPulse\dev\publish\v0.4.0.6\service
@@ -147,38 +159,25 @@ D:\Kai\GitHub\DeskPulse\dev\publish\v0.4.0.6\installer\DeskPulse_Setup_0.4.0.6.e
 D:\Kai\GitHub\DeskPulse\releases\current\DeskPulse_Setup_0.4.0.6.exe
 ```
 
-Because 0.4.0.6 is a patch release, `releases\v0.4.0.0` remains the retained milestone folder and must not be replaced.
+`releases\v0.4.0.0` remains the retained milestone folder.
 
-The current project and script defaults still identify 0.4.0.5. Version changes to 0.4.0.6 must be applied deliberately as part of the release preparation, then verified before commit.
+## 0.4.0.6 verification summary
 
-## 0.4.0.6 acceptance checklist
-
-1. Review the Calendar working-tree diff and confirm the intended UX.
-2. Update project and script version defaults to 0.4.0.6.
-3. Release build completes with zero errors.
-4. Full automated test suite passes.
-5. Calendar tests cover selected and unselected File, App and User Activity records.
-6. Publish outputs exist under `publish\v0.4.0.6\service` and `publish\v0.4.0.6\tray`.
-7. Installer is created as `DeskPulse_Setup_0.4.0.6.exe`.
-8. Installer upgrades the accepted 0.4.0.5 installation.
-9. Installed service and tray report version 0.4.0.6.
-10. Exactly one tray process runs in the active Windows session.
-11. Service starts automatically and remains responsive.
-12. File, App and User Activity records continue to be written correctly.
-13. Calendar shows separate Files, Apps and User Activity tabs.
-14. Each Calendar tab shows and exports only its own selected records.
-15. Removed Calendar toggle and preference leave no stale UI or registry dependency.
-16. Current-user and System logs retain their data-isolation boundaries.
-17. Per-user and System maintenance target only their authorized databases.
-18. SQLite integrity checks pass for the current user and System databases.
-19. Current approved installer is copied to `releases\current`.
-20. `releases\v0.4.0.0` remains unchanged.
-21. README, CHANGELOG, VERSION_CHECK and both handovers identify 0.4.0.6 only after acceptance.
-22. Commit, tag and GitHub release are created only after all required checks pass.
+- Release build succeeded.
+- 81 automated tests passed.
+- Publish succeeded.
+- Inno Setup created the installer.
+- Upgrade installation and runtime startup succeeded.
+- Service reported Running with Automatic startup.
+- One service and one tray process were active.
+- Current-user Log and record deletion worked.
+- Calendar tab separation and independent state were accepted manually.
+- Installer task-page removal and upgrade preference preservation were accepted manually.
+- Installer SHA-256 is recorded in `..\VERSION_CHECK.md`.
 
 ## Generated content and repository housekeeping
 
-The following are regenerable and should not be treated as source history:
+Regenerable content:
 
 - `dev\publish`
 - project `bin` folders
@@ -190,8 +189,8 @@ Retain deliberately:
 - source and tests;
 - release documentation;
 - `releases\current`;
-- retained milestone folders;
-- verification evidence still needed for audit or rollback.
+- `releases\v0.4.0.0`;
+- verification evidence still required for audit or rollback.
 
 ## Planned work after 0.4.0.6
 

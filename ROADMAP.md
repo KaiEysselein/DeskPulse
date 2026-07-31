@@ -1,6 +1,8 @@
 # DeskPulse Roadmap
 
-## Current release: 0.4.0.5
+## Current release: 0.4.0.6
+
+Completed foundations and current capabilities:
 
 - Protected system and per-user ProgramData databases and settings
 - SID, scope and Windows-session attribution
@@ -13,10 +15,12 @@
 - Optional folder-opening suppression
 - One DeskPulse form open from the tray at a time
 - Integrated Records and Calendar layouts
-- Calendar marking, All/Marked filtering and expandable grouping across File, App and User Activity
-- Calendar Details-column grouping and summarisation
+- Calendar marking for File, App and User Activity
+- Separate Calendar Files, Apps and User Activity tabs
+- Independent Calendar grouping and expanded/collapsed state per tab
 - Collapsible File, App and User Activity report tables
 - Per-user startup status and time-format preferences
+- Upgrade-safe installer preference preservation
 - Animated progress feedback for large view operations
 
 ## Planned
@@ -42,6 +46,8 @@ Persistent pause remains available for critical service-resource safeguards.
 - Verify scheduled-task startup after clean installation and Windows sign-in.
 - Add automated coverage for single-window tray behavior where practical.
 
-## Known bugs — next work
+### Release and repository maintenance
 
-- [ ] Calendar: Double-clicking the title bar collapses all groups, but the collapsed state persists when switching between Files, Apps and User Activity tabs. This shared state causes erratic behaviour; make collapse/expand state tab-specific or reset it when changing tabs.
+- Keep generated `bin`, `obj` and `publish` output out of retained source history.
+- Retain only the current installer and deliberate milestone installers locally.
+- Keep release handovers concise and move historical implementation detail to the changelog or Git history.

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0.6 - 2026-07-31
+
+- Separated Calendar records into Files, Apps and User Activity tabs.
+- Limited each Calendar tab and export to its corresponding activity type.
+- Changed Calendar to load only records explicitly marked for Calendar view.
+- Removed the former All records/Marked records toggle and its saved preference.
+- Made grouping and expanded/collapsed group state independent for each Calendar tab.
+- Fixed erratic cross-tab behaviour after double-click grouping or collapse actions.
+- Removed the installer's Additional Tasks page.
+- Enabled the desktop shortcut and startup message by default on fresh installations.
+- Preserved existing desktop-shortcut and startup-message choices during upgrades and same-version reinstalls.
+- Expanded the automated suite to 81 passing tests.
+- Cleaned the repository and technical handover material to remove stale generated output and obsolete release instructions.
+
 ## 0.4.0.5 - 2026-07-30
 
 - Added collapsible grouped rows to User Activity by date, event, user or computer.

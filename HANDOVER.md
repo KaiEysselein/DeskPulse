@@ -1,29 +1,18 @@
-# DeskPulse Repository and Release Handover
+﻿# DeskPulse Repository and Release Handover
 
-## Release status
+## Current release
 
-- Current released version: **0.4.0.5**
-- Maintenance release target: **0.4.0.6**
+- Current released version: **0.4.0.6**
 - Repository: `https://github.com/KaiEysselein/DeskPulse`
-- Current release tag: `v0.4.0.5`
+- Release tag: `v0.4.0.6`
+- Release code commit: `6fd84ca`
 - Retained milestone folder: `releases\v0.4.0.0`
-- Current approved installer: `releases\current\DeskPulse_Setup_0.4.0.5.exe`
+- Current approved installer: `releases\current\DeskPulse_Setup_0.4.0.6.exe`
+- Installer SHA-256: `413A8E7B4C3C8002BF8D582C4C93F4BB090832CD99A87DA32FAA8D681588E1AE`
 - Active development source: `dev`
 - Detailed technical handover: `dev\HANDOVER.md`
 
-Version 0.4.0.5 is the released baseline. It provides collapsible grouped rows and summaries across File, App and User Activity report tables.
-
-## Unreleased working tree
-
-The working tree contains a Calendar refinement intended for the 0.4.0.6 maintenance release:
-
-- separate Files, Apps and User Activity Calendar tabs;
-- each tab displays and exports only its own activity type;
-- Calendar loads only records explicitly selected for Calendar view;
-- the former All records/Marked records toggle and registry preference are removed;
-- query coverage includes selected and unselected records across all three activity sources.
-
-This work has not yet been accepted as a release. Build, full automated tests, installer creation and runtime verification remain required.
+Version 0.4.0.6 separates Calendar records into Files, Apps and User Activity tabs, restricts each tab and export to its own activity type, keeps grouping state independent per tab, and preserves installer choices during upgrades.
 
 ## Architecture and security boundary
 
@@ -36,21 +25,20 @@ This work has not yet been accepted as a release. Build, full automated tests, i
 
 ## Release verification
 
-`VERSION_CHECK.md` records the accepted release verification. It currently applies to 0.4.0.5 and must not be rewritten for 0.4.0.6 until the new build and runtime checks have passed.
+`VERSION_CHECK.md` records the 0.4.0.6 build, 81-test suite, publish, installer and installed acceptance results.
 
 ## Release retention
 
 - `releases\v0.4.0.0` remains the retained 0.4 milestone installer.
-- Patch installers replace the contents of `releases\current` after acceptance.
-- Numbered patch installers are attached to their corresponding GitHub releases.
+- Patch installers replace `releases\current` after acceptance.
+- Numbered installers are attached to their corresponding GitHub releases.
 - Generated `dev\publish`, `bin` and `obj` content is disposable and should not be retained as source history.
+- Historical verification or rollback evidence should be archived outside the active repository when no longer needed day to day.
 
 ## Next work
 
-1. Complete and verify the Calendar refinement.
-2. Run the 0.4.0.6 build, automated tests, publish and installer workflow.
-3. Perform installed upgrade and runtime acceptance checks.
-4. Update README, CHANGELOG, VERSION_CHECK and both handovers only after acceptance.
-5. Commit and publish release `v0.4.0.6`.
-6. Continue distinct session-only and persistent pause modes.
-7. Add further concurrent-session runtime regression coverage.
+1. Distinct session-only and persistent pause modes.
+2. Further concurrent-session runtime regression coverage.
+3. Calendar daily summaries and optional hour-level drill-down.
+4. Additional grouped SQLite aggregation where it materially improves large-view performance.
+

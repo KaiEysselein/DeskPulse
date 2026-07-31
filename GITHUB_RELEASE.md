@@ -1,30 +1,37 @@
-# DeskPulse 0.4.0.5
+﻿# DeskPulse 0.4.0.6
 
-DeskPulse 0.4.0.5 makes every Records activity table collapsible and summarised.
+DeskPulse 0.4.0.6 refines the integrated Calendar workflow and makes installer upgrades quieter and safer.
 
 ## Highlights
 
-- File, App and User Activity tables all support collapsible grouped rows.
-- User Activity can be grouped by date, event, user or computer.
-- User groups support expansion, summary details, Calendar marking and grouped deletion.
-- Regression tests cover every supported User Activity grouping header.
+- Calendar now has separate **Files**, **Apps** and **User Activity** tabs.
+- Each tab displays and exports only its own activity type.
+- Calendar loads only records explicitly marked for Calendar view.
+- Grouping and expanded/collapsed state are maintained independently for each tab.
+- The cross-tab collapse-state bug that caused erratic behaviour has been fixed.
+- The obsolete All records/Marked records toggle and saved preference have been removed.
+- The installer no longer shows an Additional Tasks page.
+- Fresh installs enable the desktop shortcut and startup message by default.
+- Upgrades and same-version reinstalls preserve the user's existing choices.
+- The automated suite now contains **81 passing tests**.
 
 ## Upgrade
 
-The installer preserves databases, administrator rule overrides and existing per-user preferences. The startup-message installer choice is applied on fresh installations only, so upgrades do not reset the user's saved preference.
+Run the installer over an existing DeskPulse installation. Databases, administrator rule overrides and per-user preferences are preserved.
 
 ## Installer
 
 ```text
-DeskPulse_Setup_0.4.0.5.exe
+DeskPulse_Setup_0.4.0.6.exe
 ```
 
 SHA-256:
 
 ```text
-AA3BC8DA12B06E49EAEACD3B0A9FC87860169C2D458ECAB109BAE42AD06A3337
+413A8E7B4C3C8002BF8D582C4C93F4BB090832CD99A87DA32FAA8D681588E1AE
 ```
 
 ## Verification
 
-The Release build, 79 automated tests, packaging, installation, binary hashes and live database integrity verification are recorded in `VERSION_CHECK.md`.
+Build, test, publish, installer and installed runtime acceptance details are recorded in [`VERSION_CHECK.md`](VERSION_CHECK.md).
+

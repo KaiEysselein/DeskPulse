@@ -1,25 +1,36 @@
 # DeskPulse
 
-## Windows activity logging without the clutter
+## Local Windows activity logging with clear user and administrator boundaries
 
-**DeskPulse** is a Windows activity logger built around a background Windows service and a lightweight per-user tray application.
+**DeskPulse** is an open-source Windows activity logger built around a privileged Windows service and a lightweight per-user tray application.
 
-It records selected file, application, user-session and Windows activity in a local SQLite database while giving the user direct control over filtering, pausing, reviewing, cleaning and exporting recorded data.
+It records selected file, application, user-session and Windows activity in local SQLite databases while giving users direct control over filtering, pausing, reviewing, cleaning and exporting their own records.
 
-**Current version:** `0.4.0.5`
+**Current version:** `0.4.0.6`
 
 [Download the latest DeskPulse installer](https://github.com/KaiEysselein/DeskPulse/releases/latest)
 
+## Highlights in 0.4.0.6
 
-## What DeskPulse does
+- Calendar records are separated into **Files**, **Apps** and **User Activity** tabs.
+- Each Calendar tab displays and exports only its own activity type.
+- Calendar loads only records explicitly marked for Calendar view.
+- Grouping and expanded/collapsed group state are independent for each Calendar tab.
+- The obsolete All records/Marked records Calendar toggle and saved preference were removed.
+- Installer upgrades no longer show an Additional Tasks page.
+- Fresh installs enable the desktop shortcut and startup message by default.
+- Upgrades and same-version reinstalls preserve the existing shortcut and startup-message choices.
+- The automated suite now contains **81 passing tests**.
 
-DeskPulse separates privileged monitoring from the normal desktop interface:
+## Architecture
 
-- **DeskPulse.Service** runs in the background, monitors activity and owns all database writes.
-- **DeskPulse.Tray** provides isolated current-user and UAC-elevated system log, settings, export and maintenance interfaces.
-- **DeskPulse.Shared** contains common settings, rules, models, database access and monitoring logic.
+DeskPulse separates privileged monitoring from the desktop interface:
 
-DeskPulse is designed for local use. Activity data remains on the computer unless the user explicitly exports it.
+- **DeskPulse.Service** runs automatically in the background, monitors activity and is the sole SQLite writer.
+- **DeskPulse.Tray** provides current-user controls and separate UAC-elevated system administration entry points.
+- **DeskPulse.Shared** contains shared settings, rules, models, database access and monitoring logic.
+
+Activity data remains local unless a user explicitly exports it.
 
 ## Main capabilities
 
@@ -28,22 +39,58 @@ DeskPulse is designed for local use. Activity data remains on the computer unles
 - Windows startup, shutdown, lock, unlock, logon and logoff events
 - DeskPulse install, update and reinstall activity records
 - Rule-based Include and Exclude filtering
-- Configurable Windows-system activity suppression
-- Application-based File Activity filtering
-- Paged log views with details and export
-- Integrated Records and Calendar layouts with marked-record filtering and header grouping
-- Animated progress feedback while large views are loaded, sorted, grouped or expanded
-- Per-user startup status message and 24-hour/AM-PM time preference
+- Application-aware File Activity filtering
+- Optional folder-opening suppression without suppressing extensionless files
+- Paged log views with details, grouping, deletion and Excel export
+- Integrated Records and Calendar layouts
+- Calendar marking and separate Files, Apps and User Activity tabs
+- Independent grouping and expansion state per Calendar tab
+- Animated progress feedback for large view operations
+- Per-user startup status message and 24-hour/AM-PM preference
 - Database cleanup using the current rules
 - Pause and resume control
 - Service CPU and RAM safeguards
-- Controlled safeguard diagnostic tests, hard-capped at 50% CPU and RAM
-- Windows service status and maintenance controls
-- Separate short-lived administrator processes for system log, settings and maintenance
-- Per-user and system SQLite storage under protected `%ProgramData%\DeskPulse` folders
-- Windows-SID and session attribution for activity records
+- Controlled diagnostic load tests, hard-capped at 50% CPU and RAM
+- Protected system and per-user storage under `%ProgramData%\DeskPulse`
+- Windows SID, scope and session attribution
 - Service-side named-pipe client authorization
-- Optional folder-opening suppression without suppressing extensionless files
+- Separate current-user and elevated system log, settings and maintenance interfaces
+
+## Data and security boundaries
+
+DeskPulse deliberately provides no combined all-users log.
+
+- Current-user views and maintenance target only the calling user's SID database.
+- Elevated administrator views and maintenance target only the protected System database.
+- DeskPulse does not expose another user's personal database through its administrator interface.
+- State-changing commands are authorized by the service.
+- The Windows service owns every SQLite write, including deletion, cleanup and lifecycle records.
+
+## Data locations
+
+| Purpose | Location |
+|---|---|
+| System database | `%ProgramData%\DeskPulse\System\DeskPulse-System.db` |
+| System settings | `%ProgramData%\DeskPulse\System\settings.json` |
+| Current-user database | `%ProgramData%\DeskPulse\Users\<Windows-SID>\DeskPulse.db` |
+| Current-user settings | `%ProgramData%\DeskPulse\Users\<Windows-SID>\Settings\settings.json` |
+| Shipped default rules | `%ProgramFiles%\DeskPulse\Config\default-rules.yaml` |
+| Administrator rule overrides | `%ProgramData%\DeskPulse\Config\admin-rules.yaml` |
+| Administrator rule diagnostics | `%ProgramData%\DeskPulse\System\admin-rules-error.log` |
+| Aggregate rule candidates | `%ProgramData%\DeskPulse\System\rule-candidates.csv` |
+| Exports | User-selected location |
+
+The uninstaller removes the application, service and startup registration while preserving system and per-user databases.
+
+## Activity filtering
+
+DeskPulse supports user-defined Include and Exclude rules for file, folder, application and user activity.
+
+Machine-wide YAML rules protect against high-volume background activity when **Track Windows system activity** is disabled. Shipped defaults live under the protected installation folder and are updated with DeskPulse releases. Local administrator overrides live under protected ProgramData storage and are preserved during upgrades.
+
+Administrator rules are evaluated before shipped defaults, and the first matching rule wins. Supported actions are `include`, `exclude`, `route_system` and `route_user`. Routing writes an event to exactly one database. System routing takes precedence over normal user attribution.
+
+Each YAML rule can also set `visible_in_ui: true` or `false`. This controls only whether the rule appears in Settings; it does not change whether the service enforces it.
 
 ## Status icons
 
@@ -53,57 +100,19 @@ DeskPulse is designed for local use. Activity data remains on the computer unles
 | **Paused** | Logging is paused |
 | **Warning** | The service or safeguard state requires attention |
 
-The shared transparent PNG and ICO resources are stored under `dev\Resources`.
+Shared transparent PNG and ICO resources are stored under `dev\Resources`.
 
-## Data locations
+## Build and verification
 
-| Purpose | Location |
-|---|---|
-| System database | `%ProgramData%\DeskPulse\System\DeskPulse-System.db` |
-| System settings | `%ProgramData%\DeskPulse\System\settings.json` |
-| Shipped default rules | `%ProgramFiles%\DeskPulse\Config\default-rules.yaml` |
-| Administrator rule overrides | `%ProgramData%\DeskPulse\Config\admin-rules.yaml` |
-| Administrator rule diagnostics | `%ProgramData%\DeskPulse\System\admin-rules-error.log` |
-| Aggregate rule candidates | `%ProgramData%\DeskPulse\System\rule-candidates.csv` |
-| Current-user database | `%ProgramData%\DeskPulse\Users\<Windows-SID>\DeskPulse.db` |
-| Current-user settings | `%ProgramData%\DeskPulse\Users\<Windows-SID>\Settings\settings.json` |
-| Exports | User-selected location |
-
-The uninstaller removes the application, service and startup registration while preserving system and per-user databases.
-
-## 0.4 release boundary
-
-Version 0.4 adds Calendar marking and an integrated Calendar layout to the Current User and elevated System logs. Patch 0.4.0.5 makes File, App and User Activity report tables consistently collapsible with expandable group summaries.
-
-## Activity filtering
-
-DeskPulse supports user-defined Include and Exclude rules for file, folder, application and user activity.
-
-Machine-wide YAML rules protect against high-volume background activity when **Track Windows system activity** is disabled. Shipped defaults live under the protected installation folder and are updated with DeskPulse releases. Local administrator overrides live under protected ProgramData storage and are preserved during upgrades.
-
-Administrator rules are evaluated before shipped defaults, and the first matching rule wins. Supported actions are `include`, `exclude`, `route_system` and `route_user`. Routing writes an event to exactly one database; System routing takes precedence over normal user attribution. An administrator can add a specific exception, add new routing or exclusion policy, or replace and disable a shipped rule by using the same rule ID. Changes are validated and detected automatically. If an edit is invalid, DeskPulse retains the last complete valid rules and records the problem in `admin-rules-error.log`.
-
-Process ownership is resolved from the accessing process token when possible, including SYSTEM, Local Service, Network Service and service virtual accounts. Session attribution is retained as a fallback. Elevated Administrator Settings can generate a read-only historical attribution preview; it writes an aggregate CSV report but does not modify either database.
-
-Each YAML rule also supports `visible_in_ui: true` or `false`. This controls only whether the rule appears in the existing Settings rule grids; it never changes whether the service enforces the rule. The property defaults to `true`.
-
-Elevated Administrator Settings includes a dynamically populated **Machine-wide Rules** page. It shows the effective YAML rule values, sources, enabled and visibility states, reasons, validation status, and actions to reload or open the relevant configuration and diagnostics files.
-
-The YAML files currently contain only machine-wide path and process rules. Current-user preferences and personal rules remain in their SID-specific JSON settings file.
-
-File Activity can also be filtered by the application responsible for the event, allowing repetitive activity from applications such as Windows File Explorer to be suppressed while retaining activity generated by other programs.
-
-## Database ownership
-
-All SQLite write operations are performed by `DeskPulse.Service`, including normal logging, record deletion, rule cleanup, database housekeeping and installation lifecycle records. The tray opens the database read-only for views, counts, statistics and exports.
+DeskPulse targets .NET 8 for Windows. The current release was built, published, packaged and installed successfully, with **81 automated tests passing**. Release-specific verification is recorded in [`VERSION_CHECK.md`](VERSION_CHECK.md).
 
 ## Project links
 
 - [Releases](https://github.com/KaiEysselein/DeskPulse/releases)
-- [Stable and Nightly release channels](RELEASE_CHANNELS.md)
-- [Change log](CHANGELOG.md)
+- [Changelog](CHANGELOG.md)
 - [Roadmap](ROADMAP.md)
 - [Backlog](BACKLOG.md)
+- [Stable and Nightly channels](RELEASE_CHANNELS.md)
 - [License](LICENSE)
 
 DeskPulse is licensed under the **GNU General Public License v3.0**.
