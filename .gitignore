@@ -60,9 +60,5 @@ Thumbs.db
 Desktop.ini
 
 # Local cleanup and folder scans
-_cleanup_quarantine/
-_DeskPulseFolderScan_*/
-_DeskPulseFolderScan_*.zip
-DeskPulse_PreCleanup_*.zip
 /Backups/
 /Temp/

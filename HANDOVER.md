@@ -1,4 +1,4 @@
-﻿# DeskPulse Repository and Release Handover
+# DeskPulse Repository and Release Handover
 
 ## Current release
 
@@ -60,3 +60,17 @@ Both folders are excluded from Git through `.gitignore`.
 - Build output such as `bin`, `obj`, `publish`, test artifacts, verification logs, and locally preserved release binaries must remain untracked unless there is a specific documented reason to commit them.
 - Keep the tracked Git working tree clean and limited to source code, tests, documentation, installer definitions, scripts, workflows, and intentionally version-controlled assets.
 
+
+## AI-Assisted Development Workflow
+
+Root-level `AGENTS.md` defines the standing workflow for Codex and other AI-assisted DeskPulse development.
+
+- Keep requested work narrowly scoped and inspect only the files needed for the task.
+- Do not perform unrelated refactoring or repository-wide audits unless specifically requested.
+- Use `D:\Kai\GitHub\DeskPulse\Temp` for AI-assisted shell downloads, temporary scripts, generated files, extracted files, intermediate artifacts, and other disposable working material.
+- Use `D:\Kai\GitHub\DeskPulse\Backups` for persistent local backups and recovery copies.
+- `Temp/` and `Backups/` are local-only and must never be committed or synced to GitHub.
+- Do not use the Windows user's general Downloads folder for DeskPulse project working files.
+- Before committing or pushing, verify Git status, relevant ignored files, and the relevant diff.
+- If local and remote history diverge or the remote appears to have been force-updated, inspect the history before taking corrective action; do not force-push blindly.
+- Keep changes in small logical commits and run only checks or tests relevant to the task.
