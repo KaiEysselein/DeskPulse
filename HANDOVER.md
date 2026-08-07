@@ -54,8 +54,9 @@ Both folders are excluded from Git through `.gitignore`.
 
 ### Standing working rule
 
-- Use `D:\Kai\GitHub\DeskPulse\Temp` for temporary or generated working material.
+- Use `D:\Kai\GitHub\DeskPulse\Temp` for all temporary or generated working material, including files downloaded or created by PowerShell, shell commands, scripts, build helpers, or AI-assisted development work. Do not use the Windows user's Downloads folder for DeskPulse project work.
 - Use `D:\Kai\GitHub\DeskPulse\Backups` for local backups and recovery snapshots.
 - Do not place temporary, generated, backup, or handover files elsewhere in the repository when they can be stored in one of these two folders.
 - Build output such as `bin`, `obj`, `publish`, test artifacts, verification logs, and locally preserved release binaries must remain untracked unless there is a specific documented reason to commit them.
 - Keep the tracked Git working tree clean and limited to source code, tests, documentation, installer definitions, scripts, workflows, and intentionally version-controlled assets.
+
